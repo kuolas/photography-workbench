@@ -1,6 +1,6 @@
 # CI — the checks from CONTRIBUTING.md §Code style and checks, run on every
 # pull request. `hygiene` checks commits once; `build` runs the cargo checks on
-# macOS, Linux and Windows.
+# macOS, Linux and Windows (ADR007).
 #
 # Every pull request runs every job, docs-only ones included: the jobs are
 # required checks on master, and a skipped workflow never reports, which
