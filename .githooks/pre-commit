@@ -1,0 +1,52 @@
+#!/bin/sh
+# pre-commit — refuse to complete a merge or a squash merge, on any branch.
+# History is linear (CONTRIBUTING.md §Making a change); ordinary commits are
+# not affected.
+#
+# Two states:
+#   MERGE_HEAD — a merge pre-merge-commit refused is left staged, and git
+#                suggests `git commit` to finish it; that runs this hook, not
+#                pre-merge-commit.
+#   SQUASH_MSG — `git merge --squash` creates no merge commit, so only this
+#                hook sees it.
+#
+# Bypass once:  git commit --no-verify   (or SKIP_HOOKS=1)
+set -eu
+
+if [ -n "${SKIP_HOOKS:-}" ]; then
+	exit 0
+fi
+
+gitdir="$(git rev-parse --git-dir)"
+
+# Not mid-merge: this hook has no opinion about ordinary commits.
+if [ -e "$gitdir/MERGE_HEAD" ]; then
+	kind=merge
+	undo="git merge --abort"
+elif [ -e "$gitdir/SQUASH_MSG" ]; then
+	kind=squash-merge
+	# NOT `git merge --abort`: a --squash merge writes no MERGE_HEAD, which is
+	# the whole reason this branch exists, so abort fails with "There is no
+	# merge to abort" and leaves the staged work in place.
+	undo="git reset --merge"
+else
+	exit 0
+fi
+
+branch="$(git symbolic-ref --short -q HEAD || echo 'a detached HEAD')"
+
+cat >&2 <<-EOF
+
+	pre-commit: refusing to complete a $kind on $branch.
+
+	  History in this repo is linear: no merge commits and no squash merges,
+	  on any branch — the same thing pre-merge-commit refuses, by the back
+	  door. A \`--squash\` merge reaches this hook and no other: it creates
+	  no merge commit, so pre-merge-commit never sees it.
+
+	  Undo it:  $undo
+	  Instead:  git rebase origin/master   (or cherry-pick the commits you need)
+	  Bypass:   git commit --no-verify
+
+EOF
+exit 1

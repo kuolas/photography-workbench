@@ -15,7 +15,8 @@ Everyone taking part is expected to follow the
 
 You need:
 
-- a stable Rust toolchain, **Rust 1.95 or later**.
+- a stable Rust toolchain, **Rust 1.95 or later**, with the `rustfmt` and
+  `clippy` components (`rustup component add rustfmt clippy`);
 - `git`. The GitHub CLI (`gh`) is handy but optional.
 
 Then:
@@ -117,15 +118,16 @@ the one from your branch.
 Before merging, with the branch rebased onto the current `origin/master`:
 
 ```sh
-# Build and test every commit of the branch:
-git rebase --exec 'cargo test --workspace' origin/master
+scripts/check-series.sh              # every commit builds and passes tests
 gh pr merge --rebase --delete-branch
 ```
 
-`git rebase --exec` checks out each commit of the branch in turn and runs the
-command on it, stopping at the first commit that fails; it needs a clean
-working tree. For a fork, use `upstream/master` as the base. If `master` moves
-before the merge, rebase and run it again.
+`scripts/check-series.sh` builds and tests each commit of the branch in a
+throwaway worktree, so your checkout is untouched. It refuses a branch that is
+not on top of the base or that contains a merge commit. `--quick` builds
+without testing; commits that touch only docs are skipped unless you pass
+`--all`. For a fork, pass the base explicitly: `scripts/check-series.sh
+upstream/master`. If `master` moves before the merge, rebase and run it again.
 
 ## Commit messages
 
@@ -240,6 +242,31 @@ A few conventions:
 - **Decisions that would surprise someone reading only the code** get a short
   Architecture Decision Record in
   [docs/architecture-decisions/](docs/architecture-decisions/README.md).
+
+## Local git hooks (optional)
+
+The repository ships git hooks that catch the common mistakes before they
+reach a pull request. They are optional, but they save a round trip:
+
+```sh
+scripts/install-hooks.sh          # enable them for this checkout
+scripts/install-hooks.sh --check  # report whether they are enabled
+```
+
+The script points `core.hooksPath` at [`.githooks/`](.githooks/) and sets
+`pull.ff only`, so a `git pull` that would create a merge commit stops with an
+error instead.
+
+- `commit-msg` checks the commit message against the active grammar.
+- `pre-merge-commit` and `pre-commit` refuse merge commits and squash merges
+  on any branch — rebase instead.
+- `pre-push` refuses a direct push to `master` or a push containing a merge
+  commit, then runs `cargo fmt --check` and `cargo clippy`.
+
+To skip them once, set `SKIP_HOOKS=1` (for example `SKIP_HOOKS=1 git push`).
+
+If you change a hook or a script, keep it executable in git:
+`git update-index --chmod=+x <file>`.
 
 ## License of contributions
 
