@@ -45,6 +45,8 @@ Everyone taking part is expected to follow the
 - [CONTRIBUTING.md](CONTRIBUTING.md) — how to build, test and send a change.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — what is planned, in what order.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the code is structured.
+- [docs/architecture-decisions/](docs/architecture-decisions/README.md) — why
+  things are the way they are.
 - [CHANGELOG.md](CHANGELOG.md) — user-visible changes.
 
 ## License

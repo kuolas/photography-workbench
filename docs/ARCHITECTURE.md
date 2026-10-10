@@ -13,4 +13,5 @@ binary, `src/main.rs`. There is no library and there are no modules yet.
 When the code outgrows one file, this page gains a table of modules — one
 row each, saying what the module owns — and a description of how data
 moves between them. A change that adds a module, or moves data between
-modules, updates both.
+modules, updates both. A constraint that forces the shape gets
+[an ADR](architecture-decisions/README.md).

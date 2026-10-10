@@ -1,0 +1,29 @@
+# Architecture Decision Records
+
+The substantial decisions that shape photography-workbench live here, one
+short record each: the context, what was decided, and what follows from it.
+They answer "why is it like this?" for anyone reading the code later.
+
+| ADR | Title | Status |
+|---|---|---|
+| [ADR001](adr001-record-architecture-decisions.md) | Record architecture decisions | Accepted |
+
+## When to write one
+
+Write an ADR when a decision would surprise someone reading only the code, is
+hard to reverse, or settles a debate that would otherwise come back. Small,
+local choices belong in a code comment or the commit message instead.
+
+## Creating an ADR
+
+1. Copy [`adr000-template.md`](adr000-template.md) to
+   `adr000-my-decision.md` (a short, descriptive name; leave the number at 000).
+2. Fill it in and open a pull request. Discussion happens on the PR.
+3. Before merging, give it the next free number, rename the file to match,
+   and add it to the table above.
+
+## Changing a decision
+
+Records are not rewritten or deleted. A new decision that replaces an old one
+gets its own ADR; the old one's status becomes "Superseded by
+[ADRxxx](…)", linking to the new record.
