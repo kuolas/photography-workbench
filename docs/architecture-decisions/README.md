@@ -7,6 +7,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | ADR | Title | Status |
 |---|---|---|
 | [ADR001](adr001-record-architecture-decisions.md) | Record architecture decisions | Accepted |
+| [ADR002](adr002-license-gpl-3-or-later.md) | License: GPL-3.0-or-later | Accepted |
 
 ## When to write one
 
