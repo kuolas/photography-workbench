@@ -161,10 +161,9 @@ Closes: #12
   - `Bug: #12` refers to an issue without closing it.
 
   The value is `#12`, `owner/repo#12` or a full URL.
-- **Commits are authored by their human author.** When a significant part of
-  a commit is taken unchanged from an AI tool's output, say so with an
-  `Assisted-by:` trailer naming the tool; don't name a tool in
-  `Co-Authored-By:` or add a "Generated with …" footer.
+- **Commits are authored by their human author.** Disclose significant AI help
+  with an `Assisted-by:` trailer (see [AI-assisted contributions](#ai-assisted-contributions));
+  don't name a tool in `Co-Authored-By:` or add a "Generated with …" footer.
   `Signed-off-by:` is not needed.
 
 More examples:
@@ -177,6 +176,40 @@ Add a README
 
 Git's own subjects (`Revert "…"`, `fixup! …`, `squash! …`) are accepted as
 they are; for a revert, add the reason to the body.
+
+## AI-assisted contributions
+
+You may use AI tools. We follow the
+[Fedora AI-Assisted Contributions Policy](https://docs.fedoraproject.org/en-US/council/policy/ai-contribution-policy/);
+the full text as it applies here is in
+[ADR006](docs/architecture-decisions/adr006-ai-assisted-contributions.md). In
+short:
+
+- **You are accountable.** You are always the author, and you vouch for the
+  quality, license compliance (GPL-3.0-or-later) and usefulness of
+  everything you submit, however it was produced.
+- **Disclose.** You must disclose AI use when a significant part of the
+  contribution is taken from a tool without changes, and should disclose
+  other uses where it might be useful. In commits, use an `Assisted-by:`
+  trailer; in issues and comments, a short note:
+
+  ```
+  thumbnails: Cache scaled images by content hash
+
+  …
+
+  Assisted-by: Claude
+  ```
+
+  Help with grammar, spelling or clarity needs no disclosure.
+- **A human decides.** AI may assist reviewers, but never as the sole or
+  final judge of a contribution, nor to evaluate a person's standing in the
+  community.
+- **Large-scale initiatives** — bots or agents opening pull requests, mass
+  changes — need an issue and the maintainers' agreement first.
+
+Concerns about a possible violation go privately to the maintainer (address
+in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)), not to a public issue.
 
 ## Code style and checks
 
