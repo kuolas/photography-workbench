@@ -1,1 +1,10 @@
+# Build output and local state only — never source.
 /target
+
+# Local secrets
+.env
+.env.*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
