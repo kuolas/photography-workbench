@@ -3,8 +3,8 @@
 A fast desktop app for culling photos: open a folder of RAW or JPEG files,
 flick through them, and keep the good ones. For macOS, Linux and Windows.
 
-**Status: early.** Nothing below works yet — the program is a skeleton that
-prints a greeting. See the [roadmap](docs/ROADMAP.md) for the plan.
+**Status: early.** Nothing below works yet — the app opens an empty window
+with a menu bar. See the [roadmap](docs/ROADMAP.md) for the plan.
 
 ## What it will do
 

@@ -7,8 +7,8 @@ requests live in the
 ## Where we are
 
 The repository, its license and its contribution process exist; the scope
-is still being decided. The program is a skeleton that prints a greeting;
-it does nothing else yet.
+is still being decided. The app opens an empty egui window with a menu
+bar; it does nothing else yet.
 
 ## Milestones
 

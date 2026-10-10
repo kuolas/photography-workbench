@@ -26,7 +26,7 @@ will receive security fixes.
 
 ## Scope
 
-Nothing in the program reads untrusted input yet — it prints a greeting. A
+Nothing in the program reads untrusted input yet — it opens an empty window. A
 photo culling app will read image files and their metadata, which are
 untrusted input; once it does, crashes and memory-safety problems on malformed
 files will be the most valuable reports.
