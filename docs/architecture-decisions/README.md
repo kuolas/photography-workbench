@@ -13,6 +13,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR005](adr005-github-issues-tracker.md) | GitHub Issues as the only tracker | Accepted |
 | [ADR006](adr006-ai-assisted-contributions.md) | AI-assisted contributions | Accepted |
 | [ADR007](adr007-egui-cross-platform.md) | egui, on macOS, Linux and Windows | Accepted |
+| [ADR008](adr008-lints-and-release-profile.md) | No unsafe code, a few extra lints, an optimized release build | Accepted |
 
 ## When to write one
 
