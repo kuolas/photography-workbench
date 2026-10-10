@@ -1,6 +1,15 @@
 [package]
 name = "photography-workbench"
 version = "0.1.0"
+authors = ["Alvaro Kuolas <kuolas@gmail.com>"]
 edition = "2024"
-
-[dependencies]
+rust-version = "1.95"
+description = "A fast desktop app for culling photos: rename by EXIF, rate sharpness and composition, pick keepers"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/kuolas/photography-workbench"
+readme = "README.md"
+keywords = ["photography", "culling", "exif", "raw", "photo-viewer"]
+categories = ["multimedia::images", "gui"]
+# An application, not a library: not published to crates.io (and the name is
+# still a working title).
+publish = false
