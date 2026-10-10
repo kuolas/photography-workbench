@@ -1,0 +1,6 @@
+# Blank issues stay enabled for docs fixes and questions, which fit neither form.
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/kuolas/photography-workbench/security/policy
+    about: Please do not report security problems in public issues. Report them privately, as the security policy describes.

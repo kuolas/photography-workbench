@@ -1,0 +1,32 @@
+name: Feature request
+description: Something photography-workbench should do that it does not.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. The project's scope is **still being decided** ([ROADMAP](https://github.com/kuolas/photography-workbench/blob/master/docs/ROADMAP.md)). A request is input to that decision, not a promise that it will be built.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way? Start from the need rather than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: How you imagine it working, if you have a picture of it.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other tools or workarounds you use today, and where they fall short.
+  - type: checkboxes
+    id: searched
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and this is not a duplicate.
+          required: true
