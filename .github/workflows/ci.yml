@@ -1,0 +1,101 @@
+# CI — the checks from CONTRIBUTING.md §Code style and checks, run on every
+# pull request. `hygiene` checks commits once; `build` runs the cargo checks on
+# macOS, Linux and Windows.
+#
+# Every pull request runs every job, docs-only ones included: the jobs are
+# required checks on master, and a skipped workflow never reports, which
+# would leave the pull request unmergeable.
+#
+# Actions must be node24-generation majors (node20 is deprecated on the hosted
+# runners): checkout@v5 or later, and so on. Before adding or bumping one,
+# check that the tag's action.yml says `using: node24`:
+#   gh api repos/OWNER/REPO/contents/action.yml?ref=TAG --jq .content | base64 -d | grep using:
+# Composite actions (such as dtolnay/rust-toolchain) have no node runtime.
+
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    name: commits and hooks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Commit messages, and no merge commits
+        # Runs .githooks/commit-msg itself over every commit of the PR, so CI
+        # and the local hook enforce the same grammar.
+        run: |
+          set -euo pipefail
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          if [ -n "$base" ] && [ -n "$head" ]; then
+            rev_args=("$base..$head")
+          else
+            # workflow_dispatch has no PR range — check the recent tip instead.
+            rev_args=(--max-count=20 HEAD)
+          fi
+          msg=$(mktemp)
+          fail=0
+          while read -r sha; do
+            [ -n "$sha" ] || continue
+            git log -1 --format=%B "$sha" > "$msg"
+            if ! .githooks/commit-msg "$msg"; then
+              echo "::error::commit message rejected on $sha — see CONTRIBUTING §Commit messages"; fail=1
+            fi
+          done < <(git rev-list "${rev_args[@]}")
+          # History is linear: no merge commit lands on master.
+          if [ -n "$base" ] && [ -n "$head" ]; then
+            merges=$(git rev-list --merges "$base..$head")
+            if [ -n "$merges" ]; then
+              echo "::error::merge commit(s) in the PR range — rebase onto master instead: $merges"; fail=1
+            fi
+          fi
+          exit $fail
+
+      # Git silently skips a hook that is not executable.
+      - name: Hooks and scripts are executable
+        run: |
+          set -euo pipefail
+          fail=0
+          while read -r mode _ _ path; do
+            if [ "$mode" != "100755" ]; then
+              echo "::error file=$path::$path is committed $mode — must be 100755 to run"
+              echo "  fix: git update-index --chmod=+x $path"
+              fail=1
+            fi
+          done < <(git ls-files -s .githooks/ 'scripts/*.sh')
+          exit $fail
+
+  build:
+    name: cargo (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      # Swatinem/rust-cache@v2 declares `using: "node24"` (checked 2026-10-09).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo build --workspace
+      - run: cargo test --workspace
