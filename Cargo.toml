@@ -13,3 +13,18 @@ categories = ["multimedia::images", "gui"]
 # An application, not a library: not published to crates.io (and the name is
 # still a working title).
 publish = false
+
+# Code policy: docs/architecture-decisions/adr008-lints-and-release-profile.md
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"
+
+# Smaller, faster release binaries; release builds take longer to compile.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
