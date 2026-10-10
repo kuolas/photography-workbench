@@ -10,6 +10,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR002](adr002-license-gpl-3-or-later.md) | License: GPL-3.0-or-later | Accepted |
 | [ADR003](adr003-linear-history.md) | Linear history with rebase-merge | Accepted |
 | [ADR004](adr004-gnome-commit-messages.md) | GNOME-style commit messages | Accepted |
+| [ADR005](adr005-github-issues-tracker.md) | GitHub Issues as the only tracker | Accepted |
 
 ## When to write one
 
