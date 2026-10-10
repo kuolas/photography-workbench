@@ -10,5 +10,7 @@ decided with the first release.
 
 ### Added
 
+- The app opens a window with a File menu and a theme choice (system,
+  light or dark); the window size and theme are remembered between runs.
 - The project is licensed under the GNU General Public License, version 3 or
   (at your option) any later version.

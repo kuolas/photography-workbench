@@ -15,8 +15,9 @@ Everyone taking part is expected to follow the
 
 You need:
 
-- a stable Rust toolchain, **Rust 1.95 or later**, with the `rustfmt` and
-  `clippy` components (`rustup component add rustfmt clippy`);
+- a stable Rust toolchain, **Rust 1.95 or later** (the minimum egui
+  supports), with the `rustfmt` and `clippy` components
+  (`rustup component add rustfmt clippy`);
 - `git`. The GitHub CLI (`gh`) is handy but optional.
 
 Then:
