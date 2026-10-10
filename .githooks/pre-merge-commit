@@ -1,0 +1,34 @@
+#!/bin/sh
+# pre-merge-commit — refuse to create a merge commit, on any branch.
+# History is linear (CONTRIBUTING.md §Making a change): bring a branch up to
+# date with `git rebase origin/master`. Fast-forwards create no merge commit
+# and are not affected.
+#
+# Bypass once:  git merge --no-verify …   (or SKIP_HOOKS=1)
+set -eu
+
+if [ -n "${SKIP_HOOKS:-}" ]; then
+	exit 0
+fi
+
+branch="$(git symbolic-ref --short -q HEAD || echo 'a detached HEAD')"
+
+cat >&2 <<-EOF
+
+	pre-merge-commit: refusing to create a merge commit on $branch.
+
+	  History in this repo is linear: no merge commits, on any branch. To
+	  bring a branch up to date, rebase it; to land it, open a PR and merge
+	  it with \`gh pr merge --rebase\`.
+
+	  Git has left the merge staged but uncommitted — undo it first:
+
+	    git merge --abort
+
+	  Instead:  git fetch origin && git rebase origin/master
+	  Bypass:   git merge --no-verify …
+
+	  (Completing it with \`git commit\` instead is refused by pre-commit.)
+
+EOF
+exit 1

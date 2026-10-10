@@ -1,0 +1,75 @@
+#!/bin/sh
+# pre-push — refuse a direct push to master and any merge commit in the pushed
+# range, then run the fast checks (cargo fmt, cargo clippy). Tests are left to
+# CI and to the checks you run before opening a PR, so this stays quick.
+#
+# Bypass once:  SKIP_HOOKS=1 git push
+set -eu
+
+DEFAULT_BRANCH=master
+
+if [ -n "${SKIP_HOOKS:-}" ]; then
+	echo "pre-push: skipped (SKIP_HOOKS set)"
+	exit 0
+fi
+
+# git feeds "<local ref> <local sha> <remote ref> <remote sha>" lines on stdin.
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+	if [ "$remote_ref" = "refs/heads/$DEFAULT_BRANCH" ]; then
+		cat >&2 <<-EOF
+
+			pre-push: refusing to push directly to $DEFAULT_BRANCH.
+
+			  Nothing reaches $DEFAULT_BRANCH except through a PR, merged with
+			  \`gh pr merge --rebase\` (CONTRIBUTING.md §Making a change).
+
+			    git switch -c wip/short-description origin/$DEFAULT_BRANCH
+			    git push -u origin wip/short-description && gh pr create
+
+			  The bypass exists for a hook that is itself broken, not for a
+			  small change — a doc-only touch-up goes through a PR too:
+			    SKIP_HOOKS=1 git push
+
+		EOF
+		exit 1
+	fi
+
+	# A deletion pushes no commits. (Matched on the zero sha's shape rather
+	# than its length, which is 64 in a SHA-256 repository.)
+	case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+
+	# Linear history: no merge commit leaves this machine, on any branch.
+	# "Not on any remote yet" is exactly what this push adds, for a new branch
+	# and for a force-push after a rebase alike.
+	merges="$(git rev-list --merges "$local_sha" --not --remotes 2>/dev/null || true)"
+	if [ -n "$merges" ]; then
+		cat >&2 <<-EOF
+
+			pre-push: refusing to push merge commit(s) to $remote_ref.
+
+			  History in this repo is linear (CONTRIBUTING.md §Making a change):
+		EOF
+		printf '%s\n' "$merges" | while read -r m; do
+			printf '    %s\n' "$(git log -1 --format='%h %s' "$m")" >&2
+		done
+		cat >&2 <<-EOF
+
+			  Replay the branch without them:
+			    git rebase origin/$DEFAULT_BRANCH
+
+		EOF
+		exit 1
+	fi
+done
+
+# Fast checks only: formatting and lint.
+if ! command -v cargo >/dev/null 2>&1; then
+	echo "pre-push: cargo not on PATH — fast gates skipped (CI still runs them)" >&2
+	exit 0
+fi
+echo "pre-push: cargo fmt --all --check"
+cargo fmt --all --check
+echo "pre-push: cargo clippy --workspace --all-targets"
+cargo clippy --workspace --all-targets --quiet -- -D warnings
+
+echo "pre-push: ok"

@@ -1,0 +1,135 @@
+#!/bin/sh
+# commit-msg — check a commit message against CONTRIBUTING.md §Commit messages.
+# CI runs this same file over every commit of a pull request.
+#
+# The grammar is GNOME's: `component: Summary` — at most one tag, a capitalised
+# summary, no trailing period, a blank second line, a ~72-char subject and
+# 75-char body lines (notes, not refusals), no tool attribution, and strict
+# issue references for Closes:/Fixes:/Bug: (other trailers only warn).
+#
+# Bypass once:  SKIP_HOOKS=1 git commit …
+set -eu
+
+if [ -n "${SKIP_HOOKS:-}" ]; then
+	echo "commit-msg: skipped (SKIP_HOOKS set)"
+	exit 0
+fi
+
+msg_file="$1"
+subject="$(head -n 1 "$msg_file")"
+
+# Let git's own housekeeping subjects through untouched.
+case "$subject" in
+	Merge\ *|Revert\ *|fixup!\ *|squash!\ *|amend!\ *|"#"*|"") exit 0 ;;
+esac
+
+fail() {
+	printf 'commit-msg: %s\n\n  %s\n\nSee CONTRIBUTING.md §Commit messages. Bypass once: SKIP_HOOKS=1 git commit\n' \
+		"$1" "$subject" >&2
+	exit 1
+}
+
+# The message as git will store it: comment lines dropped, and everything from
+# the scissors line down cut off — `git commit -v` appends the diff below it,
+# and a diff is not a body (its long lines, its quoted trailers).
+body="$(sed '/^# -\{24\} >8 -\{24\}$/,$d' "$msg_file" | grep -v '^#' || true)"
+
+# Issue reference, as GitHub resolves it: #N, owner/repo#N, or a full URL.
+issue_ref='(#[0-9]+|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+|https://[^[:space:]]+)'
+
+# A first word ending in ':' is a component tag. It must be one word —
+# `fix(ui):` is a Conventional Commits subject, the commonest way to
+# get this wrong.
+first="${subject%% *}"
+summary="$subject"
+case "$first" in
+*:)
+	if ! printf '%s' "${first%:}" | grep -qE '^[A-Za-z0-9][A-Za-z0-9_.+/-]*$'; then
+		fail "component tag '${first%:}' is not one word (letters, digits, _ . + / -) — the grammar is 'component: Summary'"
+	fi
+	summary="${subject#* }"
+	[ "$summary" != "$subject" ] || fail 'nothing after the component tag'
+	;;
+esac
+if ! printf '%s' "$summary" | grep -qE '^[^[:space:]]'; then
+	fail 'one space after the component tag, then the summary'
+fi
+word="${summary%% *}"
+case "$word" in
+*:) fail 'one component tag at most (GNOME: "prefix the first line with one tag")' ;;
+esac
+# A plain lower-case word ("fix", "add") is refused. GNOME
+# capitalises the summary; an identifier keeps its case, and is told apart
+# by what makes it code — `_`, `()`, `::`, a digit, a capital, backticks.
+if printf '%s' "$word" | grep -qE '^[a-z]+$'; then
+	fail "summary starts with the lower-case word '$word' — GNOME capitalises it ('sound: Fix label alignments'); write an identifier as it appears in code, or in backticks"
+fi
+
+if printf '%s' "$subject" | grep -qE '\.$'; then
+	fail 'subject ends with a period'
+fi
+
+if [ -n "$(printf '%s\n' "$body" | sed -n 2p)" ]; then
+	fail 'the second line must be blank — subject, blank line, then the body'
+fi
+
+len=$(printf '%s' "$subject" | wc -c | tr -d ' ')
+if [ "$len" -gt 72 ]; then
+	echo "commit-msg: note — subject is ${len} chars (guideline is ~72)" >&2
+fi
+
+# GNOME: "Each line must not exceed 75 characters." A note, not a refusal:
+# a pasted log line or a long identifier is a legitimate exception, and a
+# hook that refuses those gets bypassed. Lines without a space (a URL, a
+# path) cannot be wrapped and are left alone.
+long=$(printf '%s\n' "$body" | awk 'NR > 1 && length($0) > 75 && / / { n++ } END { print n + 0 }')
+if [ "$long" -gt 0 ]; then
+	echo "commit-msg: note — ${long} body line(s) over 75 chars (GNOME wraps the body at 75)" >&2
+fi
+
+# A commit is authored by whoever committed it. No assistant/model/tool
+# attribution, in any casing or spelling, in a trailer or a footer.
+if printf '%s\n' "$body" | grep -qiE '(co-authored-by:.*(claude|anthropic|copilot|cursor|gpt|gemini|codeium|devin)|generated with.*(claude|anthropic|copilot|cursor|gemini))'; then
+	fail 'tool named as co-author or "Generated with" footer — a tool is not an author; disclose AI help with an Assisted-by: trailer'
+fi
+
+# Trailer checks read the TRAILER BLOCK (the final paragraph), never the whole
+# body: a wrapped sentence can easily start a line with "Fixes:", and a hard
+# check that fires on prose is a hook people learn to bypass. git's own parser
+# draws that line for us.
+trailers="$(printf '%s\n' "$body" | git interpret-trailers --parse --no-divider 2>/dev/null || true)"
+
+malformed() {
+	printf 'commit-msg: malformed trailer — %s\n\ngot:\n\n%s\n' "$1" "$2" >&2
+	exit 1
+}
+
+# Closes:/Fixes: close the issue when the commit reaches master; Bug: only
+# references it (a series where no single commit fixes it — GLib's
+# convention). All three take an issue reference, checked strictly: a
+# reference nothing can resolve reads as an answer while linking nothing.
+bad="$(printf '%s\n' "$trailers" | grep -E '^(Closes|Fixes|Bug):' |
+	grep -vE "^(Closes|Fixes|Bug): $issue_ref\$" || true)"
+[ -z "$bad" ] || malformed 'Closes:, Fixes: and Bug: take an issue reference:
+
+  Closes: #12
+  Fixes: owner/repo#12
+  Bug: https://github.com/owner/repo/issues/12
+
+(The kernel-style "Fixes: <hash> (\"subject\")" is not used here; name the
+commit that introduced a bug in the body.)' "$bad"
+sanctioned='Closes|Fixes|Bug|Assisted-by'
+house='Closes:, Fixes:, Bug:, Assisted-by:'
+
+# Anything else in the trailer block: warn, never block. A genuinely new trailer
+# is a CONTRIBUTING change rather than a typo, and the cost of a false positive
+# here is a bypassed hook — worse than the typo it would have caught.
+unsanctioned="$(printf '%s\n' "$trailers" \
+	| grep -E '^[A-Z][A-Za-z-]+(-[A-Za-z]+)*: ' \
+	| grep -vE "^($sanctioned): " || true)"
+if [ -n "$unsanctioned" ]; then
+	printf 'commit-msg: note — unsanctioned trailer(s) (house set: %s):\n%s\n' \
+		"$house" "$unsanctioned" >&2
+fi
+
+exit 0
