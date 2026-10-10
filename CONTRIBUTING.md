@@ -215,8 +215,8 @@ in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)), not to a public issue.
 
 ## Code style and checks
 
-Before you open a pull request, run these four commands, in this order, and
-make sure all of them pass:
+Before you open a pull request, run these four commands — the same ones CI
+runs, in the same order:
 
 ```sh
 cargo fmt --all --check
@@ -225,7 +225,10 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-There is no CI yet, so these local checks are the gate.
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs them on every
+pull request on macOS, Linux and Windows, together with the commit-message
+check and a check that there are no merge commits in the PR. CI is the real
+gate: a pull request is merged only when all of its checks pass.
 
 A few conventions:
 
@@ -246,7 +249,8 @@ A few conventions:
 ## Local git hooks (optional)
 
 The repository ships git hooks that catch the common mistakes before they
-reach a pull request. They are optional, but they save a round trip:
+reach CI. They are optional — CI checks the same things — but they save a
+round trip:
 
 ```sh
 scripts/install-hooks.sh          # enable them for this checkout
@@ -266,7 +270,7 @@ error instead.
 To skip them once, set `SKIP_HOOKS=1` (for example `SKIP_HOOKS=1 git push`).
 
 If you change a hook or a script, keep it executable in git:
-`git update-index --chmod=+x <file>`.
+`git update-index --chmod=+x <file>`. CI checks this.
 
 ## License of contributions
 
