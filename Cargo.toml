@@ -40,3 +40,12 @@ unimplemented = "warn"
 lto = true
 codegen-units = 1
 strip = true
+
+# Desktop packaging with cargo-bundle (macOS .app, Linux .deb, Windows .msi).
+# The identifier is permanent once released; it changes if the name does.
+[package.metadata.bundle]
+name = "Photography Workbench"
+identifier = "io.github.kuolas.PhotographyWorkbench"
+category = "public.app-category.photography"
+short_description = "A fast desktop app for culling photos"
+copyright = "Copyright (C) 2026 Alvaro Kuolas and the Photography Workbench contributors"
