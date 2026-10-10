@@ -20,8 +20,7 @@ it does nothing else yet.
 4. **Rate sharpness.** Score each photo's sharpness and sort or filter by it.
 5. **Rate composition.** Score each photo's framing.
 
-The order is a plan, not a promise; a change of direction is recorded on
-this page, with the reason.
+The order is a plan, not a promise; a change of direction gets an ADR.
 
 ## Open questions
 
