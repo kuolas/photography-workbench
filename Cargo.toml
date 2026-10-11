@@ -16,8 +16,8 @@ publish = false
 
 [dependencies]
 # Desktop only (ADR007): eframe's default wgpu renderer, plus `persistence`,
-# which keeps the window geometry and egui's settings (such as the theme)
-# between runs.
+# which keeps the window geometry and the app's settings (such as the theme
+# choice) between runs.
 eframe = { version = "0.36", features = ["persistence"] }
 egui = "0.36"
 env_logger = "0.11"
