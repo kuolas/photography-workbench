@@ -12,10 +12,15 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([640.0, 400.0]),
+            .with_min_inner_size([640.0, 400.0])
+            .with_icon(PhotographyWorkbenchApp::icon())
+            // Wayland ignores the window icon: the desktop finds it through
+            // the .desktop entry whose name matches the app id, and packages
+            // name theirs after the binary. eframe also names the directory
+            // it persists state in after the app id.
+            .with_app_id(env!("CARGO_BIN_NAME")),
         ..Default::default()
     };
-    // The app name also names the directory eframe persists state in.
     eframe::run_native(
         PhotographyWorkbenchApp::NAME,
         options,

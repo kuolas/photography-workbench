@@ -14,6 +14,21 @@ impl PhotographyWorkbenchApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self::default()
     }
+
+    /// The width and height of [`Self::icon`], in pixels.
+    pub const ICON_SIZE: u32 = if cfg!(target_os = "macos") { 1024 } else { 256 };
+
+    /// The window icon, rendered from `assets/icon.svg`.
+    ///
+    /// macOS shows it in the Dock in place of the app bundle's icon while the
+    /// app runs, so it gets the full-size image there.
+    pub fn icon() -> egui::IconData {
+        #[cfg(target_os = "macos")]
+        let png = include_bytes!("../assets/icon-1024.png");
+        #[cfg(not(target_os = "macos"))]
+        let png = include_bytes!("../assets/icon-256.png");
+        eframe::icon_data::from_png_bytes(png).expect("the icons in assets/ are valid PNGs")
+    }
 }
 
 impl eframe::App for PhotographyWorkbenchApp {
@@ -50,5 +65,13 @@ mod tests {
         let harness = Harness::new_eframe(|cc| PhotographyWorkbenchApp::new(cc));
         harness.get_by_label("File");
         harness.get_by_label("No folder open");
+    }
+
+    #[test]
+    fn icon_decodes_to_a_square_of_icon_size() {
+        let size = PhotographyWorkbenchApp::ICON_SIZE;
+        let icon = PhotographyWorkbenchApp::icon();
+        assert_eq!((icon.width, icon.height), (size, size));
+        assert_eq!(icon.rgba.len(), (size * size * 4) as usize);
     }
 }

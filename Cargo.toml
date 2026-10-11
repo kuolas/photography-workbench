@@ -25,6 +25,13 @@ log = "0.4"
 
 [dev-dependencies]
 egui_kittest = { version = "0.36", features = ["eframe"] }
+# tests/package_metadata.rs reads this file.
+toml = "1"
+
+# build.rs embeds the icon in the Windows executable; it does nothing for
+# other targets.
+[build-dependencies]
+winresource = "0.1"
 
 # Code policy: docs/architecture-decisions/adr008-lints-and-release-profile.md
 [lints.rust]
@@ -49,3 +56,14 @@ identifier = "io.github.kuolas.PhotographyWorkbench"
 category = "public.app-category.photography"
 short_description = "A fast desktop app for culling photos"
 copyright = "Copyright (C) 2026 Alvaro Kuolas and the Photography Workbench contributors"
+icon = ["assets/icon-256.png", "assets/icon-1024.png"]
+
+# Version information in the Windows executable (build.rs). Windows shows
+# FileDescription as the app's name, in Task Manager for one, so it is the
+# display name rather than the package description. tests/package_metadata.rs
+# checks that these agree with the bundle section and the app's window title.
+[package.metadata.winresource]
+FileDescription = "Photography Workbench"
+ProductName = "Photography Workbench"
+OriginalFilename = "photography-workbench.exe"
+LegalCopyright = "Copyright (C) 2026 Alvaro Kuolas and the Photography Workbench contributors"
