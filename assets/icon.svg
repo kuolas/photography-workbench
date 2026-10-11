@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- The app icon: a stack of prints, the top one marked as a keeper.
+     The source for every icon file in this folder; after editing it, run
+     scripts/render-icons.sh. The tile follows the macOS icon grid (an
+     824-unit rounded square centred on a 1024-unit canvas). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3a4e"/>
+      <stop offset="1" stop-color="#121a26"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5cc3f0"/>
+      <stop offset="1" stop-color="#d9f1fc"/>
+    </linearGradient>
+    <clipPath id="photo">
+      <rect x="268" y="368" width="464" height="300" rx="6"/>
+    </clipPath>
+  </defs>
+
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)"/>
+
+  <!-- The print underneath. -->
+  <rect x="270" y="300" width="520" height="400" rx="18" fill="#94a3b8"
+        transform="rotate(-9 530 500)"/>
+
+  <!-- The top print: a white border round a landscape. -->
+  <g transform="rotate(4 500 540)">
+    <rect x="240" y="340" width="520" height="400" rx="18" fill="#f8fafc"/>
+    <g clip-path="url(#photo)">
+      <rect x="268" y="368" width="464" height="300" fill="url(#sky)"/>
+      <circle cx="628" cy="450" r="38" fill="#fde68a"/>
+      <path d="M268 668 L392 506 L466 590 L566 470 L732 668 Z" fill="#14807a"/>
+      <path d="M268 668 L268 618 Q390 560 500 612 T732 600 L732 668 Z" fill="#0b4f4b"/>
+    </g>
+  </g>
+
+  <!-- The keeper mark. -->
+  <circle cx="742" cy="722" r="132" fill="#f59e0b" stroke="#121a26" stroke-width="24"/>
+  <path d="M684 724 L724 764 L802 684" fill="none" stroke="#ffffff"
+        stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

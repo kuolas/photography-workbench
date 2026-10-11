@@ -14,7 +14,10 @@ thin binary, laid out like
 |---|---|---|
 | `src/main.rs` | the binary: sets up logging and the window, then hands control to eframe | the library, `eframe`, `env_logger` |
 | `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` | its own modules |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's panels and menus | `eframe`, `egui` |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's panels, menus and icon | `eframe`, `egui` |
+| `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
+| `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
+| `tests/package_metadata.rs` | checks that the app's name and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp::NAME` | the library, `toml` |
 
 Keeping everything but start-up in the library lets tests drive the UI
 without a display: [egui_kittest](https://github.com/emilk/egui/tree/main/crates/egui_kittest)
@@ -27,9 +30,9 @@ There is no state yet: the window shows a menu bar and an empty view.
 
 **Persisted state.** eframe's `persistence` feature saves the window geometry
 and egui's own settings, such as the theme, in a per-user directory named
-after `PhotographyWorkbenchApp::NAME` (for example
-`~/Library/Application Support/Photography-Workbench` on macOS). Renaming the
-app moves that directory, which resets those settings.
+after the app id, which `main.rs` sets to the binary's name (for example
+`~/Library/Application Support/photography-workbench` on macOS). Renaming the
+binary moves that directory, which resets those settings.
 
 Choices that shape the code still to come, such as rating storage, are open
 — see [ROADMAP.md](ROADMAP.md#open-questions).

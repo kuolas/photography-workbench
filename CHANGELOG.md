@@ -12,5 +12,8 @@ decided with the first release.
 
 - The app opens a window with a File menu and a theme choice (system,
   light or dark); the window size and theme are remembered between runs.
+- The app has an icon, shown on its window, in the taskbar or Dock, and on
+  the Windows executable. Under Wayland the desktop shows it only for an
+  installed package, which provides the icon through its desktop entry.
 - The project is licensed under the GNU General Public License, version 3 or
   (at your option) any later version.

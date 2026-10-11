@@ -29,6 +29,29 @@ cargo run
 cargo test
 ```
 
+### Changing the app icon
+
+The icon's source is [assets/icon.svg](assets/icon.svg). The PNG and ICO
+files next to it are rendered from it and committed, so building needs
+nothing extra. After editing the SVG, run `scripts/render-icons.sh` to render
+them again. The script needs:
+
+- `rsvg-convert`, from librsvg;
+- `python3`.
+
+To install librsvg:
+
+```sh
+# macOS
+brew install librsvg
+
+# Debian and Ubuntu
+sudo apt install librsvg2-bin
+
+# Fedora
+sudo dnf install librsvg2-tools
+```
+
 ## Get involved
 
 - **Found a bug or want a feature?** Open an
