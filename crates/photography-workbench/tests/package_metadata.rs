@@ -2,7 +2,10 @@
 
 //! The app's name and copyright are written out in Cargo.toml for each
 //! packaging tool, and the name again in the code. These tests keep the
-//! copies in step, so a rename cannot miss one.
+//! copies in step, so a rename cannot miss one, and keep every crate's
+//! version where the workspace sets it.
+
+use std::path::Path;
 
 use photography_workbench::PhotographyWorkbenchApp;
 
@@ -52,6 +55,40 @@ fn windows_copyright_matches_the_bundle() {
         ),
         string(&manifest, &["package", "metadata", "bundle", "copyright"]),
     );
+}
+
+/// The workspace sets the one version every crate has (ADR012); a version
+/// written in a crate's own manifest would let that crate's drift from it.
+#[test]
+fn every_crate_takes_its_version_from_the_workspace() {
+    // This crate sits in crates/, next to every other crate.
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the app crate is in crates/");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(crates).expect("crates/ is readable") {
+        let dir = entry.expect("crates/ is readable").path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let path = dir.join("Cargo.toml");
+        let manifest: toml::Table = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+            .parse()
+            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let inherited = manifest["package"]
+            .get("version")
+            .and_then(|version| version.get("workspace"))
+            .and_then(toml::Value::as_bool);
+        assert_eq!(
+            inherited,
+            Some(true),
+            "{}: package.version is `version.workspace = true`",
+            path.display()
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "no crate found in {}", crates.display());
 }
 
 #[test]

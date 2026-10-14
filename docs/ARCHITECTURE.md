@@ -5,10 +5,17 @@ any structural change.
 
 ## Today
 
-photography-workbench is one Rust crate (edition 2024) with a library and a
-thin binary, laid out like
+photography-workbench is a Cargo workspace (Rust, edition 2024) of crates
+under `crates/`
+([ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)).
+The root `Cargo.toml` holds what they share: the version, the package
+fields, the dependency versions, the lints and the release profile.
+
+So far there is one crate, `crates/photography-workbench`, the app: a
+library and a thin binary, laid out like
 [eframe_template](https://github.com/emilk/eframe_template) but desktop-only
-([ADR007](architecture-decisions/adr007-egui-cross-platform.md)):
+([ADR007](architecture-decisions/adr007-egui-cross-platform.md)). Paths
+below are relative to it:
 
 | File | Holds | May depend on |
 |---|---|---|
@@ -18,7 +25,7 @@ thin binary, laid out like
 | `src/theme.rs` | the colour themes, private to the crate: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one, and each theme's `Palette` (none for Dark, which is egui's stock dark visuals) and how it maps onto egui's visuals | `egui` |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
-| `tests/package_metadata.rs` | checks that the app's name and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp::NAME` | the library, `toml` |
+| `tests/package_metadata.rs` | checks that the app's name and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp::NAME`, and that every crate's version is the workspace's | the library, `toml` |
 
 Keeping everything but start-up in the library lets tests drive the UI
 without a display: [egui_kittest](https://github.com/emilk/egui/tree/main/crates/egui_kittest)
@@ -55,9 +62,9 @@ which resets those settings.
 Choices that shape the code still to come, such as rating storage, are open
 — see [ROADMAP.md](ROADMAP.md#open-questions).
 
-**Decided, not yet built.** The first release's work turns this crate into
-a workspace of small crates laid out engine-first, with the photos on
-disk and the decoding below a GUI-free line and the window above it
+**Decided, not yet built.** The first release's work adds the other
+crates of the workspace, laid out engine-first, with the photos on disk
+and the decoding below a GUI-free line and the window above it
 ([ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)),
 and replaces the menu bar with a title bar of the app's own that holds
 the mode switcher

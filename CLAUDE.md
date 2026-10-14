@@ -1,7 +1,8 @@
 # CLAUDE.md
 
 photography-workbench is a desktop app for culling photos (Rust, edition
-2024, egui, one crate with a library and a thin binary, GPL-3.0-or-later).
+2024, egui, a Cargo workspace whose crates live in `crates/`,
+GPL-3.0-or-later).
 It is at an early stage; see [docs/ROADMAP.md](docs/ROADMAP.md) for what is
 planned.
 

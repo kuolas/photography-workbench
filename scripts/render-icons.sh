@@ -1,9 +1,9 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Renders the icon files in assets/ from assets/icon.svg. Run it after
-# editing the SVG and commit the results: builds use the rendered files, so
-# nobody needs these tools just to build.
+# Renders the icon files in the app crate's assets/ from assets/icon.svg.
+# Run it after editing the SVG and commit the results: builds use the
+# rendered files, so nobody needs these tools just to build.
 #
 #   icon-256.png   the window icon on Linux and Windows (src/app.rs)
 #   icon-1024.png  the window icon on macOS, and the bundle icon (cargo-bundle)
@@ -13,7 +13,7 @@
 
 set -eu
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../crates/photography-workbench"
 svg=assets/icon.svg
 
 for tool in rsvg-convert python3; do

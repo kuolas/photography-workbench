@@ -1,69 +1,47 @@
-[package]
-name = "photography-workbench"
+# The workspace: small crates under crates/, laid out engine-first. See
+# docs/architecture-decisions/adr013-a-workspace-of-small-crates.md.
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+# One version for every crate (ADR012), and the package fields they share.
+# Each crate takes them with `<field>.workspace = true`.
+[workspace.package]
 version = "0.1.0"
 authors = ["Alvaro Kuolas <kuolas@gmail.com>"]
 edition = "2024"
 rust-version = "1.95"
-description = "A fast desktop app for culling photos: rename by EXIF, rate sharpness and composition, pick keepers"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/kuolas/photography-workbench"
 readme = "README.md"
-keywords = ["photography", "culling", "exif", "raw", "photo-viewer"]
-categories = ["multimedia::images", "gui"]
-# An application, not a library: not published to crates.io (and the name is
-# still a working title).
+# An application, not a library: no crate is published to crates.io (and the
+# name is still a working title).
 publish = false
 
-[dependencies]
-# Desktop only (ADR007): eframe's default wgpu renderer, plus `persistence`,
-# which keeps the window geometry and the app's settings (such as the theme
-# choice) between runs.
-eframe = { version = "0.36", features = ["persistence"] }
+# Every external dependency, one version each. A crate names the ones it uses
+# with `<name>.workspace = true`, adding the features it needs.
+[workspace.dependencies]
+eframe = "0.36"
 egui = "0.36"
+egui_kittest = "0.36"
 env_logger = "0.11"
 log = "0.4"
-
-[dev-dependencies]
-egui_kittest = { version = "0.36", features = ["eframe"] }
-# tests/package_metadata.rs reads this file.
 toml = "1"
-
-# build.rs embeds the icon in the Windows executable; it does nothing for
-# other targets.
-[build-dependencies]
 winresource = "0.1"
 
 # Code policy: docs/architecture-decisions/adr008-lints-and-release-profile.md
-[lints.rust]
+# Each crate takes these with `[lints] workspace = true`.
+[workspace.lints.rust]
 unsafe_code = "forbid"
 
-[lints.clippy]
+[workspace.lints.clippy]
 dbg_macro = "warn"
 todo = "warn"
 unimplemented = "warn"
 
 # Smaller, faster release binaries; release builds take longer to compile.
+# Profiles apply only from the workspace root.
 [profile.release]
 lto = true
 codegen-units = 1
 strip = true
-
-# Desktop packaging with cargo-bundle (macOS .app, Linux .deb, Windows .msi).
-# The identifier is permanent once released; it changes if the name does.
-[package.metadata.bundle]
-name = "Photography Workbench"
-identifier = "io.github.kuolas.PhotographyWorkbench"
-category = "public.app-category.photography"
-short_description = "A fast desktop app for culling photos"
-copyright = "Copyright (C) 2026 Alvaro Kuolas and the Photography Workbench contributors"
-icon = ["assets/icon-256.png", "assets/icon-1024.png"]
-
-# Version information in the Windows executable (build.rs). Windows shows
-# FileDescription as the app's name, in Task Manager for one, so it is the
-# display name rather than the package description. tests/package_metadata.rs
-# checks that these agree with the bundle section and the app's window title.
-[package.metadata.winresource]
-FileDescription = "Photography Workbench"
-ProductName = "Photography Workbench"
-OriginalFilename = "photography-workbench.exe"
-LegalCopyright = "Copyright (C) 2026 Alvaro Kuolas and the Photography Workbench contributors"
