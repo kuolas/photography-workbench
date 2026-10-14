@@ -161,7 +161,8 @@ Closes: #12
 - **Issue references** go in the last paragraph, one per line:
   - `Closes: #12` or `Fixes: #12` closes the issue when the commit reaches
     `master` — put it on the commit that actually completes the work;
-  - `Bug: #12` refers to an issue without closing it.
+  - `Issue: #12` refers to an issue without closing it, as each commit of a
+    series toward one issue does.
 
   The value is `#12`, `owner/repo#12` or a full URL.
 - **Commits are authored by their human author.** Disclose significant AI help

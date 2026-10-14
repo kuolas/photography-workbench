@@ -5,7 +5,7 @@
 # The grammar is GNOME's: `component: Summary` — at most one tag, a capitalised
 # summary, no trailing period, a blank second line, a ~72-char subject and
 # 75-char body lines (notes, not refusals), no tool attribution, and strict
-# issue references for Closes:/Fixes:/Bug: (other trailers only warn).
+# issue references for Closes:/Fixes:/Issue: (other trailers only warn).
 #
 # Bypass once:  SKIP_HOOKS=1 git commit …
 set -eu
@@ -104,22 +104,22 @@ malformed() {
 	exit 1
 }
 
-# Closes:/Fixes: close the issue when the commit reaches master; Bug: only
-# references it (a series where no single commit fixes it — GLib's
-# convention). All three take an issue reference, checked strictly: a
+# Closes:/Fixes: close the issue when the commit reaches master; Issue: only
+# references it (a series of commits toward one issue, none of which
+# closes it). All three take an issue reference, checked strictly: a
 # reference nothing can resolve reads as an answer while linking nothing.
-bad="$(printf '%s\n' "$trailers" | grep -E '^(Closes|Fixes|Bug):' |
-	grep -vE "^(Closes|Fixes|Bug): $issue_ref\$" || true)"
-[ -z "$bad" ] || malformed 'Closes:, Fixes: and Bug: take an issue reference:
+bad="$(printf '%s\n' "$trailers" | grep -E '^(Closes|Fixes|Issue):' |
+	grep -vE "^(Closes|Fixes|Issue): $issue_ref\$" || true)"
+[ -z "$bad" ] || malformed 'Closes:, Fixes: and Issue: take an issue reference:
 
   Closes: #12
   Fixes: owner/repo#12
-  Bug: https://github.com/owner/repo/issues/12
+  Issue: https://github.com/owner/repo/issues/12
 
 (The kernel-style "Fixes: <hash> (\"subject\")" is not used here; name the
 commit that introduced a bug in the body.)' "$bad"
-sanctioned='Closes|Fixes|Bug|Assisted-by'
-house='Closes:, Fixes:, Bug:, Assisted-by:'
+sanctioned='Closes|Fixes|Issue|Assisted-by'
+house='Closes:, Fixes:, Issue:, Assisted-by:'
 
 # Anything else in the trailer block: warn, never block. A genuinely new trailer
 # is a CONTRIBUTING change rather than a typo, and the cost of a false positive

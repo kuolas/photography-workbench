@@ -14,7 +14,7 @@ two formats considered were the GNOME commit message guidelines
 ## Decision
 
 We will follow the GNOME commit message guidelines: a `component: Summary`
-subject, a body explaining why, and `Closes:` / `Fixes:` / `Bug:` issue
+subject, a body explaining why, and `Closes:` / `Fixes:` / `Issue:` issue
 trailers, as CONTRIBUTING.md describes.
 
 - **Rejected Angular / Conventional Commits:** its value is changelog and
