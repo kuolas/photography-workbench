@@ -1,0 +1,18 @@
+[package]
+name = "previews"
+description = "Decoding for photography-workbench: the photos' embedded previews, off the UI thread"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+# No GUI: never egui, eframe or desktop-ui (ADR013), so the tests run on a
+# machine with no display.
+[dependencies]
+
+[lints]
+workspace = true

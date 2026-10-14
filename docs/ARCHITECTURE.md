@@ -13,8 +13,10 @@ fields, the dependency versions, the lints and the release profile.
 
 | Crate | Holds | May depend on |
 |---|---|---|
+| `crates/catalog` | the photos on disk: the folder tree, a folder's photo list, the current photo. Empty so far | never `egui`, `eframe` or `desktop-ui` |
+| `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe` or `desktop-ui` |
 | `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes. Knows nothing of photos | `egui` |
-| `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | `desktop-ui`, and any external crate |
+| `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | any other crate here, and any external one |
 
 ### photography-workbench
 
@@ -44,6 +46,12 @@ Paths are relative to `crates/desktop-ui`:
 |---|---|---|
 | `src/lib.rs` | the library root | its own modules |
 | `src/theme.rs` | the colour themes: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one, and each theme's `Palette` (none for Dark, which is egui's stock dark visuals) and how it maps onto egui's visuals | `egui` |
+
+### catalog and previews
+
+Both are empty so far: each `src/lib.rs` holds only the crate's
+description. They have no GUI dependency, so their tests will run on a
+machine with no display.
 
 ### How it fits together
 
@@ -78,9 +86,8 @@ which resets those settings.
 Choices that shape the code still to come, such as rating storage, are open
 — see [ROADMAP.md](ROADMAP.md#open-questions).
 
-**Decided, not yet built.** The first release's work adds the other
-crates of the workspace, laid out engine-first, with the photos on disk
-and the decoding below a GUI-free line and the window above it
+**Decided, not yet built.** The first release's work fills `catalog`
+and `previews`, below the GUI-free line, and builds the window on them
 ([ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)),
 and replaces the menu bar with a title bar of the app's own that holds
 the mode switcher
