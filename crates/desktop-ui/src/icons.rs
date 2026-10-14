@@ -28,7 +28,9 @@ fn resolve(name: &str) -> Option<(char, FontFamily)> {
 }
 
 /// Give egui the icon font, alongside its own fonts. Call it once, before
-/// the first frame; egui takes it up at the start of the next pass.
+/// the first frame; egui takes it up at the start of the next pass. Until
+/// then egui knows no font for the icons, and a pass that paints one from
+/// [`lucide`] or [`glyph`] panics.
 ///
 /// It sets egui's font definitions to egui's defaults plus the icon font,
 /// so a font added later must be added after it.
