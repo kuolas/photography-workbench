@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The top-level eframe application: the window's panels and menus.
+//! The top-level eframe application: the window's title bar, panels and
+//! menus.
 
+use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
+use desktop_ui::icons;
 use desktop_ui::theme::{self, Theme};
 
 /// The [`eframe::Storage`] key the theme choice is saved under, as the
@@ -28,9 +31,11 @@ impl PhotographyWorkbenchApp {
     /// culls on. Every layout is designed and tested at this size (ADR010).
     pub const MIN_WINDOW: egui::Vec2 = egui::vec2(1280.0, 800.0);
 
-    /// Called once, before the first frame. Restores the saved theme choice;
-    /// with none saved, or an unreadable one, takes the default.
+    /// Called once, before the first frame. Installs the icon font and
+    /// restores the saved theme choice; with none saved, or an unreadable
+    /// one, takes the default.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        icons::install(&cc.egui_ctx);
         let theme = cc
             .storage
             .and_then(|storage| storage.get_string(THEME_KEY))
@@ -78,6 +83,56 @@ impl PhotographyWorkbenchApp {
         want.apply(ctx);
         true
     }
+
+    /// The title bar's contents: the menus at the left, past the space
+    /// macOS's window buttons take, and the window controls at the right.
+    /// The whole bar drags the window, so it is made a drag region before
+    /// anything is put on it.
+    fn title_bar(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
+        let bar = ui.max_rect();
+        chrome::title_bar_drag_region(ui, bar);
+
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(bar)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+            |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                chrome::window_controls(ui, palette);
+            },
+        );
+
+        ui.scope_builder(
+            egui::UiBuilder::new()
+                .max_rect(bar)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+            |ui| {
+                ui.add_space(chrome::title_bar_left_pad(ui.ctx(), None));
+                self.menus(ui);
+            },
+        );
+    }
+
+    /// The File and View menus.
+    fn menus(&mut self, ui: &mut egui::Ui) {
+        egui::MenuBar::new().ui(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("Quit").clicked() {
+                    ui.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+            ui.menu_button("View", |ui| {
+                ui.menu_button("Theme", |ui| {
+                    // The click itself makes egui run another frame,
+                    // whose top installs the new choice.
+                    ui.selectable_value(&mut self.theme, None, "System");
+                    for t in Theme::ALL {
+                        ui.selectable_value(&mut self.theme, Some(t), t.name());
+                    }
+                });
+            });
+        });
+    }
 }
 
 impl eframe::App for PhotographyWorkbenchApp {
@@ -91,31 +146,21 @@ impl eframe::App for PhotographyWorkbenchApp {
             ui.reset_style();
         }
 
-        egui::Panel::top("menu_bar").show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Quit").clicked() {
-                        ui.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
-                ui.menu_button("View", |ui| {
-                    ui.menu_button("Theme", |ui| {
-                        // The click itself makes egui run another frame,
-                        // whose top installs the new choice.
-                        ui.selectable_value(&mut self.theme, None, "System");
-                        for t in Theme::ALL {
-                            ui.selectable_value(&mut self.theme, Some(t), t.name());
-                        }
-                    });
-                });
-            });
-        });
+        let palette = theme::resolve(self.theme, ui.ctx()).palette();
+        egui::Panel::top("title_bar")
+            .exact_size(TITLE_BAR_HEIGHT)
+            .show_separator_line(true)
+            .frame(chrome::title_bar_frame(&palette))
+            .show(ui, |ui| self.title_bar(ui, &palette));
 
         egui::CentralPanel::default().show(ui, |ui| {
             ui.centered_and_justified(|ui| {
                 ui.label("No folder open");
             });
         });
+
+        // Last, so the strips are above everything else.
+        chrome::window_resize_handles(ui.ctx());
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -131,6 +176,9 @@ mod tests {
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable as _;
 
+    use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
+    use desktop_ui::icons;
+
     use super::PhotographyWorkbenchApp;
 
     /// The app, run headless in a window of the smallest size it allows.
@@ -145,6 +193,32 @@ mod tests {
         let harness = harness();
         harness.get_by_label("File");
         harness.get_by_label("No folder open");
+    }
+
+    #[test]
+    fn the_title_bar_holds_the_menus_and_the_window_controls() {
+        let harness = harness();
+        for menu in ["File", "View"] {
+            let rect = harness.get_by_label(menu).rect();
+            assert!(rect.bottom() <= TITLE_BAR_HEIGHT, "{menu} at {rect:?}");
+            // On macOS, clear of the system's window buttons.
+            if cfg!(target_os = "macos") {
+                assert!(
+                    rect.left() >= MAC_WINDOW_BUTTONS_WIDTH,
+                    "{menu} at {rect:?}"
+                );
+            }
+        }
+        let close = harness.query_by_label("Close");
+        assert_eq!(close.is_some(), !cfg!(target_os = "macos"));
+    }
+
+    #[test]
+    fn the_icon_font_is_installed_at_start() {
+        let harness = harness();
+        assert!(icons::resolves("x"));
+        let (glyph, font) = icons::glyph("x", 14.0, '?');
+        assert!(harness.ctx.fonts_mut(|fonts| fonts.has_glyph(&font, glyph)));
     }
 
     #[test]
