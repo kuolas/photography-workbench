@@ -11,8 +11,8 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([640.0, 400.0])
+            .with_inner_size(PhotographyWorkbenchApp::MIN_WINDOW)
+            .with_min_inner_size(PhotographyWorkbenchApp::MIN_WINDOW)
             .with_icon(PhotographyWorkbenchApp::icon())
             // Wayland ignores the window icon: the desktop finds it through
             // the .desktop entry whose name matches the app id, and packages
