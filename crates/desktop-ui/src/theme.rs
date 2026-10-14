@@ -13,9 +13,10 @@
 //! egui's type out in full, so the two never blur.
 //!
 //! [`Theme::apply`] maps a theme's [`Palette`] onto egui's [`egui::Visuals`];
-//! Dark has no palette and installs egui's stock dark visuals as they are.
-//! Custom painters, when they arrive, read their colours from new [`Palette`]
-//! slots rather than hard-coding them, so every colour the app paints changes
+//! Dark installs egui's stock dark visuals as they are, and its palette
+//! repeats their colours. Whatever the app paints itself, such as the title
+//! bar, the trays and the thumbnails, reads its colour from a [`Palette`]
+//! slot rather than hard-coding it, so every colour the app paints changes
 //! with the theme. Adding a theme is one [`Palette`] constructor, a [`Theme`]
 //! variant with its match arms, and an entry in [`Theme::ALL`].
 //!
@@ -61,30 +62,30 @@ impl Theme {
         }
     }
 
-    /// This theme's colours, `None` for Dark, which has none of its own: it
-    /// is egui's stock dark visuals.
-    fn palette(self) -> Option<Palette> {
+    /// This theme's colours.
+    pub fn palette(self) -> Palette {
         match self {
-            Self::Paper => Some(Palette::paper()),
-            Self::Graphite => Some(Palette::graphite()),
-            Self::Nexus => Some(Palette::nexus()),
-            Self::Dark => None,
+            Self::Paper => Palette::paper(),
+            Self::Graphite => Palette::graphite(),
+            Self::Nexus => Palette::nexus(),
+            Self::Dark => Palette::dark(),
         }
     }
 
     /// Whether this theme is built on egui's dark visuals rather than its
     /// light ones.
     pub fn is_dark(self) -> bool {
-        self.palette().is_none_or(|p| p.dark_mode)
+        self.palette().dark_mode
     }
 
     /// The egui `Visuals` for this theme: the palette mapped onto the fills,
     /// text and selection that most define the look, over the base dark or
     /// light visuals. Dark's are egui's own, unchanged.
     fn visuals(self) -> egui::Visuals {
-        let Some(p) = self.palette() else {
+        if self == Self::Dark {
             return egui::Visuals::dark();
-        };
+        }
+        let p = self.palette();
         let mut v = if p.dark_mode {
             egui::Visuals::dark()
         } else {
@@ -163,11 +164,21 @@ pub struct Palette {
     // --- backgrounds ---
     /// Panels: the menu bar and the main view (egui `panel_fill`).
     pub panel: Color32,
+    /// The title bar.
+    pub title_bar: Color32,
+    /// The status bar and the trays, the plates an action bar's buttons sit
+    /// on: one shade below [`Self::panel`] in every theme, so the two read as
+    /// one family.
+    pub strip: Color32,
     /// Modals, windows and popups such as menus and dropdowns (egui
     /// `window_fill`).
     pub window: Color32,
     /// Text-input background (egui `extreme_bg_color`).
     pub field: Color32,
+    /// A thumbnail's tile, under and around the picture.
+    pub chip: Color32,
+    /// Behind the photo in the viewer.
+    pub viewer_backdrop: Color32,
     /// Separator, frame-border and indent-line stroke (egui
     /// `widgets.noninteractive.bg_stroke`).
     pub separator: Color32,
@@ -178,13 +189,27 @@ pub struct Palette {
     /// `widgets.inactive.fg_stroke`). Hovered, pressed and open widgets keep
     /// the base visuals' colours.
     pub text: Color32,
+    /// An icon drawn by the app that is on, or under the pointer.
+    pub icon_active: Color32,
+    /// An icon drawn by the app that is off.
+    pub icon_inactive: Color32,
+    /// The window controls' glyphs: close, maximize and minimize.
+    pub window_ctrl: Color32,
+    /// A see-through wash over a control under the pointer: white on a dark
+    /// theme, black on a light one.
+    pub hover_overlay: Color32,
 
-    // --- links and selection ---
+    // --- links, selection and accents ---
     /// Hyperlink colour, chosen to stay legible on [`Self::panel`]: at least
     /// 3:1.
     pub link: Color32,
     /// Text-selection fill (egui `selection.bg_fill`).
     pub selection: Color32,
+    /// The outline of the current photo, in the grid and the filmstrip.
+    pub accent: Color32,
+    /// A control that destroys or closes, under the pointer: the close
+    /// button.
+    pub danger: Color32,
 }
 
 impl Palette {
@@ -195,13 +220,24 @@ impl Palette {
     fn paper() -> Self {
         Self {
             dark_mode: false,
-            panel: hex(0xF3F1E9),     // main content paper
-            window: hex(0xFBF9F3),    // dialogs / menus, brighter paper
-            field: hex(0xFFFDF7),     // inputs, brightest (soft, not pure white)
-            separator: hex(0xC9C3B4), // warm light rule (≈ egui light default)
-            text: hex(0x2A2822),      // warm near-black
-            link: hex(0x0A6CC4),      // slightly deep blue for contrast on paper
+            panel: hex(0xF3F1E9),           // main content paper
+            title_bar: hex(0xE7E3D8),       // a step below the paper
+            strip: hex(0xE2DDD0),           // a step below the title bar
+            window: hex(0xFBF9F3),          // dialogs / menus, brighter paper
+            field: hex(0xFFFDF7),           // inputs, brightest (soft, not pure white)
+            chip: hex(0xE4DFD2),            // tiles sit just below the paper
+            viewer_backdrop: hex(0xCFC9BA), // medium warm grey behind the photo
+            separator: hex(0xC9C3B4),       // warm light rule (≈ egui light default)
+            text: hex(0x2A2822),            // warm near-black
+            icon_active: hex(0x2A2822),     // as the text
+            icon_inactive: hex(0x9A9488),   // warm grey
+            window_ctrl: hex(0x4A463C),
+            // Light chrome darkens, rather than lightens, under the pointer.
+            hover_overlay: Color32::from_black_alpha(20),
+            link: hex(0x0A6CC4), // slightly deep blue for contrast on paper
             selection: hex(0xBFDBF5),
+            accent: hex(0x0A6CC4), // the link blue
+            danger: hex(0xB3261E),
         }
     }
 
@@ -211,31 +247,120 @@ impl Palette {
         Self {
             dark_mode: true,
             panel: Color32::DARK_GRAY,
+            title_bar: Color32::from_gray(48),
+            strip: Color32::from_gray(70),
             window: Color32::from_gray(27),
             field: Color32::from_gray(10),
+            chip: Color32::from_gray(55),
+            viewer_backdrop: Color32::from_gray(28),
             separator: Color32::from_gray(60), // egui dark default
             text: Color32::WHITE,
+            icon_active: Color32::from_gray(235),
+            icon_inactive: Color32::from_gray(150),
+            window_ctrl: Color32::from_gray(210),
+            hover_overlay: Color32::from_white_alpha(28),
             // Its blue accent (#0078D7) lightened to stay legible on the
             // mid-grey panel.
             link: hex(0x7BBAEA),
             selection: Color32::from_rgb(0, 92, 128),
+            accent: hex(0x0078D7),
+            danger: Color32::from_rgb(196, 43, 28),
         }
     }
 
     /// Near-black wells, mid-grey chrome and raised #404040 controls (egui's
     /// own dark widget fills already match these, so they are left as they
-    /// are). The yellow is kept for links rather than selection
-    /// fills, because selected text would be unreadable on yellow.
+    /// are). The yellow is kept for links and the current photo's outline
+    /// rather than selection fills, because selected text would be
+    /// unreadable on yellow.
     fn nexus() -> Self {
         Self {
             dark_mode: true,
-            panel: hex(0x333333),     // chrome bars and docks
-            window: hex(0x242424),    // menus and dialogs, a step below the chrome
-            field: hex(0x1A1A1A),     // text inputs sunk to the content-well tone
-            separator: hex(0x1A1A1A), // dock edges, the content-well tone
+            panel: hex(0x333333),           // chrome bars and docks
+            title_bar: hex(0x262626),       // a step below the chrome
+            strip: hex(0x292929),           // the trays, a shade below the chrome
+            window: hex(0x242424),          // menus and dialogs, a step below the chrome
+            field: hex(0x1A1A1A),           // text inputs sunk to the content-well tone
+            chip: hex(0x404040),            // the raised control grey
+            viewer_backdrop: hex(0x1A1A1A), // the content-well tone
+            separator: hex(0x1A1A1A),       // dock edges, the content-well tone
             text: Color32::WHITE,
+            icon_active: hex(0xEBEBEB),
+            icon_inactive: hex(0x9A9A9A),
+            window_ctrl: hex(0xD2D2D2),
+            hover_overlay: Color32::from_white_alpha(24),
             link: hex(0xFFF800),      // vivid yellow
             selection: hex(0x404040), // selected rows: a raised grey, not the yellow — white text stays legible on it
+            accent: hex(0xFFF800),    // the link yellow
+            danger: hex(0xC42B1C),
         }
+    }
+
+    /// egui's stock dark visuals: the colours [`Theme::visuals`] would map
+    /// equal the ones `egui::Visuals::dark()` already has, and `text` is its
+    /// label colour. The rest step around its flat charcoal so the window's
+    /// parts still read apart.
+    fn dark() -> Self {
+        Self {
+            dark_mode: true,
+            panel: Color32::from_gray(27),
+            title_bar: Color32::from_gray(30),
+            strip: Color32::from_gray(22),
+            window: Color32::from_gray(27),
+            field: Color32::from_gray(10),
+            chip: Color32::from_gray(40),
+            viewer_backdrop: Color32::from_gray(10),
+            separator: Color32::from_gray(60),
+            text: Color32::from_gray(140),
+            icon_active: Color32::from_gray(220),
+            icon_inactive: Color32::from_gray(120),
+            window_ctrl: Color32::from_gray(180),
+            hover_overlay: Color32::from_white_alpha(24),
+            link: Color32::from_rgb(90, 170, 255),
+            selection: Color32::from_rgb(0, 92, 128),
+            accent: Color32::from_rgb(90, 170, 255), // the link blue
+            danger: Color32::from_rgb(220, 90, 90),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The trays and the status bar are the panel's own colour a shade
+    /// darker, never a separate surface: the mean of the three channels of
+    /// `strip` is between 55 % and 96 % of `panel`'s, in every theme.
+    #[test]
+    fn the_strip_is_a_shade_below_the_panel_in_every_theme() {
+        fn mean(c: Color32) -> f32 {
+            (f32::from(c.r()) + f32::from(c.g()) + f32::from(c.b())) / 3.0
+        }
+        for theme in Theme::ALL {
+            let p = theme.palette();
+            let ratio = mean(p.strip) / mean(p.panel);
+            assert!(
+                (0.55..=0.96).contains(&ratio),
+                "{}: strip / panel = {ratio:.2}, outside 0.55..=0.96",
+                theme.name()
+            );
+        }
+    }
+
+    /// Dark installs egui's stock visuals unmapped, so its palette must hold
+    /// their colours, or what the app paints itself would not match what
+    /// egui paints.
+    #[test]
+    fn the_dark_palette_holds_the_stock_dark_colours() {
+        let p = Theme::Dark.palette();
+        let v = egui::Visuals::dark();
+        assert!(p.dark_mode);
+        assert_eq!(p.panel, v.panel_fill);
+        assert_eq!(p.window, v.window_fill);
+        assert_eq!(p.field, v.extreme_bg_color);
+        assert_eq!(p.separator, v.widgets.noninteractive.bg_stroke.color);
+        assert_eq!(p.text, v.widgets.noninteractive.fg_stroke.color);
+        assert_eq!(p.link, v.hyperlink_color);
+        assert_eq!(p.selection, v.selection.bg_fill);
     }
 }
