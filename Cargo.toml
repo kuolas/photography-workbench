@@ -18,9 +18,12 @@ readme = "README.md"
 # name is still a working title).
 publish = false
 
-# Every external dependency, one version each. A crate names the ones it uses
-# with `<name>.workspace = true`, adding the features it needs.
+# Every dependency, one version each. A crate names the ones it uses with
+# `<name>.workspace = true`, adding the features it needs.
 [workspace.dependencies]
+# The workspace's own crates.
+desktop-ui = { path = "crates/desktop-ui" }
+# External crates.
 eframe = "0.36"
 egui = "0.36"
 egui_kittest = "0.36"

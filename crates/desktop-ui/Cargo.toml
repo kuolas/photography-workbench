@@ -1,0 +1,18 @@
+[package]
+name = "desktop-ui"
+description = "The custom widgets and shared parts of photography-workbench's window"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+# egui only: this crate knows nothing of photos (ADR013).
+[dependencies]
+egui.workspace = true
+
+[lints]
+workspace = true

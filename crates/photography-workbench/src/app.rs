@@ -2,7 +2,7 @@
 
 //! The top-level eframe application: the window's panels and menus.
 
-use crate::theme::{self, Theme};
+use desktop_ui::theme::{self, Theme};
 
 /// The [`eframe::Storage`] key the theme choice is saved under, as the
 /// theme's [`Theme::name`], or `"System"` for none. The display name is the
