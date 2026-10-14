@@ -1,0 +1,18 @@
+[package]
+name = "catalog"
+description = "The photos on disk, for photography-workbench: the folder tree and a folder's photo list"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+# No GUI: never egui, eframe or desktop-ui (ADR013), so the tests run on a
+# machine with no display.
+[dependencies]
+
+[lints]
+workspace = true

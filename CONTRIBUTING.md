@@ -99,7 +99,7 @@ maintainer's own. The flow:
 
 5. **Open a pull request.** Describe what changed and why, and link the issue
    it answers. The template has a short checklist. Give the PR a title in the
-   same shape as a commit subject (`import: Read EXIF dates`).
+   same shape as a commit subject (`catalog: Read EXIF dates`).
 
 ### Linear history: why rebase, not merge
 
@@ -137,7 +137,7 @@ We follow the
 [GNOME commit message guidelines](https://handbook.gnome.org/development/commit-messages.html):
 
 ```
-import: Read the capture date from EXIF
+catalog: Read the capture date from EXIF
 
 Sorting by file modification time put every photo copied off a card on
 the day it was copied. The capture date is what a person means by "when
@@ -148,16 +148,17 @@ Closes: #12
 
 - **Subject line:** `component: Summary`.
   - The component tag is optional and a single word naming the part of the
-    project the commit touches (`import`, `thumbnails`, `docs`, `build`,
-    `ci`).
+    project the commit touches: a crate (`catalog`, `previews`,
+    `desktop-ui`, or `app` for `photography-workbench`), or `docs`, `build`,
+    `ci`.
   - The summary is in the imperative ("Add", not "Added"), **starts with a
     capital letter** (or with an identifier written as it appears in code,
-    ``thumbnails: `scale_to()` keeps the aspect ratio``), has **no trailing
+    ``previews: `scale_to()` keeps the aspect ratio``), has **no trailing
     period**, and stays within about **72 characters**.
 - **A blank second line**, always.
 - **Body:** plain prose wrapped at 75 columns, explaining *why* the change is
   needed — the diff already shows *how*. If the commit fixes a bug introduced
-  by an earlier commit, name it in the body as `64aee44 ("import: Read dates
+  by an earlier commit, name it in the body as `64aee44 ("catalog: Read dates
   lazily")`, using the hash on `master`.
 - **Issue references** go in the last paragraph, one per line:
   - `Closes: #12` or `Fixes: #12` closes the issue when the commit reaches
@@ -174,7 +175,7 @@ Closes: #12
 More examples:
 
 ```
-thumbnails: Cache scaled images by content hash
+previews: Cache scaled images by content hash
 build: Pin the Rust toolchain for CI
 Add a README
 ```
@@ -199,7 +200,7 @@ short:
   trailer; in issues and comments, a short note:
 
   ```
-  thumbnails: Cache scaled images by content hash
+  previews: Cache scaled images by content hash
 
   …
 
