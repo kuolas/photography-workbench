@@ -49,7 +49,7 @@ Paths are relative to `crates/desktop-ui`:
 | File | Holds | May depend on |
 |---|---|---|
 | `src/lib.rs` | the library root | its own modules |
-| `src/theme.rs` | the colour themes: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one, and each theme's `Palette` (none for Dark, which is egui's stock dark visuals) and how it maps onto egui's visuals | `egui` |
+| `src/theme.rs` | the colour themes: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one, and each theme's `Palette`, the colours of every part of the window, and how it maps onto egui's visuals (Dark installs egui's stock dark visuals as they are, and its palette repeats their colours) | `egui` |
 
 ### catalog and previews
 
