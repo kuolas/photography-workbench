@@ -10,9 +10,10 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
-# egui only: this crate knows nothing of photos (ADR013).
+# The GUI only: this crate knows nothing of photos (ADR013).
 [dependencies]
 egui.workspace = true
+iconflow.workspace = true
 
 [lints]
 workspace = true

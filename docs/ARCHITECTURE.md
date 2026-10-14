@@ -19,7 +19,7 @@ never:
 |---|---|---|
 | `crates/catalog` | the photos on disk: the folder tree, a folder's photo list, the current photo. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
-| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes. Knows nothing of photos | `egui`; never `catalog`, `previews`, `raw-files` or `image` |
+| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes and the icons. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
 | `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | any other crate here, and any external one |
 
 ### photography-workbench
@@ -49,6 +49,7 @@ Paths are relative to `crates/desktop-ui`:
 | File | Holds | May depend on |
 |---|---|---|
 | `src/lib.rs` | the library root | its own modules |
+| `src/icons.rs` | the icons: Lucide's icon font, given to egui once by `install`, and an icon by its Lucide name as text (`lucide`) or as a character and a font to paint (`glyph`), with a fallback for a name that does not resolve | `egui`, `iconflow` |
 | `src/theme.rs` | the colour themes: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one, and each theme's `Palette`, the colours of every part of the window, and how it maps onto egui's visuals (Dark installs egui's stock dark visuals as they are, and its palette repeats their colours) | `egui` |
 
 ### catalog and previews
