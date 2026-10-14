@@ -18,6 +18,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR010](adr010-modes-and-the-window.md) | Three modes in one window with its own title bar | Accepted |
 | [ADR011](adr011-views-navigation-and-the-keymap.md) | Views, navigation and the keymap | Accepted |
 | [ADR012](adr012-version-numbers.md) | Version numbers | Accepted |
+| [ADR013](adr013-a-workspace-of-small-crates.md) | A workspace of small crates | Accepted |
 
 ## When to write one
 
