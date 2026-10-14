@@ -55,6 +55,15 @@ which resets those settings.
 Choices that shape the code still to come, such as rating storage, are open
 — see [ROADMAP.md](ROADMAP.md#open-questions).
 
+**Decided, not yet built.** The first release's work turns this crate into
+a workspace of small crates laid out engine-first, with the photos on
+disk and the decoding below a GUI-free line and the window above it
+([ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)),
+and replaces the menu bar with a title bar of the app's own that holds
+the mode switcher
+([ADR010](architecture-decisions/adr010-modes-and-the-window.md)). This
+file is rewritten with each of those changes, in the same pull request.
+
 ## As the code grows
 
 Each new module adds a row to the table above, and a change that moves data
