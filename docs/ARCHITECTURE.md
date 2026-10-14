@@ -11,18 +11,23 @@ under `crates/`
 The root `Cargo.toml` holds what they share: the version, the package
 fields, the dependency versions, the lints and the release profile.
 
-So far there is one crate, `crates/photography-workbench`, the app: a
-library and a thin binary, laid out like
+| Crate | Holds | May depend on |
+|---|---|---|
+| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes. Knows nothing of photos | `egui` |
+| `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | `desktop-ui`, and any external crate |
+
+### photography-workbench
+
+The app is a library and a thin binary, laid out like
 [eframe_template](https://github.com/emilk/eframe_template) but desktop-only
-([ADR007](architecture-decisions/adr007-egui-cross-platform.md)). Paths
-below are relative to it:
+([ADR007](architecture-decisions/adr007-egui-cross-platform.md)). Paths are
+relative to `crates/photography-workbench`:
 
 | File | Holds | May depend on |
 |---|---|---|
 | `src/main.rs` | the binary: sets up logging and the window, then hands control to eframe | the library, `eframe`, `env_logger` |
 | `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` | its own modules |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's panels, menus and icon, and the theme choice it saves and applies | `eframe`, `egui`, `theme` |
-| `src/theme.rs` | the colour themes, private to the crate: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one, and each theme's `Palette` (none for Dark, which is egui's stock dark visuals) and how it maps onto egui's visuals | `egui` |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's panels, menus and icon, and the theme choice it saves and applies | `eframe`, `egui`, `desktop_ui::theme` |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp::NAME`, and that every crate's version is the workspace's | the library, `toml` |
@@ -30,6 +35,17 @@ below are relative to it:
 Keeping everything but start-up in the library lets tests drive the UI
 without a display: [egui_kittest](https://github.com/emilk/egui/tree/main/crates/egui_kittest)
 runs the app headless and queries its widgets through AccessKit.
+
+### desktop-ui
+
+Paths are relative to `crates/desktop-ui`:
+
+| File | Holds | May depend on |
+|---|---|---|
+| `src/lib.rs` | the library root | its own modules |
+| `src/theme.rs` | the colour themes: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one, and each theme's `Palette` (none for Dark, which is egui's stock dark visuals) and how it maps onto egui's visuals | `egui` |
+
+### How it fits together
 
 **Data flow.** eframe owns the event loop and calls
 `PhotographyWorkbenchApp::ui` every frame; egui is immediate-mode, so the UI
@@ -73,6 +89,7 @@ file is rewritten with each of those changes, in the same pull request.
 
 ## As the code grows
 
-Each new module adds a row to the table above, and a change that moves data
+Each new crate adds a row to the crate table and a section of its own, each
+new module a row to its crate's table, and a change that moves data
 between modules updates the data flow. A constraint that forces the shape
 gets [an ADR](architecture-decisions/README.md).

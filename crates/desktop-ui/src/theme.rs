@@ -2,7 +2,7 @@
 
 //! The app's colour themes.
 //!
-//! What the user picks in View ▸ Theme, and the app saves between runs, is an
+//! What the user picks, and the app saves between runs, is an
 //! `Option<Theme>`: `None` follows the OS light/dark preference. [`resolve`]
 //! turns it into the [`Theme`] to install. Only a [`Theme`] can be installed
 //! ([`apply`](Theme::apply)), so "System", which names no colours, can't be
@@ -46,8 +46,8 @@ pub enum Theme {
 }
 
 impl Theme {
-    /// Every theme, in menu order: lightest to darkest. The View ▸ Theme menu
-    /// lists "System", then these.
+    /// Every theme, in the order a theme picker lists them after "System":
+    /// lightest to darkest.
     pub const ALL: [Self; 4] = [Self::Paper, Self::Graphite, Self::Nexus, Self::Dark];
 
     /// Display name. It is also the value the app saves for the choice, so

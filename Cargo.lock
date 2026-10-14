@@ -814,6 +814,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "desktop-ui"
+version = "0.1.0"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "dispatch"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2531,6 +2538,7 @@ dependencies = [
 name = "photography-workbench"
 version = "0.1.0"
 dependencies = [
+ "desktop-ui",
  "eframe",
  "egui",
  "egui_kittest",

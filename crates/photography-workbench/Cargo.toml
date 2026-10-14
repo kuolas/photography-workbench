@@ -13,6 +13,7 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+desktop-ui.workspace = true
 # Desktop only (ADR007): eframe's default wgpu renderer, plus `persistence`,
 # which keeps the window geometry and the app's settings (such as the theme
 # choice) between runs.
