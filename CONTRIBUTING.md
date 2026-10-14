@@ -231,8 +231,12 @@ cargo test --workspace
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs them on every
 pull request on macOS, Linux and Windows, together with the commit-message
-check and a check that there are no merge commits in the PR. CI is the real
-gate: a pull request is merged only when all of its checks pass.
+check, a check that there are no merge commits in the PR, and
+`scripts/check-crate-boundary.sh`, which checks that the crates depend on
+one another only in the direction
+[ADR013](docs/architecture-decisions/adr013-a-workspace-of-small-crates.md)
+sets; run it yourself after adding a dependency. CI is the real gate: a
+pull request is merged only when all of its checks pass.
 
 A few conventions:
 

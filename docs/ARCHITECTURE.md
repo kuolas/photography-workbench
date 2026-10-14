@@ -11,11 +11,15 @@ under `crates/`
 The root `Cargo.toml` holds what they share: the version, the package
 fields, the dependency versions, the lints and the release profile.
 
+`scripts/check-crate-boundary.sh`, which CI runs, fails when a crate
+depends, directly or not, on one that its "May depend on" cell says
+never:
+
 | Crate | Holds | May depend on |
 |---|---|---|
-| `crates/catalog` | the photos on disk: the folder tree, a folder's photo list, the current photo. Empty so far | never `egui`, `eframe` or `desktop-ui` |
-| `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe` or `desktop-ui` |
-| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes. Knows nothing of photos | `egui` |
+| `crates/catalog` | the photos on disk: the folder tree, a folder's photo list, the current photo. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
+| `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
+| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes. Knows nothing of photos | `egui`; never `catalog`, `previews`, `raw-files` or `image` |
 | `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | any other crate here, and any external one |
 
 ### photography-workbench
