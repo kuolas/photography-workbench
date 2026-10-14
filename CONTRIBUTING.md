@@ -31,7 +31,8 @@ cargo test
 ```
 
 To run a single test, or every test whose name contains a word:
-`cargo test <name>`.
+`cargo test <name>`. The code is a workspace of crates under `crates/`;
+`cargo test -p <crate>` tests one of them.
 
 ## Reporting bugs and requesting features
 

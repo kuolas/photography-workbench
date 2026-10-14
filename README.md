@@ -31,10 +31,11 @@ cargo test
 
 ### Changing the app icon
 
-The icon's source is [assets/icon.svg](assets/icon.svg). The PNG and ICO
-files next to it are rendered from it and committed, so building needs
-nothing extra. After editing the SVG, run `scripts/render-icons.sh` to render
-them again. The script needs:
+The icon's source is
+[crates/photography-workbench/assets/icon.svg](crates/photography-workbench/assets/icon.svg).
+The PNG and ICO files next to it are rendered from it and committed, so
+building needs nothing extra. After editing the SVG, run
+`scripts/render-icons.sh` to render them again. The script needs:
 
 - `rsvg-convert`, from librsvg;
 - `python3`.
