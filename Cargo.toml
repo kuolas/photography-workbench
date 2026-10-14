@@ -32,6 +32,7 @@ egui_kittest = "0.36"
 env_logger = "0.11"
 iconflow = { version = "2", default-features = false, features = ["pack-lucide"] }
 log = "0.4"
+raw-window-handle = "0.6"
 toml = "1"
 winresource = "0.1"
 

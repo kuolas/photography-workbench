@@ -22,6 +22,11 @@ egui.workspace = true
 env_logger.workspace = true
 log.workspace = true
 
+# The window's handle, to measure macOS's window buttons at start-up; the
+# same version eframe uses.
+[target.'cfg(target_os = "macos")'.dependencies]
+raw-window-handle.workspace = true
+
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["eframe"] }
 # tests/package_metadata.rs reads this file.
