@@ -210,6 +210,9 @@ pub struct Palette {
     /// A control that destroys or closes, under the pointer: the close
     /// button.
     pub danger: Color32,
+    /// Text and icons on [`Self::danger`]: the close button's cross while
+    /// the pointer is over it.
+    pub on_danger: Color32,
 }
 
 impl Palette {
@@ -238,6 +241,7 @@ impl Palette {
             selection: hex(0xBFDBF5),
             accent: hex(0x0A6CC4), // the link blue
             danger: hex(0xB3261E),
+            on_danger: Color32::WHITE,
         }
     }
 
@@ -265,6 +269,7 @@ impl Palette {
             selection: Color32::from_rgb(0, 92, 128),
             accent: hex(0x0078D7),
             danger: Color32::from_rgb(196, 43, 28),
+            on_danger: Color32::WHITE,
         }
     }
 
@@ -293,6 +298,7 @@ impl Palette {
             selection: hex(0x404040), // selected rows: a raised grey, not the yellow — white text stays legible on it
             accent: hex(0xFFF800),    // the link yellow
             danger: hex(0xC42B1C),
+            on_danger: Color32::WHITE,
         }
     }
 
@@ -320,6 +326,7 @@ impl Palette {
             selection: Color32::from_rgb(0, 92, 128),
             accent: Color32::from_rgb(90, 170, 255), // the link blue
             danger: Color32::from_rgb(220, 90, 90),
+            on_danger: Color32::WHITE,
         }
     }
 }

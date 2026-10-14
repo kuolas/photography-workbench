@@ -15,5 +15,8 @@ publish.workspace = true
 egui.workspace = true
 iconflow.workspace = true
 
+[dev-dependencies]
+egui_kittest.workspace = true
+
 [lints]
 workspace = true
