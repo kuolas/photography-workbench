@@ -3,8 +3,13 @@
 All notable changes to photography-workbench are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
-Nothing has been released yet, so there is no versioning promise; that will be
-decided with the first release.
+Releases are numbered `MAJOR.MINOR.PATCH`: while the first part is 0 the
+scope is still settling and any release may change what the app does or how
+it stores things; the second part goes up when a release adds something a
+user can see or do, the third when it only fixes things (the record of that
+decision is
+[ADR012](docs/architecture-decisions/adr012-version-numbers.md)).
+Nothing has been released yet.
 
 ## [Unreleased]
 

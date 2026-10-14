@@ -17,6 +17,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR009](adr009-raw-files-reads-raw-files.md) | raw-files reads RAW files | Accepted |
 | [ADR010](adr010-modes-and-the-window.md) | Three modes in one window with its own title bar | Accepted |
 | [ADR011](adr011-views-navigation-and-the-keymap.md) | Views, navigation and the keymap | Accepted |
+| [ADR012](adr012-version-numbers.md) | Version numbers | Accepted |
 
 ## When to write one
 
