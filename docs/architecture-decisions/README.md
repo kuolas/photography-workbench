@@ -15,6 +15,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR007](adr007-egui-cross-platform.md) | egui, on macOS, Linux and Windows | Accepted |
 | [ADR008](adr008-lints-and-release-profile.md) | No unsafe code, a few extra lints, an optimized release build | Accepted |
 | [ADR009](adr009-raw-files-reads-raw-files.md) | raw-files reads RAW files | Accepted |
+| [ADR010](adr010-modes-and-the-window.md) | Three modes in one window with its own title bar | Accepted |
 
 ## When to write one
 
