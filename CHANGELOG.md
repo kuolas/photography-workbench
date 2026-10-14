@@ -15,12 +15,17 @@ Nothing has been released yet.
 
 ### Added
 
-- The app opens a window with a File menu and a View ▸ Theme menu offering
+- The app opens a window with a title bar of its own, the same on every
+  system, holding a File menu and a View ▸ Theme menu offering
   Paper, Graphite, Nexus and Dark themes, plus System, which follows the OS
   (Paper when it is light, Graphite otherwise); the window size and theme are
   remembered between runs.
 - The window opens at 1280 × 800 points the first time and cannot be made
   smaller, so every part of it fits on a handheld's screen.
+- Dragging the title bar moves the window, and double-clicking it maximizes
+  or restores the window. On Windows and Linux the title bar has the close,
+  maximize and minimize buttons, and the window resizes from any edge or
+  corner; on macOS the system's own window buttons sit on the title bar.
 - The app has an icon, shown on its window, in the taskbar or Dock, and on
   the Windows executable. Under Wayland the desktop shows it only for an
   installed package, which provides the icon through its desktop entry.

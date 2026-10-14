@@ -10,9 +10,9 @@ The repository, its license and its contribution process exist, and the
 decisions that shape the app are recorded
 ([ADR009](architecture-decisions/adr009-raw-files-reads-raw-files.md) to
 [ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)).
-The app opens a window with a menu bar and a choice of themes; it does
-nothing else yet. The first release, 0.1.0, is being built, one pull
-request at a time, under
+The app opens a window with a title bar of its own and a choice of
+themes; it does nothing else yet. The first release, 0.1.0, is being
+built, one pull request at a time, under
 [issue #4](https://github.com/kuolas/photography-workbench/issues/4).
 
 ## Three modes
