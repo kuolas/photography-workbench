@@ -23,6 +23,11 @@ impl PhotographyWorkbenchApp {
     /// The name shown in the title bar.
     pub const NAME: &'static str = "Photography Workbench";
 
+    /// The smallest the window can be, in points, and its size on the first
+    /// run: a handheld's 1280 × 800 screen, the smallest a photographer
+    /// culls on. Every layout is designed and tested at this size (ADR010).
+    pub const MIN_WINDOW: egui::Vec2 = egui::vec2(1280.0, 800.0);
+
     /// Called once, before the first frame. Restores the saved theme choice;
     /// with none saved, or an unreadable one, takes the default.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -128,9 +133,16 @@ mod tests {
 
     use super::PhotographyWorkbenchApp;
 
+    /// The app, run headless in a window of the smallest size it allows.
+    fn harness() -> Harness<'static, PhotographyWorkbenchApp> {
+        Harness::builder()
+            .with_size(PhotographyWorkbenchApp::MIN_WINDOW)
+            .build_eframe(|cc| PhotographyWorkbenchApp::new(cc))
+    }
+
     #[test]
     fn first_frame_shows_menu_and_empty_state() {
-        let harness = Harness::new_eframe(|cc| PhotographyWorkbenchApp::new(cc));
+        let harness = harness();
         harness.get_by_label("File");
         harness.get_by_label("No folder open");
     }
