@@ -33,7 +33,7 @@ relative to `crates/photography-workbench`:
 |---|---|---|
 | `src/main.rs` | the binary: sets up logging and the window (its size, and its frame on each system), then hands control to eframe | the library, `eframe`, `env_logger` |
 | `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` | its own modules |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar, panels, menus and icon, and the theme choice it saves and applies | `eframe`, `egui`, `desktop_ui` |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar, panels, menus and icon, and the theme choice it saves and applies | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp::NAME`, and that every crate's version is the workspace's | the library, `toml` |

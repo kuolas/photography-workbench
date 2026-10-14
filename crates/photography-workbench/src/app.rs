@@ -20,6 +20,10 @@ pub struct PhotographyWorkbenchApp {
     /// The concrete theme last installed on the context: [`Self::theme`]
     /// resolved against the OS preference. `None` until the first install.
     resolved_theme: Option<Theme>,
+    /// The width of macOS's window buttons with their margins, measured at
+    /// start-up, for the title bar to start past. `None` on other systems,
+    /// or when the window could not be measured.
+    mac_window_buttons: Option<f32>,
 }
 
 impl PhotographyWorkbenchApp {
@@ -42,6 +46,7 @@ impl PhotographyWorkbenchApp {
             .and_then(|name| Theme::ALL.into_iter().find(|t| t.name() == name));
         let mut app = Self {
             theme,
+            mac_window_buttons: measure_mac_window_buttons(cc),
             ..Self::default()
         };
         app.reconcile_theme(&cc.egui_ctx);
@@ -107,7 +112,8 @@ impl PhotographyWorkbenchApp {
                 .max_rect(bar)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
             |ui| {
-                ui.add_space(chrome::title_bar_left_pad(ui.ctx(), None));
+                let pad = chrome::title_bar_left_pad(ui.ctx(), self.mac_window_buttons);
+                ui.add_space(pad);
                 self.menus(ui);
             },
         );
@@ -132,6 +138,24 @@ impl PhotographyWorkbenchApp {
                 });
             });
         });
+    }
+}
+
+/// The width of macOS's window buttons with their margins, as the system
+/// lays them out, unaffected by egui's zoom. `None` on other systems, and
+/// when there is no window to measure, as in the headless tests.
+fn measure_mac_window_buttons(cc: &eframe::CreationContext<'_>) -> Option<f32> {
+    #[cfg(target_os = "macos")]
+    {
+        use raw_window_handle::HasWindowHandle as _;
+        let handle = cc.window_handle().ok()?;
+        eframe::WindowChromeMetrics::from_window_handle(&handle.as_raw())
+            .map(|metrics| metrics.traffic_lights_size.x)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = cc;
+        None
     }
 }
 

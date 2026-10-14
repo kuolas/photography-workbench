@@ -2556,6 +2556,7 @@ dependencies = [
  "egui_kittest",
  "env_logger",
  "log",
+ "raw-window-handle",
  "toml",
  "winresource",
 ]
