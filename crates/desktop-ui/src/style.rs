@@ -9,6 +9,13 @@
 //! controls are 18 points high. Parts that are drawn at a size of their
 //! own, such as the window controls and the title bar's icon buttons, keep
 //! it.
+//!
+//! The pace: how long egui's animations take, from a section opening to a
+//! tooltip, menu or dialog fading in and a scroll bar appearing. egui's own
+//! is brisk; the window's is unhurried.
+
+/// How long every animation takes, in seconds; egui's own is 0.2.
+const ANIMATION_TIME: f32 = 0.4;
 
 /// Set the style in every one of egui's styles, light and dark. A change
 /// of theme replaces only the visuals, so the style stays. Call it once,
@@ -25,6 +32,7 @@ pub fn install(ctx: &egui::Context) {
         spacing.interact_size.y = 26.0;
         spacing.menu_margin = egui::Margin::same(8);
         spacing.window_margin = egui::Margin::same(12);
+        style.animation_time = ANIMATION_TIME;
     });
 }
 
@@ -47,6 +55,7 @@ mod tests {
             assert_eq!(spacing.interact_size.y, 26.0, "{theme:?}");
             assert_eq!(spacing.menu_margin, egui::Margin::same(8), "{theme:?}");
             assert_eq!(spacing.window_margin, egui::Margin::same(12), "{theme:?}");
+            assert_eq!(ctx.style_of(theme).animation_time, 0.4, "{theme:?}");
         }
     }
 }
