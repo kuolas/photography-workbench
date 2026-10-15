@@ -4,6 +4,8 @@
 //! each with its own layout of the window, chosen in the title bar's mode
 //! switcher (ADR010).
 
+use desktop_ui::dock::Side;
+
 /// The parts of the window a mode has around its centre, besides the
 /// title bar, which every mode has.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -20,6 +22,17 @@ pub struct Layout {
     /// The bar of controls under the centre, between the side docks, for
     /// what the centre shows and how.
     pub toolbar: bool,
+}
+
+impl Layout {
+    /// Whether it has the dock on `side`.
+    pub fn has_dock(self, side: Side) -> bool {
+        match side {
+            Side::Left => self.left_dock,
+            Side::Right => self.right_dock,
+            Side::Bottom => self.bottom_dock,
+        }
+    }
 }
 
 /// One of the app's modes.

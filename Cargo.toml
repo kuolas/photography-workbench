@@ -32,8 +32,10 @@ egui_kittest = "0.36"
 env_logger = "0.11"
 iconflow = { version = "2", default-features = false, features = ["pack-lucide"] }
 log = "0.4"
+muda = { version = "0.21", default-features = false }
 raw-window-handle = "0.6"
 toml = "1"
+winit = { version = "0.30", default-features = false }
 winresource = "0.1"
 
 # Code policy: docs/architecture-decisions/adr008-lints-and-release-profile.md

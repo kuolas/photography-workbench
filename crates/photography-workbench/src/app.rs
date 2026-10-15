@@ -13,6 +13,7 @@ use desktop_ui::toolbar;
 use crate::dialogs;
 use crate::keymap::{self, Action, Surface};
 use crate::layout::{self, Docks};
+use crate::menu::{self, MacMenu};
 use crate::mode::{Layout, Mode};
 use crate::view::View;
 
@@ -61,6 +62,9 @@ pub struct PhotographyWorkbenchApp {
     /// start-up, for the title bar to start past. `None` on other systems,
     /// or when the window could not be measured.
     mac_window_buttons: Option<f32>,
+    /// The menu bar at the top of the screen, on macOS. `None` on other
+    /// systems, and when there is no window to give it to.
+    menu: Option<MacMenu>,
 }
 
 impl PhotographyWorkbenchApp {
@@ -92,7 +96,7 @@ impl PhotographyWorkbenchApp {
         style::install(&cc.egui_ctx);
         // Quitting is the keymap's, like every other shortcut: egui's own
         // Ctrl+Q would close the window even with a dialog open. On macOS
-        // the system's app menu takes Cmd+Q before the window sees it.
+        // the menu bar's Quit takes Cmd+Q before the window sees it.
         cc.egui_ctx.options_mut(|o| o.quit_shortcuts.clear());
         let saved = |key| cc.storage.and_then(|storage| storage.get_string(key));
         let theme =
@@ -109,6 +113,7 @@ impl PhotographyWorkbenchApp {
             docks: Docks::restore(cc.storage),
             view,
             mac_window_buttons: measure_mac_window_buttons(cc),
+            menu: MacMenu::install(cc),
             ..Self::default()
         };
         app.reconcile_theme(&cc.egui_ctx);
@@ -259,6 +264,37 @@ impl PhotographyWorkbenchApp {
         }
     }
 
+    /// Do what the menu bar's items clicked since the last frame ask.
+    fn menu_clicks(&mut self, ctx: &egui::Context) {
+        let clicked = self.menu.as_mut().map(MacMenu::clicked);
+        self.perform_from_menu(ctx, clicked.unwrap_or_default());
+    }
+
+    /// Do the `actions` menu items asked for, each only if its item can
+    /// be chosen when it is done. The items show what can be chosen as
+    /// the last frame left the app, and an action done before this one
+    /// can have changed that, by opening a dialog, for one.
+    fn perform_from_menu(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
+        for action in actions {
+            if self.menu_state().enabled(action) {
+                self.perform(ctx, action);
+            }
+        }
+    }
+
+    /// What the menu bar shows of the app: the mode, the view and the
+    /// docks shown, and whether a dialog is open.
+    fn menu_state(&self) -> menu::State {
+        menu::State {
+            mode: self.mode,
+            view: self.view,
+            parts: self.parts(),
+            docks: self.docks,
+            dialog: self.show_settings || self.show_about || self.show_shortcuts,
+            shortcuts: self.show_shortcuts,
+        }
+    }
+
     /// Do what `action` asks, whether a key, a button or a menu item asked
     /// for it, so each asks for the same thing in the same way (ADR010).
     fn perform(&mut self, ctx: &egui::Context, action: Action) {
@@ -368,6 +404,18 @@ fn measure_mac_window_buttons(cc: &eframe::CreationContext<'_>) -> Option<f32> {
 }
 
 impl eframe::App for PhotographyWorkbenchApp {
+    /// Do what the menu bar's items ask. eframe calls this before every
+    /// frame, and also while the window is minimized or hidden, when it
+    /// draws no frame, so the menu bar acts then too: its Minimize leaves
+    /// it showing, and its Quit must still close the window.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.menu_clicks(ctx);
+        let state = self.menu_state();
+        if let Some(menu) = &mut self.menu {
+            menu.show(state);
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // The theme is installed only here, at the top of the frame, never
         // part-way through it, so a frame is painted in one theme. The root
@@ -378,6 +426,8 @@ impl eframe::App for PhotographyWorkbenchApp {
             ui.reset_style();
         }
 
+        // What the keys ask for, after the menu bar's items (`logic`),
+        // before anything is drawn, so it shows in this frame.
         self.shortcuts(ui.ctx());
 
         let palette = theme::resolve(self.theme, ui.ctx()).palette();
@@ -431,6 +481,12 @@ impl eframe::App for PhotographyWorkbenchApp {
         }
         if self.show_shortcuts && dialogs::shortcuts(ui.ctx(), &keymap::sections()) {
             self.show_shortcuts = false;
+        }
+
+        // The menu bar shows the app as this frame leaves it.
+        let state = self.menu_state();
+        if let Some(menu) = &mut self.menu {
+            menu.show(state);
         }
     }
 
@@ -809,6 +865,56 @@ mod tests {
         assert_eq!(app.mode, Mode::Library);
         app.perform(&ctx, Action::Mode(Mode::Organizer));
         assert_eq!(app.mode, Mode::Library, "a mode not built yet");
+    }
+
+    /// The menu bar is shown the app as it is: the mode, the view, the
+    /// window's parts and docks, and whether a dialog is open, and which.
+    #[test]
+    fn the_menu_bar_is_shown_the_app_as_it_is() {
+        let mut app = PhotographyWorkbenchApp {
+            view: View::Viewer,
+            ..PhotographyWorkbenchApp::default()
+        };
+        app.docks.right = false;
+        let state = app.menu_state();
+        assert_eq!(state.mode, Mode::Library);
+        assert_eq!(state.view, View::Viewer);
+        assert!(state.parts.bottom_dock, "the viewer has the filmstrip");
+        assert_eq!(state.docks, docks(true, false, true));
+        assert!(!state.dialog && !state.shortcuts);
+        for open in [
+            |app: &mut PhotographyWorkbenchApp| app.show_settings = true,
+            |app: &mut PhotographyWorkbenchApp| app.show_about = true,
+        ] {
+            let mut app = PhotographyWorkbenchApp::default();
+            open(&mut app);
+            let state = app.menu_state();
+            assert!(state.dialog && !state.shortcuts);
+        }
+        app.show_shortcuts = true;
+        let state = app.menu_state();
+        assert!(state.dialog && state.shortcuts);
+    }
+
+    /// A menu item's action is done only if its item can be chosen when
+    /// it is done: none while a dialog is open, even one opened by the
+    /// action before it, but the reference's own, which closes it.
+    #[test]
+    fn a_menu_item_s_action_waits_while_a_dialog_is_open() {
+        let ctx = egui::Context::default();
+        let mut app = PhotographyWorkbenchApp::default();
+        let viewer = Action::View(View::Viewer);
+        app.perform_from_menu(&ctx, vec![Action::Settings, viewer]);
+        assert!(app.show_settings);
+        assert_eq!(app.view, View::Grid, "not behind the dialog");
+
+        let mut app = PhotographyWorkbenchApp {
+            show_shortcuts: true,
+            ..PhotographyWorkbenchApp::default()
+        };
+        app.perform_from_menu(&ctx, vec![Action::About, Action::Shortcuts]);
+        assert!(!app.show_about);
+        assert!(!app.show_shortcuts, "the reference's own item closes it");
     }
 
     /// The docks shown: the left, right and bottom ones.

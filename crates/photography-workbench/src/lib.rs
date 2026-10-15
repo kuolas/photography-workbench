@@ -10,6 +10,7 @@ mod app;
 mod dialogs;
 mod keymap;
 mod layout;
+mod menu;
 mod mode;
 mod view;
 

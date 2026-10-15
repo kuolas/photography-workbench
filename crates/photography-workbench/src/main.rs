@@ -32,6 +32,14 @@ fn main() -> eframe::Result {
         .with_fullsize_content_view(true);
     let options = eframe::NativeOptions {
         viewport,
+        // The app gives macOS a menu bar of its own (`menu.rs`), whose
+        // Quit closes the window. The one the system gives by default
+        // would end the app without closing it.
+        #[cfg(target_os = "macos")]
+        event_loop_builder: Some(Box::new(|builder| {
+            use winit::platform::macos::EventLoopBuilderExtMacOS as _;
+            builder.with_default_menu(false);
+        })),
         ..Default::default()
     };
     eframe::run_native(

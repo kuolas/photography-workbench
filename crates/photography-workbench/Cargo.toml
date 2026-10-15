@@ -22,10 +22,16 @@ egui.workspace = true
 env_logger.workspace = true
 log.workspace = true
 
-# The window's handle, to measure macOS's window buttons at start-up; the
-# same version eframe uses.
 [target.'cfg(target_os = "macos")'.dependencies]
+# The menu bar at the top of the screen. Its default features only add
+# Linux's GTK menus, which the app does not use.
+muda.workspace = true
+# The window's handle, to measure macOS's window buttons at start-up and to
+# make the menu bar only for a real window; the same version eframe uses.
 raw-window-handle.workspace = true
+# Only to turn off the menu bar winit makes by default (main.rs); the same
+# version eframe uses, which does not pass that setting on.
+winit.workspace = true
 
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["eframe"] }
