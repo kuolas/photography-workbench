@@ -16,10 +16,10 @@ Nothing has been released yet.
 ### Added
 
 - The app opens a window with a title bar of its own, the same on every
-  system, holding a File menu and a settings gear. The gear opens Settings,
-  which offers Paper, Graphite, Nexus and Dark themes, plus System, which
-  follows the OS (Paper when it is light, Graphite otherwise); the window
-  size and theme are remembered between runs.
+  system, holding a settings gear. The gear opens Settings, which offers
+  Paper, Graphite, Nexus and Dark themes, plus System, which follows the OS
+  (Paper when it is light, Graphite otherwise); the window size and theme
+  are remembered between runs.
 - An About dialog shows the app's version, copyright and licence, and
   links to its home page. On Windows and Linux the app's icon at the left
   of the title bar opens it.

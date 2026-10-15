@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The top-level eframe application: the window's title bar, panels and
-//! menus.
+//! dialogs.
 
 use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
 use desktop_ui::icons;
@@ -140,14 +140,13 @@ impl PhotographyWorkbenchApp {
         true
     }
 
-    /// The title bar's contents: the app's icon (except on macOS), the mode
-    /// switcher and the menus at the left, past the space macOS's window
-    /// buttons take, and the window controls and the settings gear at the
-    /// right. The icon opens About; on macOS, About belongs in the app menu
-    /// at the top of the screen, and an icon beside the system's window
-    /// buttons would look out of place.
-    /// The whole bar drags the window, so it is made a drag region before
-    /// anything is put on it.
+    /// The title bar's contents: the app's icon (except on macOS) and the
+    /// mode switcher at the left, past the space macOS's window buttons
+    /// take, and the window controls and the settings gear at the right.
+    /// The icon opens About; on macOS, About belongs in the app menu at the
+    /// top of the screen, and an icon beside the system's window buttons
+    /// would look out of place. The whole bar drags the window, so it is
+    /// made a drag region before anything is put on it.
     fn title_bar(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
         let bar = ui.max_rect();
         chrome::title_bar_drag_region(ui, bar);
@@ -178,10 +177,7 @@ impl PhotographyWorkbenchApp {
                     self.title_bar_icon(ui);
                     ui.add_space(6.0);
                 }
-                // The menus take the rest of the bar's width, so they come
-                // last.
                 self.mode_switcher(ui);
-                self.menus(ui);
             },
         );
     }
@@ -212,17 +208,6 @@ impl PhotographyWorkbenchApp {
                 self.mode = mode;
             }
         }
-    }
-
-    /// The File menu.
-    fn menus(&mut self, ui: &mut egui::Ui) {
-        egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("File", |ui| {
-                if ui.button("Quit").clicked() {
-                    ui.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            });
-        });
     }
 }
 
@@ -343,20 +328,29 @@ mod tests {
     }
 
     #[test]
-    fn first_frame_shows_menu_and_empty_state() {
+    fn first_frame_shows_the_title_bar_and_the_empty_state() {
         let harness = harness();
-        harness.get_by_label("File");
+        harness.get_by_label("Library");
         harness.get_by_label("No folder open");
+    }
+
+    /// The window has no menus: the title bar holds the app's commands.
+    #[test]
+    fn the_window_has_no_menus() {
+        let harness = harness();
+        for menu in ["File", "View"] {
+            assert!(harness.query_by_label(menu).is_none(), "{menu}");
+        }
     }
 
     /// At the window's smallest, everything on the title bar fits on it,
     /// clear of the system's window buttons on macOS, and of the window
     /// controls elsewhere.
     #[test]
-    fn the_title_bar_holds_the_modes_the_menu_the_gear_and_the_window_controls() {
+    fn the_title_bar_holds_the_modes_the_gear_and_the_window_controls() {
         let harness = harness();
         let mut last = egui::Rect::NOTHING;
-        for name in ["Library", "Organizer", "Develop", "File", "Settings"] {
+        for name in ["Library", "Organizer", "Develop", "Settings"] {
             let rect = harness.get_by_label(name).rect();
             assert!(rect.bottom() <= TITLE_BAR_HEIGHT, "{name} at {rect:?}");
             assert!(
