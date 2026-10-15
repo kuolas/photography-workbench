@@ -19,7 +19,7 @@ never:
 |---|---|---|
 | `crates/catalog` | the photos on disk: the folder tree, a folder's photo list, the current photo. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
-| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the style, the icons, the parts of the title bar and the dialogs' frame. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
+| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the style, the icons, the parts of the title bar, the dialogs' frame and the About dialog. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
 | `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | any other crate here, and any external one |
 
 ### photography-workbench
@@ -51,6 +51,7 @@ Paths are relative to `crates/desktop-ui`:
 | File | Holds | May depend on |
 |---|---|---|
 | `src/lib.rs` | the library root | its own modules |
+| `src/about.rs` | the About dialog: the app's icon over its name, tagline, version, copyright, licence and a link to its home page, all of which the app passes in | `egui`, its own `dialog` |
 | `src/chrome.rs` | the parts of the title bar the app draws itself: its frame and height, the region that drags the window and maximizes it on a double-click, its buttons (one showing an icon, and one showing an icon and a word that can be shown selected), the close, maximize and minimize buttons, the strips along the window's edges that resize it, and the gap that keeps the bar clear of macOS's window buttons. The window controls and the strips add nothing on macOS, where the system's frame provides them | `egui`, its own `icons` and `theme` |
 | `src/dialog.rs` | dialogs: the frame every dialog shares (the theme's popup frame with 16 points of room inside), and `show`, which shows one. A dialog closes on Esc or a click outside it, never acting as it closes | `egui` |
 | `src/icons.rs` | the icons: Lucide's icon font, given to egui once by `install`, and an icon by its Lucide name as text (`lucide`), before a word as one run of text for a button (`labeled`), or as a character and a font to paint (`glyph`), with a fallback for a name that does not resolve | `egui`, `iconflow` |

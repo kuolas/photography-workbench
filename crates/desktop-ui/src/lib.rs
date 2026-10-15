@@ -4,6 +4,7 @@
 //! built on egui. It knows nothing of photos, so the app's modes, and any
 //! other app, can use it as they are. See `docs/ARCHITECTURE.md`.
 
+pub mod about;
 pub mod chrome;
 pub mod dialog;
 pub mod icons;
