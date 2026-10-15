@@ -78,6 +78,32 @@ impl Docks {
         }
     }
 
+    /// Hide the docks on `sides` that `layout` has, if any of them is
+    /// shown, or else show them all, so one key shows or hides them
+    /// together. A dock `layout` does not have is left as it is.
+    pub fn toggle(&mut self, layout: Layout, sides: &[Side]) {
+        let has = |side| match side {
+            Side::Left => layout.left_dock,
+            Side::Right => layout.right_dock,
+            Side::Bottom => layout.bottom_dock,
+        };
+        let any_shown = sides.iter().any(|&side| has(side) && *self.shown_mut(side));
+        for &side in sides {
+            if has(side) {
+                *self.shown_mut(side) = !any_shown;
+            }
+        }
+    }
+
+    /// Whether the dock on `side` is shown, to read or change.
+    fn shown_mut(&mut self, side: Side) -> &mut bool {
+        match side {
+            Side::Left => &mut self.left,
+            Side::Right => &mut self.right,
+            Side::Bottom => &mut self.bottom,
+        }
+    }
+
     /// Save the docks' states in `storage`.
     pub fn save(self, storage: &mut dyn eframe::Storage) {
         let states = [self.left, self.right, self.bottom];
