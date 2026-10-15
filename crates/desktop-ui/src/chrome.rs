@@ -22,7 +22,7 @@ use crate::icons;
 use crate::theme::Palette;
 
 /// The height of the title bar, and of the window controls, which fill it.
-pub const TITLE_BAR_HEIGHT: f32 = 40.0;
+pub const TITLE_BAR_HEIGHT: f32 = 42.0;
 
 /// The width of the strips along the window's edges that resize it.
 pub const RESIZE_BORDER: f32 = 8.0;
@@ -40,8 +40,16 @@ const TITLE_BAR_LEFT_MARGIN: i8 = 8;
 /// The width of each window control.
 const WINDOW_CONTROL_WIDTH: f32 = 46.0;
 
-/// The width of an [`icon_button`].
-const ICON_BUTTON_WIDTH: f32 = 36.0;
+/// The room an [`icon_button`] takes along the bar:
+/// the square it takes the pointer over, and 6 points either side, so
+/// neighbouring icons stand 40 points apart.
+const ICON_SLOT_WIDTH: f32 = 40.0;
+
+/// The side of the square an [`icon_button`] takes the pointer over.
+const ICON_HIT_SIZE: f32 = 28.0;
+
+/// The size of an [`icon_button`]'s icon.
+const ICON_SIZE: f32 = 18.0;
 
 /// Whether the system draws the window's controls and resizes it at its
 /// edges, which it does on macOS only.
@@ -125,7 +133,8 @@ pub fn title_bar_drag_region(ui: &mut egui::Ui, bar: Rect) {
 }
 
 /// A title-bar button showing only the Lucide icon `icon.0`, or the
-/// character `icon.1` if the name does not resolve. `label` is its tooltip
+/// character `icon.1` if the name does not resolve. The icon brightens
+/// under the pointer, with nothing drawn behind it. `label` is its tooltip
 /// and the name screen readers and the tests know it by.
 pub fn icon_button(
     ui: &mut egui::Ui,
@@ -133,10 +142,30 @@ pub fn icon_button(
     icon: (&str, char),
     label: &str,
 ) -> egui::Response {
-    let colours = (palette.icon_inactive, palette.icon_active);
-    let fill = palette.hover_overlay;
-    let size = vec2(ICON_BUTTON_WIDTH, TITLE_BAR_HEIGHT);
-    painted_button(ui, size, (icon, 16.0), colours, fill, label)
+    let response = title_icon(ui, label);
+    let colour = if response.hovered() {
+        palette.icon_active
+    } else {
+        palette.icon_inactive
+    };
+    let (glyph, font) = icons::glyph(icon.0, ICON_SIZE, icon.1);
+    let centre = response.rect.center();
+    ui.painter()
+        .text(centre, Align2::CENTER_CENTER, glyph, font, colour);
+    response.on_hover_text(label)
+}
+
+/// The place of an [`icon_button`] on the bar: an [`ICON_SLOT_WIDTH`] slot,
+/// the bar's height, with a square in its middle that takes the pointer.
+/// Named `label` for screen readers and the tests.
+fn title_icon(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let (slot, _) = ui.allocate_exact_size(vec2(ICON_SLOT_WIDTH, TITLE_BAR_HEIGHT), Sense::hover());
+    let square = Rect::from_center_size(slot.center(), egui::Vec2::splat(ICON_HIT_SIZE));
+    let response = ui.interact(square, ui.id().with(("title_icon", label)), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
+    });
+    response
 }
 
 /// A title-bar button with the Lucide icon `icon.0` (or the text `icon.1`
@@ -213,7 +242,7 @@ fn window_control(
     painted_button(ui, size, (icon, 14.0), colours, fill, label)
 }
 
-/// A button of `size` that paints its own icon: the Lucide icon
+/// A window control of `size` that paints its own icon: the Lucide icon
 /// `icon.0.0`, or the character `icon.0.1` if it does not resolve, at
 /// `icon.1` points. The icon is `colours.0`, and `colours.1` on `fill`
 /// while the pointer is over the button. The icon is painted rather than
@@ -535,6 +564,63 @@ mod tests {
         harness.get_by_label("Settings").click();
         harness.run();
         assert_eq!(clicks.get(), 1);
+    }
+
+    /// An icon button alone in a bar 120 points wide.
+    fn lone_icon_button() -> Harness<'static> {
+        let palette = Theme::Paper.palette();
+        harness(vec2(120.0, TITLE_BAR_HEIGHT), false, move |ui| {
+            icon_button(ui, &palette, ("settings", '⚙'), "Settings");
+        })
+    }
+
+    /// An icon takes the pointer over a 28-point square, and the next one
+    /// stands 40 points along.
+    #[test]
+    fn icons_take_28_point_squares_40_points_apart() {
+        let palette = Theme::Paper.palette();
+        let harness = harness(vec2(200.0, TITLE_BAR_HEIGHT), false, move |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                icon_button(ui, &palette, ("settings", '⚙'), "Settings");
+                icon_button(ui, &palette, ("circle-help", '?'), "Help");
+            });
+        });
+        let gear = harness.get_by_label("Settings").rect();
+        let help = harness.get_by_label("Help").rect();
+        for square in [gear, help] {
+            assert_eq!(
+                square.size(),
+                egui::Vec2::splat(ICON_HIT_SIZE),
+                "{square:?}"
+            );
+        }
+        assert_eq!(help.center().x - gear.center().x, ICON_SLOT_WIDTH);
+    }
+
+    /// Under the pointer the icon brightens, with nothing painted behind it.
+    #[test]
+    fn an_icon_button_brightens_under_the_pointer_with_nothing_behind_it() {
+        let palette = Theme::Paper.palette();
+        let mut harness = lone_icon_button();
+        let background = harness.ctx.global_style().visuals.panel_fill;
+        let icon_colour = |harness: &Harness<'_>| {
+            let mut colours = Vec::new();
+            for clipped in &harness.output().shapes {
+                match &clipped.shape {
+                    egui::Shape::Text(text) => colours.push(text.fallback_color),
+                    egui::Shape::Rect(rect) if rect.fill != background => {
+                        panic!("a plate behind the icon: {rect:?}");
+                    }
+                    _ => {}
+                }
+            }
+            colours
+        };
+        assert_eq!(icon_colour(&harness), [palette.icon_inactive]);
+        let centre = harness.get_by_label("Settings").rect().center();
+        frame_with(&mut harness, vec![Event::PointerMoved(centre)]);
+        assert_eq!(icon_colour(&harness), [palette.icon_active]);
     }
 
     #[test]
