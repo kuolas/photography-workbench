@@ -7,10 +7,12 @@ use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
 use desktop_ui::fonts;
 use desktop_ui::style;
 use desktop_ui::theme::{self, Theme};
+use desktop_ui::toolbar;
 
 use crate::dialogs;
 use crate::layout::{self, Docks};
-use crate::mode::Mode;
+use crate::mode::{Layout, Mode};
+use crate::view::View;
 
 /// The [`eframe::Storage`] key the theme choice is saved under, as the
 /// theme's [`Theme::name`], or `"System"` for none. The display name is the
@@ -20,6 +22,10 @@ const THEME_KEY: &str = "theme";
 /// The [`eframe::Storage`] key the mode is saved under, as its
 /// [`Mode::name`].
 const MODE_KEY: &str = "mode";
+
+/// The [`eframe::Storage`] key Library's view is saved under, as its
+/// [`View::name`].
+const VIEW_KEY: &str = "view";
 
 /// The application state, owned by eframe for the life of the window.
 #[derive(Default)]
@@ -33,6 +39,8 @@ pub struct PhotographyWorkbenchApp {
     mode: Mode,
     /// Which docks are shown.
     docks: Docks,
+    /// How Library shows a folder's photos, saved between runs.
+    view: View,
     /// Whether the Settings dialog is open.
     show_settings: bool,
     /// Whether the About dialog is open.
@@ -68,8 +76,8 @@ impl PhotographyWorkbenchApp {
     pub const MIN_WINDOW: egui::Vec2 = egui::vec2(1280.0, 800.0);
 
     /// Called once, before the first frame. Installs the fonts and the
-    /// style, and restores the saved theme choice and mode; with none
-    /// saved, or an unreadable one, takes the default.
+    /// style, and restores the saved theme choice, mode and view;
+    /// with none saved, or an unreadable one, takes the default.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         fonts::install(&cc.egui_ctx);
         style::install(&cc.egui_ctx);
@@ -79,9 +87,13 @@ impl PhotographyWorkbenchApp {
         let mode = saved(MODE_KEY)
             .and_then(|name| Mode::from_saved(&name))
             .unwrap_or_default();
+        let view = saved(VIEW_KEY)
+            .and_then(|name| View::from_saved(&name))
+            .unwrap_or_default();
         let mut app = Self {
             theme,
             mode,
+            view,
             mac_window_buttons: measure_mac_window_buttons(cc),
             ..Self::default()
         };
@@ -188,6 +200,33 @@ impl PhotographyWorkbenchApp {
         );
     }
 
+    /// The parts of the window shown around the centre: the mode's, but
+    /// in Library's grid without the bottom dock, the filmstrip's, as the
+    /// grid shows the photos as thumbnails already.
+    fn parts(&self) -> Layout {
+        let mut parts = self.mode.layout();
+        if self.view == View::Grid {
+            parts.bottom_dock = false;
+        }
+        parts
+    }
+
+    /// The mode's own controls at the start of the toolbar: in Library, a
+    /// button per view, the current one selected.
+    fn mode_controls(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
+        match self.mode {
+            Mode::Library => {
+                for view in View::ALL {
+                    let selected = self.view == view;
+                    if toolbar::button(ui, palette, view.icon(), view.name(), selected).clicked() {
+                        self.view = view;
+                    }
+                }
+            }
+            Mode::Organizer | Mode::Develop => {}
+        }
+    }
+
     /// The app's icon, 20 points square, which opens About.
     fn title_bar_icon(&mut self, ui: &mut egui::Ui) {
         let about = format!("About {}", Self::NAME);
@@ -254,17 +293,29 @@ impl eframe::App for PhotographyWorkbenchApp {
             .show(ui, |ui| self.title_bar(ui, &palette));
 
         // Each panel takes its edge of what the ones before it left: the
-        // tool rail the window's right edge, and the side docks the rest
-        // of the height, down to the window's bottom.
-        let parts = self.mode.layout();
+        // tool rail the window's right edge, the side docks the rest of
+        // the height, down to the window's bottom, then the toolbar the
+        // bottom between them, and the bottom dock the room above it.
+        let parts = self.parts();
         if parts.tool_rail {
             layout::tool_rail(ui, &palette, &mut self.docks);
         }
         layout::side_docks(ui, parts, &mut self.docks);
+        if parts.toolbar {
+            let start = |ui: &mut egui::Ui| self.mode_controls(ui, &palette);
+            toolbar::show(ui, "toolbar", &palette, start, |_| {});
+        }
+        layout::bottom_dock(ui, &palette, parts, &mut self.docks);
 
-        egui::CentralPanel::default().show(ui, |ui| {
+        // The viewer shows its photo on a backdrop of its own.
+        let (empty, fill) = match self.view {
+            View::Grid => ("No folder open", palette.panel),
+            View::Viewer => ("No photo open", palette.viewer_backdrop),
+        };
+        let centre = egui::Frame::central_panel(ui.style()).fill(fill);
+        egui::CentralPanel::default().frame(centre).show(ui, |ui| {
             ui.centered_and_justified(|ui| {
-                ui.label("No folder open");
+                ui.label(empty);
             });
         });
 
@@ -288,6 +339,7 @@ impl eframe::App for PhotographyWorkbenchApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(THEME_KEY, theme::choice_name(self.theme).to_owned());
         storage.set_string(MODE_KEY, self.mode.name().to_owned());
+        storage.set_string(VIEW_KEY, self.view.name().to_owned());
     }
 }
 
@@ -301,9 +353,9 @@ mod tests {
     use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
     use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
-    use desktop_ui::icons;
+    use desktop_ui::{icons, theme};
 
-    use super::{Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, THEME_KEY, Theme};
+    use super::{Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, THEME_KEY, Theme, VIEW_KEY, View};
 
     /// Settings kept in memory, in place of eframe's file.
     #[derive(Default)]
@@ -342,6 +394,15 @@ mod tests {
             })
     }
 
+    /// [`harness`], with Library showing the viewer, which has every part
+    /// of the window the grid has and the filmstrip.
+    fn viewer_harness() -> Harness<'static, PhotographyWorkbenchApp> {
+        let mut harness = harness();
+        harness.state_mut().view = View::Viewer;
+        harness.run();
+        harness
+    }
+
     #[test]
     fn first_frame_shows_the_title_bar_and_the_empty_state() {
         let harness = harness();
@@ -358,15 +419,16 @@ mod tests {
         }
     }
 
-    /// At the window's smallest, everything on the title bar fits on it,
-    /// clear of the system's window buttons on macOS, and of the window
-    /// controls elsewhere.
+    /// At the window's smallest, everything on the title bar fits on it in
+    /// order, clear of the system's window buttons on macOS, and of the
+    /// window controls elsewhere.
     #[test]
     fn the_title_bar_holds_the_modes_the_gear_and_the_window_controls() {
         let harness = harness();
         let mut last = egui::Rect::NOTHING;
         for name in ["Library", "Organizer", "Develop", "Settings"] {
             let rect = harness.get_by_label(name).rect();
+            assert!(rect.left() >= last.right(), "{name} at {rect:?}");
             assert!(rect.bottom() <= TITLE_BAR_HEIGHT, "{name} at {rect:?}");
             assert!(
                 rect.right() <= PhotographyWorkbenchApp::MIN_WINDOW.x,
@@ -385,6 +447,42 @@ mod tests {
         if let Some(minimize) = minimize {
             assert!(last.right() < minimize.rect().left(), "{last:?}");
         }
+    }
+
+    /// Library's view buttons choose how the centre shows the photos, and
+    /// show which is chosen.
+    #[test]
+    fn the_view_buttons_switch_the_centre() {
+        let mut harness = harness();
+        let toggled = |harness: &Harness<'_, PhotographyWorkbenchApp>, name| {
+            harness.get_by_label(name).accesskit_node().toggled()
+        };
+        assert_eq!(toggled(&harness, "Thumbnail grid"), Some(Toggled::True));
+        harness.get_by_label("No folder open");
+        harness.get_by_label("Image viewer").click();
+        harness.run();
+        assert_eq!(harness.state().view, View::Viewer);
+        assert_eq!(toggled(&harness, "Image viewer"), Some(Toggled::True));
+        assert_eq!(toggled(&harness, "Thumbnail grid"), Some(Toggled::False));
+        harness.get_by_label("No photo open");
+    }
+
+    /// The view is saved and restored on the next run; an unreadable one
+    /// starts in the grid.
+    #[test]
+    fn the_view_is_saved_and_restored() {
+        let mut storage = MemoryStorage::default();
+        let mut harness = harness();
+        harness.state_mut().view = View::Viewer;
+        harness.state_mut().save(&mut storage);
+        assert_eq!(
+            storage.get_string(VIEW_KEY).as_deref(),
+            Some("Image viewer")
+        );
+        assert_eq!(harness_from(&storage).state().view, View::Viewer);
+
+        storage.set_string(VIEW_KEY, "Filmstrip".to_owned());
+        assert_eq!(harness_from(&storage).state().view, View::Grid);
     }
 
     #[test]
@@ -515,10 +613,12 @@ mod tests {
 
     /// At the window's smallest, Library has every part in its place: the
     /// tool rail and the side docks from the title bar down to the window's
-    /// bottom, leaving the centre room to work in.
+    /// bottom, the toolbar along the bottom between the side docks, holding
+    /// the view buttons, and the bottom dock above it, leaving the centre
+    /// room to work in.
     #[test]
     fn library_lays_out_its_bars_and_docks_around_the_centre() {
-        let harness = harness();
+        let harness = viewer_harness();
         let window =
             egui::Rect::from_min_size(egui::Pos2::ZERO, PhotographyWorkbenchApp::MIN_WINDOW);
         let title_bar = panel(&harness, "title_bar");
@@ -538,13 +638,87 @@ mod tests {
         let info = harness.get_by_role_and_label(Role::Button, "Info").rect();
         assert!(info.top() - tool_rail.top() < info.height(), "{info:?}");
 
-        let centre = harness.get_by_label("No folder open").rect();
+        let under_the_centre = egui::Rangef::new(left_dock.right(), right_dock.left());
+        let toolbar = panel(&harness, "toolbar");
+        assert_eq!(toolbar.x_range(), under_the_centre, "{toolbar:?}");
+        assert_eq!(toolbar.bottom(), window.bottom(), "{toolbar:?}");
+        for view in View::ALL {
+            let button = harness.get_by_label(view.name()).rect();
+            assert!(toolbar.contains_rect(button), "{button:?}");
+        }
+
+        let bottom_dock = panel(&harness, "bottom_dock");
+        assert_eq!(bottom_dock.x_range(), under_the_centre, "{bottom_dock:?}");
+        assert_eq!(bottom_dock.bottom(), toolbar.top(), "{bottom_dock:?}");
+
+        let centre = harness.get_by_label("No photo open").rect();
         assert!(
             centre.width() >= 300.0 && centre.height() >= 300.0,
             "{centre:?}"
         );
         assert!(left_dock.right() <= centre.left() && centre.right() <= right_dock.left());
-        assert!(title_bar.bottom() <= centre.top() && centre.bottom() <= window.bottom());
+        assert!(title_bar.bottom() <= centre.top() && centre.bottom() <= bottom_dock.top());
+    }
+
+    /// The bottom dock, the filmstrip's, is 142 points high under the
+    /// viewer. The grid has none: the centre runs down to the toolbar.
+    #[test]
+    fn the_filmstrip_comes_with_the_viewer_only() {
+        let mut harness = viewer_harness();
+        assert_eq!(panel(&harness, "bottom_dock").height(), 142.0);
+        harness.get_by_label("Thumbnail grid").click();
+        harness.run();
+        let centre = harness.get_by_label("No folder open").rect();
+        let below = panel(&harness, "toolbar").top() - centre.bottom();
+        assert!((0.0..20.0).contains(&below), "{below}");
+    }
+
+    /// The viewer and its filmstrip are filled with the viewer's backdrop;
+    /// the grid is not.
+    #[test]
+    fn the_viewer_and_the_filmstrip_sit_on_the_viewer_s_backdrop() {
+        let on_backdrop = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let palette = theme::resolve(harness.state().theme, &harness.ctx).palette();
+            harness
+                .output()
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(rect) if rect.fill == palette.viewer_backdrop => {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut harness = viewer_harness();
+        let filled = on_backdrop(&harness);
+        let centre = harness.get_by_label("No photo open").rect();
+        assert!(
+            filled.iter().any(|rect| rect.contains_rect(centre)),
+            "{filled:?}"
+        );
+        let filmstrip = panel(&harness, "bottom_dock");
+        // All of it but the line along its top.
+        let fills_filmstrip =
+            |rect: &egui::Rect| filmstrip.contains_rect(*rect) && rect.height() >= 141.0;
+        assert!(filled.iter().any(fills_filmstrip), "{filled:?}");
+        harness.get_by_label("Thumbnail grid").click();
+        harness.run();
+        assert_eq!(on_backdrop(&harness), Vec::new());
+    }
+
+    /// Switching between the grid and the viewer, which has the bottom
+    /// dock, leaves the ids of the centre's widgets as they were, so they
+    /// keep their state.
+    #[test]
+    fn the_centre_keeps_its_ids_between_the_views() {
+        let mut harness = harness();
+        let grid = harness.get_by_label("No folder open").accesskit_node().id();
+        harness.get_by_label("Image viewer").click();
+        harness.run();
+        let viewer = harness.get_by_label("No photo open").accesskit_node().id();
+        assert_eq!(grid, viewer);
     }
 
     /// With the side docks dragged as wide as they go, the centre keeps
@@ -603,6 +777,7 @@ mod tests {
         harness.state_mut().docks = Docks {
             left: false,
             right: false,
+            bottom: false,
         };
         harness.run();
         let shown = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
@@ -619,7 +794,7 @@ mod tests {
         assert!(shown(&harness));
         assert!(selected(&harness, "Info"));
         let docks = harness.state().docks;
-        assert!(!docks.left && docks.right, "{docks:?}");
+        assert!(!docks.left && docks.right && !docks.bottom, "{docks:?}");
     }
 
     #[test]

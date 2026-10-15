@@ -35,8 +35,9 @@ relative to `crates/photography-workbench`:
 | `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` | its own modules |
 | `src/dialogs.rs` | the app's dialogs, in the frame `desktop_ui::dialog` gives every dialog: Settings, which holds the theme choice, and About, which `desktop_ui::about` draws from the app's name, tagline, version, copyright, licence and home page | `egui`, `desktop_ui` |
 | `src/mode.rs` | `Mode`, the app's modes (Library, Organizer, Develop): each one's name and icon, whether it is built yet, and its `Layout`, the parts of the window it has around its centre | `desktop_ui` (tests only) |
-| `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the right dock's message when no photo is selected), and `Docks`, which of them are shown | `egui`, `desktop_ui` |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher and settings gear, the order the window's panels are laid out in, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
+| `src/view.rs` | `View`, the ways Library shows a folder's photos (a grid of thumbnails, or one photo in the viewer): each one's name and icon | `desktop_ui` (tests only) |
+| `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the right dock's message when no photo is selected, and the filmstrip's backdrop), and `Docks`, which of them are shown | `egui`, `desktop_ui` |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher and settings gear, the toolbar under the centre with the mode's own controls (Library's view buttons), the order the window's panels are laid out in, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode and view it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name, tagline and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp`'s constants, and that every crate's version is the workspace's | the library, `toml` |
@@ -75,16 +76,19 @@ machine with no display.
 **Data flow.** eframe owns the event loop and calls
 `PhotographyWorkbenchApp::ui` every frame; egui is immediate-mode, so the UI
 is rebuilt from the app's state each time rather than kept as a widget tree.
-The only state so far is the theme choice, the mode, which docks are
-shown and which dialogs are open; the window shows its own title bar,
+The only state so far is the theme choice, the mode, Library's view,
+which docks are shown and which dialogs are open; the window shows its own title bar,
 which holds the app's icon (which opens About; not on macOS), the mode
 switcher, the settings gear and the window controls. Only Library is
 built: the switcher shows Organizer and Develop disabled. Below the
 title bar the panels are laid out in an order that gives each its place:
 first the tool rail, so it takes the window's right edge below the title
 bar; then the side docks, the right one inside the tool rail, so they
-run down to the window's bottom; and last the centre, empty so far,
-which takes what is left. Each frame starts by resolving the theme
+run down to the window's bottom; then the toolbar along the bottom
+between them, holding the mode's own controls (in Library, a button per
+view); then, in Library's viewer, the bottom dock above the toolbar,
+for the filmstrip, which the grid has no need of; and last the centre,
+empty so far, which takes what is left. Each frame starts by resolving the theme
 choice against the OS light/dark preference and, when the resulting theme
 changed, reinstalling egui's visuals and restyling the frame's root `Ui`,
 which took its style before the app ran. The Settings dialog only records
@@ -99,7 +103,7 @@ Windows, so pinning it under System would freeze the theme at the one the
 OS had at launch.
 
 **Persisted state.** eframe's `persistence` feature saves the window geometry,
-egui's own settings and the app's theme choice and mode in a
+egui's own settings and the app's theme choice, mode and view in a
 per-user directory named after the app id, which `main.rs` sets to the
 binary's name (for example
 `~/Library/Application Support/photography-workbench` on macOS). The theme
@@ -107,7 +111,8 @@ choice is stored as text under the key `theme`: the theme's display name, or
 `System`; a missing or unrecognised value means System, so renaming a theme
 resets users who chose it. The mode is stored under the key `mode`, as
 its name; a missing or unrecognised value, or a mode not built yet, means
-Library. egui's own
+Library. Library's view is stored under `view`, as its name; a missing
+or unrecognised value means the grid. egui's own
 theme preference is not where the theme lives: the app sets it from the
 choice each frame, as above. Renaming the binary moves that directory,
 which resets those settings.

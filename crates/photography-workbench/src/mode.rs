@@ -15,6 +15,11 @@ pub struct Layout {
     pub left_dock: bool,
     /// The dock along the right side.
     pub right_dock: bool,
+    /// The dock along the bottom, between the side docks.
+    pub bottom_dock: bool,
+    /// The bar of controls under the centre, between the side docks, for
+    /// what the centre shows and how.
+    pub toolbar: bool,
 }
 
 /// One of the app's modes.
@@ -70,6 +75,8 @@ impl Mode {
                 tool_rail: true,
                 left_dock: true,
                 right_dock: true,
+                bottom_dock: true,
+                toolbar: true,
             },
             Self::Organizer | Self::Develop => Layout::default(),
         }
