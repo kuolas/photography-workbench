@@ -12,7 +12,8 @@
 //! far.
 
 use desktop_ui::action_bar::{self, Edge};
-use desktop_ui::dock;
+use desktop_ui::chrome;
+use desktop_ui::dock::{self, Side};
 use desktop_ui::theme::Palette;
 
 use crate::mode::Layout;
@@ -33,8 +34,8 @@ const FILMSTRIP_HEIGHT: f32 = 142.0;
 /// What the right dock can show: the tool rail's button for it.
 const INFO: ((&str, char), &str) = (("info", 'ℹ'), "Info");
 
-/// Which docks are shown. A dock the mode does not have is never shown,
-/// whatever it says here.
+/// Which docks are shown, saved between runs. A dock the mode does not
+/// have is never shown, whatever it says here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Docks {
     /// Whether the left dock is shown.
@@ -52,6 +53,66 @@ impl Default for Docks {
             left: true,
             right: true,
             bottom: true,
+        }
+    }
+}
+
+impl Docks {
+    /// The [`eframe::Storage`] keys each dock's state is saved under, as
+    /// `"true"` or `"false"`: the left, right and bottom docks'.
+    const KEYS: [&str; 3] = ["show_left_dock", "show_right_dock", "show_bottom_dock"];
+
+    /// The docks' states saved in `storage`. A dock with none saved, or an
+    /// unreadable one, is shown.
+    pub fn restore(storage: Option<&dyn eframe::Storage>) -> Self {
+        let shown = |key| {
+            storage
+                .and_then(|storage| storage.get_string(key))
+                .is_none_or(|value| value != "false")
+        };
+        let [left, right, bottom] = Self::KEYS;
+        Self {
+            left: shown(left),
+            right: shown(right),
+            bottom: shown(bottom),
+        }
+    }
+
+    /// Save the docks' states in `storage`.
+    pub fn save(self, storage: &mut dyn eframe::Storage) {
+        let states = [self.left, self.right, self.bottom];
+        for (key, shown) in Self::KEYS.into_iter().zip(states) {
+            storage.set_string(key, shown.to_string());
+        }
+    }
+}
+
+/// The title bar's toggles for the docks `layout` has, in a right-to-left
+/// layout, so they read left, bottom, right, as the docks lie.
+pub fn dock_toggles(ui: &mut egui::Ui, palette: &Palette, layout: Layout, docks: &mut Docks) {
+    let toggles = [
+        (
+            layout.right_dock,
+            Side::Right,
+            &mut docks.right,
+            "Show or hide the right dock",
+        ),
+        (
+            layout.bottom_dock,
+            Side::Bottom,
+            &mut docks.bottom,
+            "Show or hide the filmstrip",
+        ),
+        (
+            layout.left_dock,
+            Side::Left,
+            &mut docks.left,
+            "Show or hide the left dock",
+        ),
+    ];
+    for (has, side, shown, label) in toggles {
+        if has && chrome::dock_toggle(ui, palette, side, *shown, label).clicked() {
+            *shown = !*shown;
         }
     }
 }
