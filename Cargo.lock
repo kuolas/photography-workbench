@@ -631,6 +631,10 @@ dependencies = [
 [[package]]
 name = "catalog"
 version = "0.1.0"
+dependencies = [
+ "raw-files",
+ "tempfile",
+]
 
 [[package]]
 name = "cc"
@@ -2796,6 +2800,12 @@ name = "range-alloc"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
+
+[[package]]
+name = "raw-files"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c428cebf6bff18869c04a9b1461e851de0f8e0afe559f65e5cd63e3a694a64b"
 
 [[package]]
 name = "raw-window-handle"

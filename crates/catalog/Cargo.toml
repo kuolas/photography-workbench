@@ -13,6 +13,10 @@ publish.workspace = true
 # No GUI: never egui, eframe or desktop-ui (ADR013), so the tests run on a
 # machine with no display.
 [dependencies]
+raw-files.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true
