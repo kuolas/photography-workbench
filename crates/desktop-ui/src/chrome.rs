@@ -15,9 +15,11 @@
 //! system.
 
 use egui::{
-    Align2, CursorIcon, Frame, Margin, Rect, ResizeDirection, Sense, ViewportCommand, pos2, vec2,
+    Align2, CursorIcon, Frame, Margin, Rect, ResizeDirection, Sense, Stroke, StrokeKind,
+    ViewportCommand, pos2, vec2,
 };
 
+use crate::dock::Side;
 use crate::icons;
 use crate::theme::Palette;
 
@@ -40,12 +42,13 @@ const TITLE_BAR_LEFT_MARGIN: i8 = 8;
 /// The width of each window control.
 const WINDOW_CONTROL_WIDTH: f32 = 46.0;
 
-/// The room an [`icon_button`] takes along the bar:
+/// The room an [`icon_button`] or a [`dock_toggle`] takes along the bar:
 /// the square it takes the pointer over, and 6 points either side, so
 /// neighbouring icons stand 40 points apart.
 const ICON_SLOT_WIDTH: f32 = 40.0;
 
-/// The side of the square an [`icon_button`] takes the pointer over.
+/// The side of the square an [`icon_button`] or a [`dock_toggle`] takes
+/// the pointer over.
 const ICON_HIT_SIZE: f32 = 28.0;
 
 /// The size of an [`icon_button`]'s icon.
@@ -142,7 +145,7 @@ pub fn icon_button(
     icon: (&str, char),
     label: &str,
 ) -> egui::Response {
-    let response = title_icon(ui, label);
+    let response = title_icon(ui, label, None);
     let colour = if response.hovered() {
         palette.icon_active
     } else {
@@ -155,17 +158,78 @@ pub fn icon_button(
     response.on_hover_text(label)
 }
 
-/// The place of an [`icon_button`] on the bar: an [`ICON_SLOT_WIDTH`] slot,
-/// the bar's height, with a square in its middle that takes the pointer.
-/// Named `label` for screen readers and the tests.
-fn title_icon(ui: &mut egui::Ui, label: &str) -> egui::Response {
+/// The place of an [`icon_button`] or a [`dock_toggle`] on the bar: an
+/// [`ICON_SLOT_WIDTH`] slot, the bar's height, with a square in its middle
+/// that takes the pointer. Named `label` for screen readers and the tests,
+/// and, when `selected` is given, said to be on or off.
+fn title_icon(ui: &mut egui::Ui, label: &str, selected: Option<bool>) -> egui::Response {
     let (slot, _) = ui.allocate_exact_size(vec2(ICON_SLOT_WIDTH, TITLE_BAR_HEIGHT), Sense::hover());
     let square = Rect::from_center_size(slot.center(), egui::Vec2::splat(ICON_HIT_SIZE));
     let response = ui.interact(square, ui.id().with(("title_icon", label)), Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
+    response.widget_info(|| match selected {
+        Some(on) => {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, response.enabled(), on, label)
+        }
+        None => egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label),
     });
     response
+}
+
+/// A title-bar button that shows or hides the dock on `side`: a small
+/// window whose strip on that side is filled while the dock is `shown`,
+/// and only marked off by a line while it is hidden. It brightens while
+/// the dock is shown and under the pointer. `label` is its tooltip and the
+/// name screen readers and the tests know it by.
+pub fn dock_toggle(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    side: Side,
+    shown: bool,
+    label: &str,
+) -> egui::Response {
+    let response = title_icon(ui, label, Some(shown));
+    let colour = if shown || response.hovered() {
+        palette.icon_active
+    } else {
+        palette.icon_inactive
+    };
+    let (window, strip) = dock_glyph(response.rect.center(), side);
+    let stroke = Stroke::new(1.2, colour);
+    let painter = ui.painter();
+    painter.rect_stroke(window, 1.0, stroke, StrokeKind::Inside);
+    if shown {
+        painter.rect_filled(strip, 0.0, colour);
+    } else {
+        let edge = match side {
+            Side::Left => [strip.right_top(), strip.right_bottom()],
+            Side::Right => [strip.left_top(), strip.left_bottom()],
+            Side::Bottom => [strip.left_top(), strip.right_top()],
+        };
+        painter.line_segment(edge, stroke);
+    }
+    response.on_hover_text(label)
+}
+
+/// The glyph of a [`dock_toggle`] centred on `centre`: the outline of a
+/// window, 15 by 12 points, and the strip of it on `side` that stands for
+/// the dock.
+fn dock_glyph(centre: egui::Pos2, side: Side) -> (Rect, Rect) {
+    let window = Rect::from_center_size(centre, vec2(15.0, 12.0));
+    let strip = match side {
+        Side::Left => Rect::from_min_max(
+            window.left_top(),
+            pos2(window.left() + 5.0, window.bottom()),
+        ),
+        Side::Right => Rect::from_min_max(
+            pos2(window.right() - 5.0, window.top()),
+            window.right_bottom(),
+        ),
+        Side::Bottom => Rect::from_min_max(
+            pos2(window.left(), window.bottom() - 4.0),
+            window.right_bottom(),
+        ),
+    };
+    (window, strip)
 }
 
 /// A title-bar button with the Lucide icon `icon.0` (or the text `icon.1`
@@ -583,19 +647,19 @@ mod tests {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 icon_button(ui, &palette, ("settings", '⚙'), "Settings");
-                icon_button(ui, &palette, ("circle-help", '?'), "Help");
+                dock_toggle(ui, &palette, Side::Left, true, "Left dock");
             });
         });
         let gear = harness.get_by_label("Settings").rect();
-        let help = harness.get_by_label("Help").rect();
-        for square in [gear, help] {
+        let toggle = harness.get_by_label("Left dock").rect();
+        for square in [gear, toggle] {
             assert_eq!(
                 square.size(),
                 egui::Vec2::splat(ICON_HIT_SIZE),
                 "{square:?}"
             );
         }
-        assert_eq!(help.center().x - gear.center().x, ICON_SLOT_WIDTH);
+        assert_eq!(toggle.center().x - gear.center().x, ICON_SLOT_WIDTH);
     }
 
     /// Under the pointer the icon brightens, with nothing painted behind it.
@@ -639,6 +703,80 @@ mod tests {
         let organizer = harness.get_by_label("Organizer").accesskit_node();
         assert_eq!(organizer.toggled(), Some(Toggled::False));
         assert!(organizer.is_disabled());
+    }
+
+    /// A dock toggle for each side, the left and bottom docks shown and
+    /// the right one hidden. A click on one flips its entry in `shown`.
+    fn dock_toggles(shown: Rc<Cell<[bool; 3]>>) -> Harness<'static> {
+        let palette = Theme::Paper.palette();
+        harness(vec2(200.0, TITLE_BAR_HEIGHT), false, move |ui| {
+            ui.horizontal(|ui| {
+                let sides = [
+                    (Side::Left, "Left dock"),
+                    (Side::Bottom, "Bottom dock"),
+                    (Side::Right, "Right dock"),
+                ];
+                let mut now = shown.get();
+                for (i, (side, label)) in sides.into_iter().enumerate() {
+                    if dock_toggle(ui, &palette, side, now[i], label).clicked() {
+                        now[i] = !now[i];
+                    }
+                }
+                shown.set(now);
+            });
+        })
+    }
+
+    #[test]
+    fn a_dock_toggle_is_named_by_its_label_and_says_whether_the_dock_is_shown() {
+        let shown = Rc::new(Cell::new([true, true, false]));
+        let mut harness = dock_toggles(Rc::clone(&shown));
+        let toggled =
+            |harness: &Harness<'_>, label| harness.get_by_label(label).accesskit_node().toggled();
+        assert_eq!(toggled(&harness, "Left dock"), Some(Toggled::True));
+        assert_eq!(toggled(&harness, "Right dock"), Some(Toggled::False));
+        harness.get_by_label("Right dock").click();
+        harness.run();
+        assert_eq!(shown.get(), [true, true, true]);
+        assert_eq!(toggled(&harness, "Right dock"), Some(Toggled::True));
+    }
+
+    /// The glyph's strip is filled while its dock is shown, and only its
+    /// inner edge is drawn while it is hidden.
+    #[test]
+    fn a_dock_toggle_fills_its_strip_only_while_the_dock_is_shown() {
+        let palette = Theme::Paper.palette();
+        let icon_colours = [palette.icon_active, palette.icon_inactive];
+        let filled = |shown: [bool; 3]| {
+            let harness = dock_toggles(Rc::new(Cell::new(shown)));
+            harness
+                .output()
+                .shapes
+                .iter()
+                .filter(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(rect) => icon_colours.contains(&rect.fill),
+                    _ => false,
+                })
+                .count()
+        };
+        assert_eq!(filled([true, true, false]), 2);
+        assert_eq!(filled([false, false, false]), 0);
+        assert_eq!(filled([true, true, true]), 3);
+    }
+
+    /// Each strip runs along its own side of the window outline.
+    #[test]
+    fn the_dock_glyph_marks_the_dock_s_side() {
+        let centre = pos2(100.0, 100.0);
+        let (window, left) = dock_glyph(centre, Side::Left);
+        assert_eq!(window, Rect::from_center_size(centre, vec2(15.0, 12.0)));
+        let column = |x: f32| Rect::from_x_y_ranges(x..=x + 5.0, window.y_range());
+        assert_eq!(left, column(window.left()));
+        let (_, right) = dock_glyph(centre, Side::Right);
+        assert_eq!(right, column(window.right() - 5.0));
+        let (_, bottom) = dock_glyph(centre, Side::Bottom);
+        let floor = window.bottom() - 4.0..=window.bottom();
+        assert_eq!(bottom, Rect::from_x_y_ranges(window.x_range(), floor));
     }
 
     /// A window 400 × 300 pt with nothing in it but the resize strips.
