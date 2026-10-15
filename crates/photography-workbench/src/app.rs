@@ -37,7 +37,7 @@ pub struct PhotographyWorkbenchApp {
     resolved_theme: Option<Theme>,
     /// The mode the window shows, saved between runs.
     mode: Mode,
-    /// Which docks are shown.
+    /// Which docks are shown, saved between runs.
     docks: Docks,
     /// How Library shows a folder's photos, saved between runs.
     view: View,
@@ -76,7 +76,7 @@ impl PhotographyWorkbenchApp {
     pub const MIN_WINDOW: egui::Vec2 = egui::vec2(1280.0, 800.0);
 
     /// Called once, before the first frame. Installs the fonts and the
-    /// style, and restores the saved theme choice, mode and view;
+    /// style, and restores the saved theme choice, mode, docks and view;
     /// with none saved, or an unreadable one, takes the default.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         fonts::install(&cc.egui_ctx);
@@ -93,6 +93,7 @@ impl PhotographyWorkbenchApp {
         let mut app = Self {
             theme,
             mode,
+            docks: Docks::restore(cc.storage),
             view,
             mac_window_buttons: measure_mac_window_buttons(cc),
             ..Self::default()
@@ -157,7 +158,8 @@ impl PhotographyWorkbenchApp {
 
     /// The title bar's contents: the app's icon (except on macOS) and the
     /// mode switcher at the left, past the space macOS's window buttons
-    /// take, and the window controls and the settings gear at the right.
+    /// take, and the window controls, the toggles for the mode's docks and
+    /// the settings gear at the right.
     /// The icon opens About; on macOS, About belongs in the app menu at the
     /// top of the screen, and an icon beside the system's window buttons
     /// would look out of place. The whole bar drags the window, so it is
@@ -176,6 +178,7 @@ impl PhotographyWorkbenchApp {
                 // The first icon's square ends 16 points from the window
                 // controls, or from the window's edge on macOS.
                 ui.add_space(10.0);
+                layout::dock_toggles(ui, palette, self.parts(), &mut self.docks);
                 let gear = ("settings", '⚙');
                 if chrome::icon_button(ui, palette, gear, "Settings").clicked() {
                     self.show_settings = true;
@@ -339,6 +342,7 @@ impl eframe::App for PhotographyWorkbenchApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(THEME_KEY, theme::choice_name(self.theme).to_owned());
         storage.set_string(MODE_KEY, self.mode.name().to_owned());
+        self.docks.save(storage);
         storage.set_string(VIEW_KEY, self.view.name().to_owned());
     }
 }
@@ -423,10 +427,19 @@ mod tests {
     /// order, clear of the system's window buttons on macOS, and of the
     /// window controls elsewhere.
     #[test]
-    fn the_title_bar_holds_the_modes_the_gear_and_the_window_controls() {
-        let harness = harness();
+    fn the_title_bar_holds_the_modes_the_gear_the_dock_toggles_and_the_window_controls() {
+        let harness = viewer_harness();
         let mut last = egui::Rect::NOTHING;
-        for name in ["Library", "Organizer", "Develop", "Settings"] {
+        let names = [
+            "Library",
+            "Organizer",
+            "Develop",
+            "Settings",
+            LEFT_TOGGLE,
+            BOTTOM_TOGGLE,
+            RIGHT_TOGGLE,
+        ];
+        for name in names {
             let rect = harness.get_by_label(name).rect();
             assert!(rect.left() >= last.right(), "{name} at {rect:?}");
             assert!(rect.bottom() <= TITLE_BAR_HEIGHT, "{name} at {rect:?}");
@@ -483,6 +496,55 @@ mod tests {
 
         storage.set_string(VIEW_KEY, "Filmstrip".to_owned());
         assert_eq!(harness_from(&storage).state().view, View::Grid);
+    }
+
+    /// The title bar's toggle for each dock.
+    const LEFT_TOGGLE: &str = "Show or hide the left dock";
+    const BOTTOM_TOGGLE: &str = "Show or hide the filmstrip";
+    const RIGHT_TOGGLE: &str = "Show or hide the right dock";
+
+    /// A dock toggle hides its dock, and shows it again, and says which.
+    #[test]
+    fn a_dock_toggle_hides_and_shows_its_dock() {
+        let mut harness = viewer_harness();
+        let info = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            harness.query_all_by_label("No photo selected").count()
+        };
+        assert_eq!(info(&harness), 1);
+        harness.get_by_label(RIGHT_TOGGLE).click();
+        harness.run();
+        assert_eq!(info(&harness), 0);
+        let toggle = harness.get_by_label(RIGHT_TOGGLE).accesskit_node();
+        assert_eq!(toggle.toggled(), Some(Toggled::False));
+        harness.get_by_label(RIGHT_TOGGLE).click();
+        harness.run();
+        assert_eq!(info(&harness), 1);
+
+        harness.get_by_label(BOTTOM_TOGGLE).click();
+        harness.get_by_label(LEFT_TOGGLE).click();
+        harness.run();
+        let docks = harness.state().docks;
+        assert!(!docks.left && !docks.bottom && docks.right, "{docks:?}");
+    }
+
+    /// Which docks are shown is saved, and restored on the next run. A
+    /// dock with no state saved, or one that cannot be read, is shown.
+    #[test]
+    fn the_docks_are_saved_and_restored() {
+        let mut storage = MemoryStorage::default();
+        let mut harness = harness();
+        let docks = Docks {
+            left: false,
+            right: true,
+            bottom: false,
+        };
+        harness.state_mut().docks = docks;
+        harness.state_mut().save(&mut storage);
+        assert_eq!(harness_from(&storage).state().docks, docks);
+
+        storage.set_string("show_left_dock", "no".to_owned());
+        storage.remove_string("show_bottom_dock");
+        assert_eq!(harness_from(&storage).state().docks, Docks::default());
     }
 
     #[test]
@@ -661,13 +723,16 @@ mod tests {
     }
 
     /// The bottom dock, the filmstrip's, is 142 points high under the
-    /// viewer. The grid has none: the centre runs down to the toolbar.
+    /// viewer. The grid has neither it nor its toggle: the centre runs down
+    /// to the toolbar.
     #[test]
     fn the_filmstrip_comes_with_the_viewer_only() {
         let mut harness = viewer_harness();
         assert_eq!(panel(&harness, "bottom_dock").height(), 142.0);
+        harness.get_by_label(BOTTOM_TOGGLE);
         harness.get_by_label("Thumbnail grid").click();
         harness.run();
+        assert!(harness.query_by_label(BOTTOM_TOGGLE).is_none());
         let centre = harness.get_by_label("No folder open").rect();
         let below = panel(&harness, "toolbar").top() - centre.bottom();
         assert!((0.0..20.0).contains(&below), "{below}");

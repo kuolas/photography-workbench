@@ -29,9 +29,10 @@ Nothing has been released yet.
 - In Library, docks surround the centre of the window: one on the left
   for folders and one on the right for a photo's information, each
   resized by dragging its edge, and, with the viewer, one along the
-  bottom for the filmstrip. A bar of buttons along the right edge picks
-  what the right dock shows. The docks are empty so far: the right one
-  says no photo is selected.
+  bottom for the filmstrip. Each is shown or hidden from the title bar;
+  which are shown is remembered between runs. A bar of buttons along the
+  right edge picks what the right dock shows. The docks are empty so
+  far: the right one says no photo is selected.
 - In Library, two buttons on a toolbar under the centre choose how the
   centre shows a folder's photos: as a grid of thumbnails, or one at a
   time in a viewer. The choice is remembered between runs.
