@@ -17,7 +17,7 @@ never:
 
 | Crate | Holds | May depend on |
 |---|---|---|
-| `crates/catalog` | the photos on disk: the folder tree, a folder's photo list, the current photo. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
+| `crates/catalog` | the photos on disk: so far a folder's photo list and its current photo | `raw-files`; never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the style, the typeface, the icons, the parts of the title bar, the action bars, the docks, the toolbar, the dialogs' frame, the About dialog, and the keyboard shortcuts' chords and reference. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
 | `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | any other crate here, and any external one |
@@ -68,11 +68,25 @@ Paths are relative to `crates/desktop-ui`:
 | `src/toolbar.rs` | the toolbar, the fixed row of controls under the window's centre: filled like the docks and marked off from the centre by a line, with controls running from both its ends, and its buttons, which look like an action bar's, smaller, and name in their tooltips the chord that does what they do | `egui`, its own `action_bar` and `theme` |
 | `assets/fonts/` | Inter's regular and semibold weights, from the font's own release, and its licence, the SIL Open Font License | — |
 
-### catalog and previews
+### catalog
 
-Both are empty so far: each `src/lib.rs` holds only the crate's
-description. They have no GUI dependency, so their tests will run on a
-machine with no display.
+The catalog reads the disk but starts no thread of its own: whoever
+calls it decides where the waiting happens. It has no GUI dependency, so
+its tests run on a machine with no display, over temporary folders.
+Paths are relative to `crates/catalog`:
+
+| File | Holds | May depend on |
+|---|---|---|
+| `src/lib.rs` | the library root | its own modules |
+| `src/photos.rs` | `PhotoList`, a folder's photos in natural order of their names, read from disk, and the current one, which there is exactly when the list is not empty and which moves by a step, to an index or to either end, stopping at the ends; `Photo`, a photo's file and its `Kind`, a raw file of one of the formats raw-files reads or a JPEG, told by the extension alone | `raw-files`, its own `entry` and `natural` |
+| `src/entry.rs` | which entries of a folder the catalog shows, and whether each is a file or a folder once a symbolic link is followed: not those whose name begins with a dot, nor on macOS and Windows those the system flags hidden, nor a broken link, nor anything that is neither a file nor a folder | — |
+| `src/natural.rs` | natural order for file and folder names: numbers by their value (`DSC_2` before `DSC_10`), letters whatever their case, and a fixed order for names alike by those rules, so a folder lists the same whatever order the system gave its entries in | — |
+
+### previews
+
+Empty so far: its `src/lib.rs` holds only the crate's description. It
+has no GUI dependency, so its tests will run on a machine with no
+display.
 
 ### How it fits together
 
@@ -146,8 +160,9 @@ which resets those settings.
 Choices that shape the code still to come, such as rating storage, are open
 — see [ROADMAP.md](ROADMAP.md#open-questions).
 
-**Decided, not yet built.** The first release's work fills `catalog`
-and `previews`, below the GUI-free line, and builds the window on them
+**Decided, not yet built.** The first release's work fills the rest of
+`catalog` and all of `previews`, below the GUI-free line, and builds the
+window on them
 ([ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)).
 This file is rewritten with each of those changes, in the same pull request.
 
