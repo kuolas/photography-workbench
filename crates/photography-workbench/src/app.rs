@@ -5,6 +5,7 @@
 
 use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
 use desktop_ui::icons;
+use desktop_ui::style;
 use desktop_ui::theme::{self, Theme};
 
 use crate::mode::Mode;
@@ -43,11 +44,12 @@ impl PhotographyWorkbenchApp {
     /// culls on. Every layout is designed and tested at this size (ADR010).
     pub const MIN_WINDOW: egui::Vec2 = egui::vec2(1280.0, 800.0);
 
-    /// Called once, before the first frame. Installs the icon font and
-    /// restores the saved theme choice and mode; with none saved, or an
-    /// unreadable one, takes the default.
+    /// Called once, before the first frame. Installs the icon font and the
+    /// style, and restores the saved theme choice and mode; with none
+    /// saved, or an unreadable one, takes the default.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         icons::install(&cc.egui_ctx);
+        style::install(&cc.egui_ctx);
         let saved = |key| cc.storage.and_then(|storage| storage.get_string(key));
         let theme =
             saved(THEME_KEY).and_then(|name| Theme::ALL.into_iter().find(|t| t.name() == name));
@@ -366,6 +368,13 @@ mod tests {
         assert!(icons::resolves("x"));
         let (glyph, font) = icons::glyph("x", 14.0, '?');
         assert!(harness.ctx.fonts_mut(|fonts| fonts.has_glyph(&font, glyph)));
+    }
+
+    #[test]
+    fn the_style_is_installed_at_start() {
+        let harness = harness();
+        let padding = harness.ctx.global_style().spacing.button_padding;
+        assert_eq!(padding, egui::vec2(10.0, 6.0));
     }
 
     #[test]
