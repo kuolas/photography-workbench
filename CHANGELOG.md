@@ -20,6 +20,9 @@ Nothing has been released yet.
   which offers Paper, Graphite, Nexus and Dark themes, plus System, which
   follows the OS (Paper when it is light, Graphite otherwise); the window
   size and theme are remembered between runs.
+- An About dialog shows the app's version, copyright and licence, and
+  links to its home page. On Windows and Linux the app's icon at the left
+  of the title bar opens it.
 - The title bar has a mode switcher, for the app's three modes: Library,
   where photos are browsed and culled, and Organizer and Develop, which are
   shown disabled until a later release. The mode is remembered between runs.

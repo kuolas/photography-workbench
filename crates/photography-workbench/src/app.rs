@@ -32,6 +32,11 @@ pub struct PhotographyWorkbenchApp {
     mode: Mode,
     /// Whether the Settings dialog is open.
     show_settings: bool,
+    /// Whether the About dialog is open.
+    show_about: bool,
+    /// [`Self::icon`] as a texture, for the title bar and About; made the
+    /// first time one of them is shown.
+    icon_texture: Option<egui::TextureHandle>,
     /// The width of macOS's window buttons with their margins, measured at
     /// start-up, for the title bar to start past. `None` on other systems,
     /// or when the window could not be measured.
@@ -41,6 +46,18 @@ pub struct PhotographyWorkbenchApp {
 impl PhotographyWorkbenchApp {
     /// The name shown in the title bar.
     pub const NAME: &'static str = "Photography Workbench";
+
+    /// What the app is for, in a line, as About shows it.
+    pub const TAGLINE: &'static str = "A fast desktop app for culling photos";
+
+    /// The copyright notice About shows.
+    pub const COPYRIGHT: &'static str =
+        "Copyright (C) 2026 Alvaro Kuolas and the Photography Workbench contributors";
+
+    /// The licence, as About states it, with the notice that the GPL asks an
+    /// interactive program to show.
+    pub const LICENCE: &'static str = "Free software under the GNU General Public License, \
+        version 3 or later. It comes with absolutely no warranty.";
 
     /// The smallest the window can be, in points, and its size on the first
     /// run: a handheld's 1280 × 800 screen, the smallest a photographer
@@ -84,6 +101,24 @@ impl PhotographyWorkbenchApp {
         eframe::icon_data::from_png_bytes(png).expect("the icons in assets/ are valid PNGs")
     }
 
+    /// [`Self::icon`] as a texture, made the first time it is asked for.
+    fn icon_texture(&mut self, ctx: &egui::Context) -> egui::TextureHandle {
+        self.icon_texture
+            .get_or_insert_with(|| {
+                let icon = Self::icon();
+                let size = [icon.width as usize, icon.height as usize];
+                let image = egui::ColorImage::from_rgba_unmultiplied(size, &icon.rgba);
+                // Mipmaps, so the icon stays smooth drawn far smaller than
+                // it is.
+                let options = egui::TextureOptions {
+                    mipmap_mode: Some(egui::TextureFilter::Linear),
+                    ..egui::TextureOptions::LINEAR
+                };
+                ctx.load_texture("app_icon", image, options)
+            })
+            .clone()
+    }
+
     /// Bring egui in line with the theme choice. Sets egui's theme
     /// preference to the choice's (see [`theme::egui_preference`]) every
     /// frame. Resolves the choice against the OS light/dark
@@ -105,9 +140,12 @@ impl PhotographyWorkbenchApp {
         true
     }
 
-    /// The title bar's contents: the mode switcher and the menus at the
-    /// left, past the space macOS's window buttons take, and the window
-    /// controls and the settings gear at the right.
+    /// The title bar's contents: the app's icon (except on macOS), the mode
+    /// switcher and the menus at the left, past the space macOS's window
+    /// buttons take, and the window controls and the settings gear at the
+    /// right. The icon opens About; on macOS, About belongs in the app menu
+    /// at the top of the screen, and an icon beside the system's window
+    /// buttons would look out of place.
     /// The whole bar drags the window, so it is made a drag region before
     /// anything is put on it.
     fn title_bar(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
@@ -136,12 +174,28 @@ impl PhotographyWorkbenchApp {
             |ui| {
                 let pad = chrome::title_bar_left_pad(ui.ctx(), self.mac_window_buttons);
                 ui.add_space(pad);
+                if !cfg!(target_os = "macos") {
+                    self.title_bar_icon(ui);
+                    ui.add_space(6.0);
+                }
                 // The menus take the rest of the bar's width, so they come
                 // last.
                 self.mode_switcher(ui);
                 self.menus(ui);
             },
         );
+    }
+
+    /// The app's icon, 20 points square, which opens About.
+    fn title_bar_icon(&mut self, ui: &mut egui::Ui) {
+        let about = format!("About {}", Self::NAME);
+        let icon = egui::Image::new(&self.icon_texture(ui.ctx()))
+            .fit_to_exact_size(egui::Vec2::splat(20.0))
+            .sense(egui::Sense::click())
+            .alt_text(&about);
+        if ui.add(icon).on_hover_text(about).clicked() {
+            self.show_about = true;
+        }
     }
 
     /// A button per mode, the current one selected. A mode not built yet
@@ -222,6 +276,12 @@ impl eframe::App for PhotographyWorkbenchApp {
         // click itself makes egui run.
         if self.show_settings && dialogs::settings(ui.ctx(), &mut self.theme) {
             self.show_settings = false;
+        }
+        if self.show_about {
+            let icon = self.icon_texture(ui.ctx());
+            if dialogs::about(ui.ctx(), &icon) {
+                self.show_about = false;
+            }
         }
     }
 
@@ -345,6 +405,50 @@ mod tests {
         let mut storage = MemoryStorage::default();
         harness.state_mut().save(&mut storage);
         assert_eq!(storage.get_string(THEME_KEY).as_deref(), Some("Nexus"));
+    }
+
+    /// The icon on the title bar opens About, except on macOS, where About
+    /// belongs in the app menu and the bar has no icon.
+    #[test]
+    fn the_title_bar_icon_opens_about_except_on_macos() {
+        let mut harness = harness();
+        let about = "About Photography Workbench";
+        let icon = harness.query_by_label(about);
+        assert_eq!(icon.is_some(), !cfg!(target_os = "macos"));
+        let Some(icon) = icon else { return };
+        let rect = icon.rect();
+        assert!(rect.bottom() <= TITLE_BAR_HEIGHT, "{rect:?}");
+        assert!(rect.right() <= harness.get_by_label("Library").rect().left());
+        icon.click();
+        harness.run();
+        harness.get_by_label(PhotographyWorkbenchApp::TAGLINE);
+    }
+
+    /// The icon itself, drawn on any system: it is named for About, and a
+    /// click on it opens About.
+    #[test]
+    fn a_click_on_the_icon_opens_about() {
+        let mut harness = Harness::builder().build_ui_state(
+            |ui, app: &mut PhotographyWorkbenchApp| app.title_bar_icon(ui),
+            PhotographyWorkbenchApp::default(),
+        );
+        harness.get_by_label("About Photography Workbench").click();
+        harness.run();
+        assert!(harness.state().show_about);
+    }
+
+    #[test]
+    fn about_shows_the_version_licence_and_home_page() {
+        let mut harness = harness();
+        harness.state_mut().show_about = true;
+        harness.run();
+        harness.get_by_label(&format!("Version {}", env!("CARGO_PKG_VERSION")));
+        harness.get_by_label(PhotographyWorkbenchApp::COPYRIGHT);
+        harness.get_by_label(PhotographyWorkbenchApp::LICENCE);
+        harness.get_by_label(env!("CARGO_PKG_REPOSITORY"));
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert!(!harness.state().show_about);
     }
 
     #[test]
