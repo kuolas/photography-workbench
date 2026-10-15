@@ -192,13 +192,16 @@ impl PhotographyWorkbenchApp {
                 // The first icon's square ends 16 points from the window
                 // controls, or from the window's edge on macOS.
                 ui.add_space(10.0);
-                layout::dock_toggles(ui, palette, self.parts(), &mut self.docks);
+                let (parts, surface) = (self.parts(), self.surface());
+                layout::dock_toggles(ui, palette, parts, surface, &mut self.docks);
                 let [gear, shortcuts] = TITLE_BAR_ICONS;
-                if chrome::icon_button(ui, palette, gear, "Settings", None).clicked() {
+                let chord = keymap::chord_for(surface, Action::Settings);
+                if chrome::icon_button(ui, palette, gear, "Settings", chord).clicked() {
                     self.show_settings = true;
                 }
                 let label = "Keyboard shortcuts";
-                if chrome::icon_button(ui, palette, shortcuts, label, None).clicked() {
+                let chord = keymap::chord_for(surface, Action::Shortcuts);
+                if chrome::icon_button(ui, palette, shortcuts, label, chord).clicked() {
                     self.show_shortcuts = true;
                 }
             },
@@ -301,7 +304,8 @@ impl PhotographyWorkbenchApp {
             Mode::Library => {
                 for view in View::ALL {
                     let selected = self.view == view;
-                    if toolbar::button(ui, palette, view.icon(), view.name(), selected, None)
+                    let chord = keymap::chord_for(self.surface(), Action::View(view));
+                    if toolbar::button(ui, palette, view.icon(), view.name(), selected, chord)
                         .clicked()
                     {
                         self.view = view;
@@ -328,9 +332,16 @@ impl PhotographyWorkbenchApp {
     /// is shown disabled.
     fn mode_switcher(&mut self, ui: &mut egui::Ui) {
         for mode in Mode::ALL {
+            let chord = keymap::chord_for(self.surface(), Action::Mode(mode));
             let response = ui
                 .add_enabled_ui(mode.is_available(), |ui| {
-                    chrome::selectable_button(ui, mode.icon(), mode.name(), self.mode == mode, None)
+                    chrome::selectable_button(
+                        ui,
+                        mode.icon(),
+                        mode.name(),
+                        self.mode == mode,
+                        chord,
+                    )
                 })
                 .inner
                 .on_disabled_hover_text("Coming in a later release");
@@ -445,6 +456,7 @@ mod tests {
     use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
     use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
+    use desktop_ui::keys::Chord;
     use desktop_ui::{icons, theme};
 
     use super::{
@@ -766,6 +778,44 @@ mod tests {
             .map(|viewport| viewport.commands.clone())
             .unwrap_or_default();
         assert!(sent.contains(&ViewportCommand::Close), "{sent:?}");
+    }
+
+    /// Rest the pointer on `label` until a tooltip saying `tip` shows, or
+    /// plainly too many frames go by; whether it showed. egui shows a
+    /// tooltip once the pointer has rested a moment.
+    fn tooltip_shows(
+        harness: &mut Harness<'_, PhotographyWorkbenchApp>,
+        label: &str,
+        tip: &str,
+    ) -> bool {
+        harness.get_by_label(label).hover();
+        (0..20).any(|_| {
+            harness.step();
+            harness.query_by_label(tip).is_some()
+        })
+    }
+
+    /// The title bar's and the toolbar's buttons name in their tooltips
+    /// the chord that does what they do, as this system spells it.
+    #[test]
+    fn a_button_s_tooltip_names_its_chord() {
+        let mut harness = viewer_harness();
+        let chord = |modifiers, key| Chord::new(modifiers, key).label();
+        let ctrl_alt = Modifiers::COMMAND | Modifiers::ALT;
+        let tips = [
+            ("Library", chord(ctrl_alt, Key::Num1)),
+            ("Keyboard shortcuts", chord(Modifiers::COMMAND, Key::Slash)),
+            ("Settings", chord(Modifiers::COMMAND, Key::Comma)),
+            (LEFT_TOGGLE, chord(Modifiers::NONE, Key::F7)),
+            (BOTTOM_TOGGLE, chord(Modifiers::NONE, Key::F6)),
+            (RIGHT_TOGGLE, chord(Modifiers::NONE, Key::F8)),
+            ("Thumbnail grid", chord(Modifiers::NONE, Key::G)),
+            ("Image viewer", chord(Modifiers::NONE, Key::E)),
+        ];
+        for (label, chord) in tips {
+            let tip = format!("{label} ({chord})");
+            assert!(tooltip_shows(&mut harness, label, &tip), "{tip}");
+        }
     }
 
     /// The button beside the gear opens the reference of keyboard
