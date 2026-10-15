@@ -17,7 +17,7 @@ never:
 
 | Crate | Holds | May depend on |
 |---|---|---|
-| `crates/catalog` | the photos on disk: so far a folder's photo list and its current photo | `raw-files`; never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
+| `crates/catalog` | the photos on disk: the folder tree of the home folder and the mounted volumes, and a folder's photo list and its current photo | `raw-files`; never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the style, the typeface, the icons, the parts of the title bar, the action bars, the docks, the toolbar, the dialogs' frame, the About dialog, and the keyboard shortcuts' chords and reference. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
 | `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | any other crate here, and any external one |
@@ -78,8 +78,9 @@ Paths are relative to `crates/catalog`:
 | File | Holds | May depend on |
 |---|---|---|
 | `src/lib.rs` | the library root | its own modules |
+| `src/folders.rs` | the folder tree: its roots, the home folder first and then the mounted volumes in natural order of their names (on macOS the folders in `/Volumes` other than symbolic links, the startup disk among them, and hidden ones; on Linux the mount points in `/media/<user>`, `/run/media/<user>` and `/mnt`, folders on another device than the one they are in, the user named by `USER` or else by the home folder, and a place reached by a link to another read once; on Windows the drives `C:` to `Z:`); a folder's subfolders in natural order of their names, links followed and hidden ones left out; and `FolderTree`, the roots, which folders are expanded and which one is selected, and the listings read so far. The tree reads nothing itself: it tells its caller which expanded folders it can reach have not been listed, a restored tree's whole depth at once, takes their listings back with the requests, and draws its rows from the folders listed so far, each saying whether its folder has subfolders, has none, could not be read or has not been listed. A refresh makes every listing stale, those under way among them, so they are asked for again while the old rows stay until the new ones arrive. New roots drop the listings of the roots that are gone, and refresh the tree when one goes, so a card put back, or another mounted at the same path, is listed again and a late listing of the one taken out is not taken for its own. Collapsing a folder keeps its listing and what is expanded below it; what is saved leaves out a folder below a collapsed one, under no root, or missing from its parent's fresh listing | its own `entry` and `natural` |
 | `src/photos.rs` | `PhotoList`, a folder's photos in natural order of their names, read from disk, and the current one, which there is exactly when the list is not empty and which moves by a step, to an index or to either end, stopping at the ends; `Photo`, a photo's file and its `Kind`, a raw file of one of the formats raw-files reads or a JPEG, told by the extension alone | `raw-files`, its own `entry` and `natural` |
-| `src/entry.rs` | which entries of a folder the catalog shows, and whether each is a file or a folder once a symbolic link is followed: not those whose name begins with a dot, nor on macOS and Windows those the system flags hidden, nor a broken link, nor anything that is neither a file nor a folder | — |
+| `src/entry.rs` | which entries of a folder the catalog shows, and whether each is a file or a folder once a symbolic link is followed: not those whose name begins with a dot, nor on macOS and Windows those the system flags hidden, nor a broken link, nor anything that is neither a file nor a folder. It also tells a link from what it points at, for a listing that leaves links out | — |
 | `src/natural.rs` | natural order for file and folder names: numbers by their value (`DSC_2` before `DSC_10`), letters whatever their case, and a fixed order for names alike by those rules, so a folder lists the same whatever order the system gave its entries in | — |
 
 ### previews
@@ -160,9 +161,9 @@ which resets those settings.
 Choices that shape the code still to come, such as rating storage, are open
 — see [ROADMAP.md](ROADMAP.md#open-questions).
 
-**Decided, not yet built.** The first release's work fills the rest of
-`catalog` and all of `previews`, below the GUI-free line, and builds the
-window on them
+**Decided, not yet built.** `catalog` holds what the first release needs
+of it. The rest of that release's work fills `previews`, below the
+GUI-free line, and builds the window on both
 ([ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)).
 This file is rewritten with each of those changes, in the same pull request.
 
