@@ -7,6 +7,7 @@
 //! `docs/ARCHITECTURE.md`.
 
 mod app;
+mod dialogs;
 mod mode;
 
 pub use app::PhotographyWorkbenchApp;

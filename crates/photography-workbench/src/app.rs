@@ -8,6 +8,7 @@ use desktop_ui::icons;
 use desktop_ui::style;
 use desktop_ui::theme::{self, Theme};
 
+use crate::dialogs;
 use crate::mode::Mode;
 
 /// The [`eframe::Storage`] key the theme choice is saved under, as the
@@ -22,13 +23,15 @@ const MODE_KEY: &str = "mode";
 /// The application state, owned by eframe for the life of the window.
 #[derive(Default)]
 pub struct PhotographyWorkbenchApp {
-    /// The theme chosen in View ▸ Theme, `None` for System, saved between runs.
+    /// The theme chosen in Settings, `None` for System, saved between runs.
     theme: Option<Theme>,
     /// The concrete theme last installed on the context: [`Self::theme`]
     /// resolved against the OS preference. `None` until the first install.
     resolved_theme: Option<Theme>,
     /// The mode the window shows, saved between runs.
     mode: Mode,
+    /// Whether the Settings dialog is open.
+    show_settings: bool,
     /// The width of macOS's window buttons with their margins, measured at
     /// start-up, for the title bar to start past. `None` on other systems,
     /// or when the window could not be measured.
@@ -104,7 +107,7 @@ impl PhotographyWorkbenchApp {
 
     /// The title bar's contents: the mode switcher and the menus at the
     /// left, past the space macOS's window buttons take, and the window
-    /// controls at the right.
+    /// controls and the settings gear at the right.
     /// The whole bar drags the window, so it is made a drag region before
     /// anything is put on it.
     fn title_bar(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
@@ -118,6 +121,11 @@ impl PhotographyWorkbenchApp {
             |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 chrome::window_controls(ui, palette);
+                ui.add_space(8.0);
+                let gear = ("settings", '⚙');
+                if chrome::icon_button(ui, palette, gear, "Settings").clicked() {
+                    self.show_settings = true;
+                }
             },
         );
 
@@ -152,23 +160,13 @@ impl PhotographyWorkbenchApp {
         }
     }
 
-    /// The File and View menus.
+    /// The File menu.
     fn menus(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("Quit").clicked() {
                     ui.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
-            });
-            ui.menu_button("View", |ui| {
-                ui.menu_button("Theme", |ui| {
-                    // The click itself makes egui run another frame,
-                    // whose top installs the new choice.
-                    ui.selectable_value(&mut self.theme, None, "System");
-                    for t in Theme::ALL {
-                        ui.selectable_value(&mut self.theme, Some(t), t.name());
-                    }
-                });
             });
         });
     }
@@ -216,15 +214,19 @@ impl eframe::App for PhotographyWorkbenchApp {
             });
         });
 
-        // Last, so the strips are above everything else.
+        // Above everything but the dialogs.
         chrome::window_resize_handles(ui.ctx());
+
+        // The dialogs come last, above everything else. A theme picked in
+        // Settings is installed at the top of the next frame, which the
+        // click itself makes egui run.
+        if self.show_settings && dialogs::settings(ui.ctx(), &mut self.theme) {
+            self.show_settings = false;
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        storage.set_string(
-            THEME_KEY,
-            self.theme.map_or("System", Theme::name).to_owned(),
-        );
+        storage.set_string(THEME_KEY, theme::choice_name(self.theme).to_owned());
         storage.set_string(MODE_KEY, self.mode.name().to_owned());
     }
 }
@@ -234,14 +236,14 @@ mod tests {
     use std::collections::HashMap;
 
     use eframe::{App as _, Storage as _};
-    use egui::accesskit::Toggled;
+    use egui::accesskit::{Role, Toggled};
     use egui_kittest::Harness;
     use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
     use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
     use desktop_ui::icons;
 
-    use super::{MODE_KEY, Mode, PhotographyWorkbenchApp};
+    use super::{MODE_KEY, Mode, PhotographyWorkbenchApp, THEME_KEY, Theme};
 
     /// Settings kept in memory, in place of eframe's file.
     #[derive(Default)]
@@ -291,10 +293,10 @@ mod tests {
     /// clear of the system's window buttons on macOS, and of the window
     /// controls elsewhere.
     #[test]
-    fn the_title_bar_holds_the_modes_the_menus_and_the_window_controls() {
+    fn the_title_bar_holds_the_modes_the_menu_the_gear_and_the_window_controls() {
         let harness = harness();
         let mut last = egui::Rect::NOTHING;
-        for name in ["Library", "Organizer", "Develop", "File", "View"] {
+        for name in ["Library", "Organizer", "Develop", "File", "Settings"] {
             let rect = harness.get_by_label(name).rect();
             assert!(rect.bottom() <= TITLE_BAR_HEIGHT, "{name} at {rect:?}");
             assert!(
@@ -314,6 +316,35 @@ mod tests {
         if let Some(minimize) = minimize {
             assert!(last.right() < minimize.rect().left(), "{last:?}");
         }
+    }
+
+    #[test]
+    fn the_gear_opens_settings_and_esc_closes_it() {
+        let mut harness = harness();
+        assert!(harness.query_by_label("Theme").is_none());
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_label("Theme");
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert!(harness.query_by_label("Theme").is_none());
+    }
+
+    /// A theme picked in Settings is installed on the next frame, and saved.
+    #[test]
+    fn a_theme_picked_in_settings_is_installed_and_saved() {
+        let mut harness = harness();
+        harness.get_by_label("Settings").click();
+        harness.run();
+        harness.get_by_role(Role::ComboBox).click();
+        harness.run();
+        harness.get_by_label("Nexus").click();
+        harness.run();
+        assert_eq!(harness.state().resolved_theme, Some(Theme::Nexus));
+
+        let mut storage = MemoryStorage::default();
+        harness.state_mut().save(&mut storage);
+        assert_eq!(storage.get_string(THEME_KEY).as_deref(), Some("Nexus"));
     }
 
     #[test]
