@@ -83,16 +83,22 @@ impl Docks {
     /// shown, or else show them all, so one key shows or hides them
     /// together. A dock `layout` does not have is left as it is.
     pub fn toggle(&mut self, layout: Layout, sides: &[Side]) {
-        let has = |side| match side {
-            Side::Left => layout.left_dock,
-            Side::Right => layout.right_dock,
-            Side::Bottom => layout.bottom_dock,
-        };
-        let any_shown = sides.iter().any(|&side| has(side) && *self.shown_mut(side));
+        let any_shown = sides
+            .iter()
+            .any(|&side| layout.has_dock(side) && self.shown(side));
         for &side in sides {
-            if has(side) {
+            if layout.has_dock(side) {
                 *self.shown_mut(side) = !any_shown;
             }
+        }
+    }
+
+    /// Whether the dock on `side` is shown.
+    pub fn shown(self, side: Side) -> bool {
+        match side {
+            Side::Left => self.left,
+            Side::Right => self.right,
+            Side::Bottom => self.bottom,
         }
     }
 

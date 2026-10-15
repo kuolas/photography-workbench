@@ -22,7 +22,7 @@ Nothing has been released yet.
   are remembered between runs.
 - An About dialog shows the app's version, copyright and licence, and
   links to its home page. On Windows and Linux the app's icon at the left
-  of the title bar opens it.
+  of the title bar opens it; on macOS, the app menu.
 - The title bar has a mode switcher, for the app's three modes: Library,
   where photos are browsed and culled, and Organizer and Develop, which are
   shown disabled until a later release. The mode is remembered between runs.
@@ -46,6 +46,11 @@ Nothing has been released yet.
   reference that lists them all, and a button's tooltip names the
   shortcut that does what it does. The shortcuts stand down while a
   dialog is open.
+- On macOS, a menu bar at the top of the screen: About, Settings and
+  Quit in the app menu, the views and the docks in View, the modes in
+  Window, and the reference of keyboard shortcuts in Help. The view, the
+  mode and the docks shown are checked. Its items stand down while a
+  dialog is open, as the shortcuts do.
 - The window opens at 1280 × 800 points the first time and cannot be made
   smaller, so every part of it fits on a handheld's screen.
 - Dragging the title bar moves the window, and double-clicking it maximizes

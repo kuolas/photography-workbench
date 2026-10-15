@@ -263,6 +263,20 @@ pub fn chord_for(surface: Surface, action: Action) -> Option<Chord> {
         .map(|binding| binding.chord)
 }
 
+/// The chord that does `action` wherever the keys apply, for a menu item,
+/// which is there whatever the centre shows. `None` when none does, or the
+/// action does nothing yet.
+pub fn chord_everywhere(action: Action) -> Option<Chord> {
+    BINDINGS
+        .iter()
+        .find(|binding| {
+            binding.action == action
+                && EVERYWHERE.iter().all(|s| binding.surfaces.contains(s))
+                && binding.is_live()
+        })
+        .map(|binding| binding.chord)
+}
+
 /// The reference's sections: a section per group, each listing the
 /// shortcuts that do something, with their chords spelled as this
 /// system spells them.
