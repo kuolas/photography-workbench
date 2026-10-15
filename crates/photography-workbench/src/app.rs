@@ -7,10 +7,16 @@ use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
 use desktop_ui::icons;
 use desktop_ui::theme::{self, Theme};
 
+use crate::mode::Mode;
+
 /// The [`eframe::Storage`] key the theme choice is saved under, as the
 /// theme's [`Theme::name`], or `"System"` for none. The display name is the
 /// saved value, so renaming a theme resets users who chose it to System.
 const THEME_KEY: &str = "theme";
+
+/// The [`eframe::Storage`] key the mode is saved under, as its
+/// [`Mode::name`].
+const MODE_KEY: &str = "mode";
 
 /// The application state, owned by eframe for the life of the window.
 #[derive(Default)]
@@ -20,6 +26,8 @@ pub struct PhotographyWorkbenchApp {
     /// The concrete theme last installed on the context: [`Self::theme`]
     /// resolved against the OS preference. `None` until the first install.
     resolved_theme: Option<Theme>,
+    /// The mode the window shows, saved between runs.
+    mode: Mode,
     /// The width of macOS's window buttons with their margins, measured at
     /// start-up, for the title bar to start past. `None` on other systems,
     /// or when the window could not be measured.
@@ -36,16 +44,19 @@ impl PhotographyWorkbenchApp {
     pub const MIN_WINDOW: egui::Vec2 = egui::vec2(1280.0, 800.0);
 
     /// Called once, before the first frame. Installs the icon font and
-    /// restores the saved theme choice; with none saved, or an unreadable
-    /// one, takes the default.
+    /// restores the saved theme choice and mode; with none saved, or an
+    /// unreadable one, takes the default.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         icons::install(&cc.egui_ctx);
-        let theme = cc
-            .storage
-            .and_then(|storage| storage.get_string(THEME_KEY))
-            .and_then(|name| Theme::ALL.into_iter().find(|t| t.name() == name));
+        let saved = |key| cc.storage.and_then(|storage| storage.get_string(key));
+        let theme =
+            saved(THEME_KEY).and_then(|name| Theme::ALL.into_iter().find(|t| t.name() == name));
+        let mode = saved(MODE_KEY)
+            .and_then(|name| Mode::from_saved(&name))
+            .unwrap_or_default();
         let mut app = Self {
             theme,
+            mode,
             mac_window_buttons: measure_mac_window_buttons(cc),
             ..Self::default()
         };
@@ -89,8 +100,9 @@ impl PhotographyWorkbenchApp {
         true
     }
 
-    /// The title bar's contents: the menus at the left, past the space
-    /// macOS's window buttons take, and the window controls at the right.
+    /// The title bar's contents: the mode switcher and the menus at the
+    /// left, past the space macOS's window buttons take, and the window
+    /// controls at the right.
     /// The whole bar drags the window, so it is made a drag region before
     /// anything is put on it.
     fn title_bar(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
@@ -114,9 +126,28 @@ impl PhotographyWorkbenchApp {
             |ui| {
                 let pad = chrome::title_bar_left_pad(ui.ctx(), self.mac_window_buttons);
                 ui.add_space(pad);
+                // The menus take the rest of the bar's width, so they come
+                // last.
+                self.mode_switcher(ui);
                 self.menus(ui);
             },
         );
+    }
+
+    /// A button per mode, the current one selected. A mode not built yet
+    /// is shown disabled.
+    fn mode_switcher(&mut self, ui: &mut egui::Ui) {
+        for mode in Mode::ALL {
+            let response = ui
+                .add_enabled_ui(mode.is_available(), |ui| {
+                    chrome::selectable_button(ui, mode.icon(), mode.name(), self.mode == mode)
+                })
+                .inner
+                .on_disabled_hover_text("Coming in a later release");
+            if response.clicked() {
+                self.mode = mode;
+            }
+        }
     }
 
     /// The File and View menus.
@@ -192,24 +223,59 @@ impl eframe::App for PhotographyWorkbenchApp {
             THEME_KEY,
             self.theme.map_or("System", Theme::name).to_owned(),
         );
+        storage.set_string(MODE_KEY, self.mode.name().to_owned());
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use eframe::{App as _, Storage as _};
+    use egui::accesskit::Toggled;
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable as _;
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
     use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
     use desktop_ui::icons;
 
-    use super::PhotographyWorkbenchApp;
+    use super::{MODE_KEY, Mode, PhotographyWorkbenchApp};
+
+    /// Settings kept in memory, in place of eframe's file.
+    #[derive(Default)]
+    struct MemoryStorage(HashMap<String, String>);
+
+    impl eframe::Storage for MemoryStorage {
+        fn get_string(&self, key: &str) -> Option<String> {
+            self.0.get(key).cloned()
+        }
+
+        fn set_string(&mut self, key: &str, value: String) {
+            self.0.insert(key.to_owned(), value);
+        }
+
+        fn remove_string(&mut self, key: &str) {
+            self.0.remove(key);
+        }
+
+        fn flush(&mut self) {}
+    }
 
     /// The app, run headless in a window of the smallest size it allows.
     fn harness() -> Harness<'static, PhotographyWorkbenchApp> {
         Harness::builder()
             .with_size(PhotographyWorkbenchApp::MIN_WINDOW)
             .build_eframe(|cc| PhotographyWorkbenchApp::new(cc))
+    }
+
+    /// [`harness`], with the settings in `storage` saved by an earlier run.
+    fn harness_from(storage: &MemoryStorage) -> Harness<'_, PhotographyWorkbenchApp> {
+        Harness::builder()
+            .with_size(PhotographyWorkbenchApp::MIN_WINDOW)
+            .build_eframe(|cc| {
+                cc.storage = Some(storage);
+                PhotographyWorkbenchApp::new(cc)
+            })
     }
 
     #[test]
@@ -219,22 +285,79 @@ mod tests {
         harness.get_by_label("No folder open");
     }
 
+    /// At the window's smallest, everything on the title bar fits on it,
+    /// clear of the system's window buttons on macOS, and of the window
+    /// controls elsewhere.
     #[test]
-    fn the_title_bar_holds_the_menus_and_the_window_controls() {
+    fn the_title_bar_holds_the_modes_the_menus_and_the_window_controls() {
         let harness = harness();
-        for menu in ["File", "View"] {
-            let rect = harness.get_by_label(menu).rect();
-            assert!(rect.bottom() <= TITLE_BAR_HEIGHT, "{menu} at {rect:?}");
-            // On macOS, clear of the system's window buttons.
+        let mut last = egui::Rect::NOTHING;
+        for name in ["Library", "Organizer", "Develop", "File", "View"] {
+            let rect = harness.get_by_label(name).rect();
+            assert!(rect.bottom() <= TITLE_BAR_HEIGHT, "{name} at {rect:?}");
+            assert!(
+                rect.right() <= PhotographyWorkbenchApp::MIN_WINDOW.x,
+                "{name} at {rect:?}"
+            );
             if cfg!(target_os = "macos") {
                 assert!(
                     rect.left() >= MAC_WINDOW_BUTTONS_WIDTH,
-                    "{menu} at {rect:?}"
+                    "{name} at {rect:?}"
                 );
             }
+            last = rect;
         }
-        let close = harness.query_by_label("Close");
-        assert_eq!(close.is_some(), !cfg!(target_os = "macos"));
+        let minimize = harness.query_by_label("Minimize");
+        assert_eq!(minimize.is_some(), !cfg!(target_os = "macos"));
+        if let Some(minimize) = minimize {
+            assert!(last.right() < minimize.rect().left(), "{last:?}");
+        }
+    }
+
+    #[test]
+    fn the_mode_switcher_offers_library_and_shows_the_others_disabled() {
+        let harness = harness();
+        let library = harness.get_by_label("Library").accesskit_node();
+        assert_eq!(library.toggled(), Some(Toggled::True));
+        assert!(!library.is_disabled());
+        for name in ["Organizer", "Develop"] {
+            let mode = harness.get_by_label(name).accesskit_node();
+            assert_eq!(mode.toggled(), Some(Toggled::False), "{name}");
+            assert!(mode.is_disabled(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_mode_not_built_yet_says_so_under_the_pointer() {
+        let mut harness = harness();
+        assert!(
+            harness
+                .query_by_label("Coming in a later release")
+                .is_none()
+        );
+        harness.get_by_label("Organizer").hover();
+        // egui shows a tooltip once the pointer has rested on the button for
+        // a moment, so give it frames until it does, or plainly too many.
+        let shown = (0..20).any(|_| {
+            harness.step();
+            harness
+                .query_by_label("Coming in a later release")
+                .is_some()
+        });
+        assert!(shown, "no tooltip after 20 frames");
+    }
+
+    /// The mode is saved, and restored on the next run, unless it is one
+    /// not built yet, which starts in the default mode.
+    #[test]
+    fn the_mode_is_saved_and_restored_when_available() {
+        let mut storage = MemoryStorage::default();
+        harness().state_mut().save(&mut storage);
+        assert_eq!(storage.get_string(MODE_KEY).as_deref(), Some("Library"));
+        assert_eq!(harness_from(&storage).state().mode, Mode::Library);
+
+        storage.set_string(MODE_KEY, "Organizer".to_owned());
+        assert_eq!(harness_from(&storage).state().mode, Mode::Library);
     }
 
     #[test]
