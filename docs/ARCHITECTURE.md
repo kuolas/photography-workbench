@@ -82,7 +82,9 @@ which holds the app's icon (which opens About; not on macOS), the mode
 switcher, the settings gear, a toggle for each of the mode's docks and
 the window controls. Only Library is
 built: the switcher shows Organizer and Develop disabled. Below the
-title bar the panels are laid out in an order that gives each its place:
+title bar the panels
+([ADR014](architecture-decisions/adr014-the-parts-of-the-window.md))
+are laid out in an order that gives each its place:
 first the tool rail, so it takes the window's right edge below the title
 bar; then the side docks, the right one inside the tool rail, so they
 run down to the window's bottom; then the toolbar along the bottom

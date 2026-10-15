@@ -15,10 +15,11 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR007](adr007-egui-cross-platform.md) | egui, on macOS, Linux and Windows | Accepted |
 | [ADR008](adr008-lints-and-release-profile.md) | No unsafe code, a few extra lints, an optimized release build | Accepted |
 | [ADR009](adr009-raw-files-reads-raw-files.md) | raw-files reads RAW files | Accepted |
-| [ADR010](adr010-modes-and-the-window.md) | Three modes in one window with its own title bar | Accepted |
+| [ADR010](adr010-modes-and-the-window.md) | Three modes in one window with its own title bar | Accepted; its parts of the window superseded by [ADR014](adr014-the-parts-of-the-window.md) |
 | [ADR011](adr011-views-navigation-and-the-keymap.md) | Views, navigation and the keymap | Accepted |
 | [ADR012](adr012-version-numbers.md) | Version numbers | Accepted |
 | [ADR013](adr013-a-workspace-of-small-crates.md) | A workspace of small crates | Accepted |
+| [ADR014](adr014-the-parts-of-the-window.md) | The parts of the window | Accepted |
 
 ## When to write one
 
