@@ -180,7 +180,7 @@ impl PhotographyWorkbenchApp {
                 ui.add_space(10.0);
                 layout::dock_toggles(ui, palette, self.parts(), &mut self.docks);
                 let gear = ("settings", '⚙');
-                if chrome::icon_button(ui, palette, gear, "Settings").clicked() {
+                if chrome::icon_button(ui, palette, gear, "Settings", None).clicked() {
                     self.show_settings = true;
                 }
             },
@@ -221,7 +221,9 @@ impl PhotographyWorkbenchApp {
             Mode::Library => {
                 for view in View::ALL {
                     let selected = self.view == view;
-                    if toolbar::button(ui, palette, view.icon(), view.name(), selected).clicked() {
+                    if toolbar::button(ui, palette, view.icon(), view.name(), selected, None)
+                        .clicked()
+                    {
                         self.view = view;
                     }
                 }
@@ -248,7 +250,7 @@ impl PhotographyWorkbenchApp {
         for mode in Mode::ALL {
             let response = ui
                 .add_enabled_ui(mode.is_available(), |ui| {
-                    chrome::selectable_button(ui, mode.icon(), mode.name(), self.mode == mode)
+                    chrome::selectable_button(ui, mode.icon(), mode.name(), self.mode == mode, None)
                 })
                 .inner
                 .on_disabled_hover_text("Coming in a later release");

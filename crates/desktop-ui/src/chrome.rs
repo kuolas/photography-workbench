@@ -21,6 +21,7 @@ use egui::{
 
 use crate::dock::Side;
 use crate::icons;
+use crate::keys::{self, Chord};
 use crate::theme::Palette;
 
 /// The height of the title bar, and of the window controls, which fill it.
@@ -137,13 +138,15 @@ pub fn title_bar_drag_region(ui: &mut egui::Ui, bar: Rect) {
 
 /// A title-bar button showing only the Lucide icon `icon.0`, or the
 /// character `icon.1` if the name does not resolve. The icon brightens
-/// under the pointer, with nothing drawn behind it. `label` is its tooltip
-/// and the name screen readers and the tests know it by.
+/// under the pointer, with nothing drawn behind it. `label` is the name
+/// screen readers and the tests know it by, and its tooltip, with the
+/// `chord` that does the same, if any ([`keys::tooltip`]).
 pub fn icon_button(
     ui: &mut egui::Ui,
     palette: &Palette,
     icon: (&str, char),
     label: &str,
+    chord: Option<Chord>,
 ) -> egui::Response {
     let response = title_icon(ui, label, None);
     let colour = if response.hovered() {
@@ -155,7 +158,7 @@ pub fn icon_button(
     let centre = response.rect.center();
     ui.painter()
         .text(centre, Align2::CENTER_CENTER, glyph, font, colour);
-    response.on_hover_text(label)
+    response.on_hover_text(keys::tooltip(label, chord))
 }
 
 /// The place of an [`icon_button`] or a [`dock_toggle`] on the bar: an
@@ -178,14 +181,16 @@ fn title_icon(ui: &mut egui::Ui, label: &str, selected: Option<bool>) -> egui::R
 /// A title-bar button that shows or hides the dock on `side`: a small
 /// window whose strip on that side is filled while the dock is `shown`,
 /// and only marked off by a line while it is hidden. It brightens while
-/// the dock is shown and under the pointer. `label` is its tooltip and the
-/// name screen readers and the tests know it by.
+/// the dock is shown and under the pointer. `label` is the name screen
+/// readers and the tests know it by, and its tooltip, with the `chord`
+/// that does the same, if any ([`keys::tooltip`]).
 pub fn dock_toggle(
     ui: &mut egui::Ui,
     palette: &Palette,
     side: Side,
     shown: bool,
     label: &str,
+    chord: Option<Chord>,
 ) -> egui::Response {
     let response = title_icon(ui, label, Some(shown));
     let colour = if shown || response.hovered() {
@@ -207,7 +212,7 @@ pub fn dock_toggle(
         };
         painter.line_segment(edge, stroke);
     }
-    response.on_hover_text(label)
+    response.on_hover_text(keys::tooltip(label, chord))
 }
 
 /// The glyph of a [`dock_toggle`] centred on `centre`: the outline of a
@@ -235,13 +240,16 @@ fn dock_glyph(centre: egui::Pos2, side: Side) -> (Rect, Rect) {
 /// A title-bar button with the Lucide icon `icon.0` (or the text `icon.1`
 /// if the name does not resolve) before the word `label`, shown selected
 /// when `selected`: one of a row of buttons choosing one of several
-/// things. Screen readers and the tests know it by `label` alone. Disabled
-/// when added to a disabled `ui`.
+/// things. Screen readers and the tests know it by `label` alone. With a
+/// `chord` that does the same, its tooltip names it ([`keys::tooltip`]);
+/// without, it has none, as its word says what it is. Disabled when added
+/// to a disabled `ui`.
 pub fn selectable_button(
     ui: &mut egui::Ui,
     icon: (&str, &str),
     label: &str,
     selected: bool,
+    chord: Option<Chord>,
 ) -> egui::Response {
     let text = icons::labeled(ui, icon.0, icon.1, label);
     let response = ui.add(egui::Button::new(text).selected(selected));
@@ -254,7 +262,10 @@ pub fn selectable_button(
             label,
         )
     });
-    response
+    match chord {
+        Some(chord) => response.on_hover_text(keys::tooltip(label, Some(chord))),
+        None => response,
+    }
 }
 
 /// The close, maximize (or restore) and minimize buttons, in a
@@ -415,7 +426,7 @@ mod tests {
     use std::rc::Rc;
 
     use egui::accesskit::Toggled;
-    use egui::{Event, Modifiers, PointerButton, Pos2, ViewportId};
+    use egui::{Event, Key, Modifiers, PointerButton, Pos2, ViewportId};
     use egui_kittest::Harness;
     use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
@@ -621,7 +632,7 @@ mod tests {
         let counted = Rc::clone(&clicks);
         let palette = Theme::Paper.palette();
         let mut harness = harness(vec2(200.0, TITLE_BAR_HEIGHT), false, move |ui| {
-            if icon_button(ui, &palette, ("settings", '⚙'), "Settings").clicked() {
+            if icon_button(ui, &palette, ("settings", '⚙'), "Settings", None).clicked() {
                 counted.set(counted.get() + 1);
             }
         });
@@ -634,7 +645,7 @@ mod tests {
     fn lone_icon_button() -> Harness<'static> {
         let palette = Theme::Paper.palette();
         harness(vec2(120.0, TITLE_BAR_HEIGHT), false, move |ui| {
-            icon_button(ui, &palette, ("settings", '⚙'), "Settings");
+            icon_button(ui, &palette, ("settings", '⚙'), "Settings", None);
         })
     }
 
@@ -646,8 +657,8 @@ mod tests {
         let harness = harness(vec2(200.0, TITLE_BAR_HEIGHT), false, move |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                icon_button(ui, &palette, ("settings", '⚙'), "Settings");
-                dock_toggle(ui, &palette, Side::Left, true, "Left dock");
+                icon_button(ui, &palette, ("settings", '⚙'), "Settings", None);
+                dock_toggle(ui, &palette, Side::Left, true, "Left dock", None);
             });
         });
         let gear = harness.get_by_label("Settings").rect();
@@ -691,9 +702,9 @@ mod tests {
     fn a_selectable_button_is_named_by_its_word_and_says_whether_it_is_selected() {
         let harness = harness(vec2(400.0, TITLE_BAR_HEIGHT), false, |ui| {
             ui.horizontal(|ui| {
-                selectable_button(ui, ("images", "▦"), "Library", true);
+                selectable_button(ui, ("images", "▦"), "Library", true, None);
                 ui.add_enabled_ui(false, |ui| {
-                    selectable_button(ui, ("import", "⇩"), "Organizer", false);
+                    selectable_button(ui, ("import", "⇩"), "Organizer", false, None);
                 });
             });
         });
@@ -703,6 +714,55 @@ mod tests {
         let organizer = harness.get_by_label("Organizer").accesskit_node();
         assert_eq!(organizer.toggled(), Some(Toggled::False));
         assert!(organizer.is_disabled());
+    }
+
+    /// Rest the pointer on `label` until a tooltip saying `tip` shows, or
+    /// plainly too many frames go by; whether it showed. egui shows a
+    /// tooltip once the pointer has rested a moment.
+    fn tooltip_shows(harness: &mut Harness<'_>, label: &str, tip: &str) -> bool {
+        harness.get_by_label(label).hover();
+        (0..20).any(|_| {
+            harness.step();
+            harness.query_by_label(tip).is_some()
+        })
+    }
+
+    /// A button with a chord names it in its tooltip, and keeps its label
+    /// as its name.
+    #[test]
+    fn a_button_s_tooltip_names_its_chord() {
+        let palette = Theme::Paper.palette();
+        let chord = |key| Some(Chord::new(Modifiers::NONE, key));
+        let mut harness = harness(vec2(400.0, TITLE_BAR_HEIGHT), false, move |ui| {
+            ui.horizontal(|ui| {
+                icon_button(ui, &palette, ("settings", '⚙'), "Settings", chord(Key::F1));
+                dock_toggle(ui, &palette, Side::Left, true, "Left", chord(Key::F7));
+                selectable_button(ui, ("images", "▦"), "Library", true, chord(Key::G));
+            });
+        });
+        let tips = [
+            ("Settings", "Settings (F1)"),
+            ("Left", "Left (F7)"),
+            ("Library", "Library (G)"),
+        ];
+        for (label, tip) in tips {
+            assert!(tooltip_shows(&mut harness, label, tip), "{label}");
+        }
+    }
+
+    /// A selectable button's word says what it is, so without a chord it
+    /// has no tooltip to repeat it.
+    #[test]
+    fn a_selectable_button_without_a_chord_has_no_tooltip() {
+        let mut harness = harness(vec2(400.0, TITLE_BAR_HEIGHT), false, |ui| {
+            selectable_button(ui, ("images", "▦"), "Library", true, None);
+        });
+        harness.get_by_label("Library").hover();
+        for _ in 0..20 {
+            harness.step();
+        }
+        // A tooltip would be a second thing named "Library".
+        assert_eq!(harness.query_all_by_label("Library").count(), 1);
     }
 
     /// A dock toggle for each side, the left and bottom docks shown and
@@ -718,7 +778,7 @@ mod tests {
                 ];
                 let mut now = shown.get();
                 for (i, (side, label)) in sides.into_iter().enumerate() {
-                    if dock_toggle(ui, &palette, side, now[i], label).clicked() {
+                    if dock_toggle(ui, &palette, side, now[i], label, None).clicked() {
                         now[i] = !now[i];
                     }
                 }
