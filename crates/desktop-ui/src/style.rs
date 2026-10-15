@@ -4,11 +4,11 @@
 //! come with the theme ([`crate::theme`]).
 //!
 //! The spacing: the room inside buttons, the gaps between widgets, the
-//! height of a control, and the margins of menus and windows. egui's own
-//! suits a compact tool: a button's text sits a point from its edge, and
-//! controls are 18 points high. Parts that are drawn at a size of their
-//! own, such as the window controls and the title bar's icon buttons, keep
-//! it.
+//! height of a control, the margins of menus and windows, and how tall a
+//! drop-down list grows before it scrolls. egui's own suits a compact
+//! tool: a button's text sits a point from its edge, and controls are 18
+//! points high. Parts that are drawn at a size of their own, such as the
+//! window controls and the title bar's icon buttons, keep it.
 //!
 //! The scroll bars float over what they scroll, so one appearing never
 //! moves the content, and stay visible at rest whenever there is something
@@ -36,6 +36,10 @@ pub fn install(ctx: &egui::Context) {
         spacing.interact_size.y = 26.0;
         spacing.menu_margin = egui::Margin::same(8);
         spacing.window_margin = egui::Margin::same(12);
+        // How tall a drop-down list grows before it scrolls: egui's 200
+        // points hold six entries at this spacing, this about thirteen. A
+        // shorter list still fits its entries.
+        spacing.combo_height = 420.0;
         // egui's floating bars vanish at rest; these stay faintly visible.
         spacing.scroll = egui::style::ScrollStyle::floating();
         spacing.scroll.dormant_background_opacity = 0.3;
@@ -63,6 +67,7 @@ mod tests {
             assert_eq!(spacing.interact_size.y, 26.0, "{theme:?}");
             assert_eq!(spacing.menu_margin, egui::Margin::same(8), "{theme:?}");
             assert_eq!(spacing.window_margin, egui::Margin::same(12), "{theme:?}");
+            assert_eq!(spacing.combo_height, 420.0, "{theme:?}");
             assert!(spacing.scroll.floating, "{theme:?}");
             assert_eq!(spacing.scroll.dormant_background_opacity, 0.3, "{theme:?}");
             assert_eq!(spacing.scroll.dormant_handle_opacity, 0.7, "{theme:?}");
