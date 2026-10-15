@@ -7,7 +7,10 @@
 //! `docs/ARCHITECTURE.md`.
 
 mod app;
+mod browse;
 mod dialogs;
+mod disk;
+mod folder_tree;
 mod keymap;
 mod layout;
 mod menu;

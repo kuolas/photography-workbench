@@ -10,7 +10,9 @@ use desktop_ui::style;
 use desktop_ui::theme::{self, Theme};
 use desktop_ui::toolbar;
 
+use crate::browse::Browser;
 use crate::dialogs;
+use crate::folder_tree;
 use crate::keymap::{self, Action, Surface};
 use crate::layout::{self, Docks};
 use crate::menu::{self, MacMenu};
@@ -49,6 +51,9 @@ pub struct PhotographyWorkbenchApp {
     docks: Docks,
     /// How Library shows a folder's photos, saved between runs.
     view: View,
+    /// The folder tree in Library's left dock, fed from disk; what is
+    /// expanded and selected in it is saved between runs.
+    browser: Browser,
     /// Whether the Settings dialog is open.
     show_settings: bool,
     /// Whether the About dialog is open.
@@ -89,8 +94,9 @@ impl PhotographyWorkbenchApp {
     pub const MIN_WINDOW: egui::Vec2 = egui::vec2(1280.0, 800.0);
 
     /// Called once, before the first frame. Installs the fonts and the
-    /// style, and restores the saved theme choice, mode, docks and view;
-    /// with none saved, or an unreadable one, takes the default.
+    /// style, and restores the saved theme choice, mode, docks and view,
+    /// and what is expanded and selected in the folder tree; with none
+    /// saved, or an unreadable one, takes the default.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         fonts::install(&cc.egui_ctx);
         style::install(&cc.egui_ctx);
@@ -112,6 +118,7 @@ impl PhotographyWorkbenchApp {
             mode,
             docks: Docks::restore(cc.storage),
             view,
+            browser: Browser::restore(cc.storage),
             mac_window_buttons: measure_mac_window_buttons(cc),
             menu: MacMenu::install(cc),
             ..Self::default()
@@ -429,6 +436,8 @@ impl eframe::App for PhotographyWorkbenchApp {
         // What the keys ask for, after the menu bar's items (`logic`),
         // before anything is drawn, so it shows in this frame.
         self.shortcuts(ui.ctx());
+        // What the disk has read, before the tree is drawn.
+        self.browser.update(ui.ctx());
 
         let palette = theme::resolve(self.theme, ui.ctx()).palette();
         egui::Panel::top("title_bar")
@@ -445,7 +454,8 @@ impl eframe::App for PhotographyWorkbenchApp {
         if parts.tool_rail {
             layout::tool_rail(ui, &palette, &mut self.docks);
         }
-        layout::side_docks(ui, parts, &mut self.docks);
+        let folders = |ui: &mut egui::Ui| folder_tree::show(ui, &palette, &mut self.browser);
+        layout::side_docks(ui, parts, &mut self.docks, folders);
         if parts.toolbar {
             let start = |ui: &mut egui::Ui| self.mode_controls(ui, &palette);
             toolbar::show(ui, "toolbar", &palette, start, |_| {});
@@ -495,12 +505,15 @@ impl eframe::App for PhotographyWorkbenchApp {
         storage.set_string(MODE_KEY, self.mode.name().to_owned());
         self.docks.save(storage);
         storage.set_string(VIEW_KEY, self.view.name().to_owned());
+        self.browser.save(storage);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
 
     use eframe::{App as _, Storage as _};
     use egui::accesskit::{Role, Toggled};
@@ -511,6 +524,10 @@ mod tests {
     use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
     use desktop_ui::keys::Chord;
     use desktop_ui::{icons, theme};
+
+    use catalog::folders::{Place, Root};
+
+    use crate::disk::Disk;
 
     use super::{
         Action, Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, Side, THEME_KEY, TITLE_BAR_ICONS,
@@ -537,21 +554,40 @@ mod tests {
         fn flush(&mut self) {}
     }
 
-    /// The app, run headless in a window of the smallest size it allows.
+    /// The app, run headless in a window of the smallest size it allows,
+    /// with no folders to browse: no test reads the real home folder.
     fn harness() -> Harness<'static, PhotographyWorkbenchApp> {
-        Harness::builder()
-            .with_size(PhotographyWorkbenchApp::MIN_WINDOW)
-            .build_eframe(|cc| PhotographyWorkbenchApp::new(cc))
+        harness_on(None, Vec::new()).0
     }
 
     /// [`harness`], with the settings in `storage` saved by an earlier run.
     fn harness_from(storage: &MemoryStorage) -> Harness<'_, PhotographyWorkbenchApp> {
-        Harness::builder()
+        harness_on(Some(storage), Vec::new()).0
+    }
+
+    /// The app, run headless in a window of the smallest size it allows,
+    /// with the settings in `storage` saved by an earlier run, if any, and
+    /// `roots` mounted. The disk is read at once, on the window's thread;
+    /// the roots it reads are those the handle returned holds, which a
+    /// test changes to mount and unmount volumes, the change showing on
+    /// the next frame.
+    fn harness_on(
+        storage: Option<&MemoryStorage>,
+        roots: Vec<Root>,
+    ) -> (Harness<'_, PhotographyWorkbenchApp>, Arc<Mutex<Vec<Root>>>) {
+        let roots = Arc::new(Mutex::new(roots));
+        let disk = Disk::inline(Arc::clone(&roots));
+        let harness = Harness::builder()
             .with_size(PhotographyWorkbenchApp::MIN_WINDOW)
             .build_eframe(|cc| {
-                cc.storage = Some(storage);
-                PhotographyWorkbenchApp::new(cc)
-            })
+                if let Some(storage) = storage {
+                    cc.storage = Some(storage);
+                }
+                let mut app = PhotographyWorkbenchApp::new(cc);
+                app.browser.use_disk(disk);
+                app
+            });
+        (harness, roots)
     }
 
     /// [`harness`], with Library showing the viewer, which has every part
@@ -1381,6 +1417,176 @@ mod tests {
         let harness = harness();
         let padding = harness.ctx.global_style().spacing.button_padding;
         assert_eq!(padding, egui::vec2(8.0, 3.0));
+    }
+
+    /// A temporary folder to browse, holding `DCIM`, with `100NIKON` in
+    /// it, and `Exports`.
+    fn photos_folder() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("DCIM/100NIKON")).unwrap();
+        std::fs::create_dir(dir.path().join("Exports")).unwrap();
+        dir
+    }
+
+    /// The home folder at `dir`, as the tree's root named Home.
+    fn home(dir: &Path) -> Root {
+        Root::new(Place::Home, "Home", dir)
+    }
+
+    /// Click on what is named `label`, and let the app settle.
+    fn click(harness: &mut Harness<'_, PhotographyWorkbenchApp>, label: &str) {
+        harness.get_by_label(label).click();
+        harness.run();
+    }
+
+    /// Whether the row named `label` is shown selected, which egui tells
+    /// AccessKit as the row being toggled on.
+    fn is_selected(harness: &Harness<'_, PhotographyWorkbenchApp>, label: &str) -> bool {
+        let row = harness.get_by_label(label).accesskit_node();
+        row.toggled() == Some(Toggled::True)
+    }
+
+    /// Run frames until `seconds` of egui's time have gone by, then let
+    /// the app settle.
+    fn wait(harness: &mut Harness<'_, PhotographyWorkbenchApp>, seconds: f64) {
+        let until = harness.ctx.input(|i| i.time) + seconds;
+        for _ in 0..1000 {
+            if harness.ctx.input(|i| i.time) >= until {
+                break;
+            }
+            harness.step();
+        }
+        harness.run();
+    }
+
+    /// The left dock shows the tree's roots. The arrow beside a folder
+    /// expands it, showing its subfolders, and collapses it again.
+    #[test]
+    fn the_arrow_beside_a_folder_expands_it_and_collapses_it() {
+        let dir = photos_folder();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        harness.get_by_label("Home");
+        assert!(harness.query_by_label("DCIM").is_none());
+        click(&mut harness, "Expand Home");
+        harness.get_by_label("DCIM");
+        harness.get_by_label("Exports");
+        assert!(harness.query_by_label("100NIKON").is_none());
+        click(&mut harness, "Collapse Home");
+        assert!(harness.query_by_label("DCIM").is_none());
+        harness.get_by_label("Expand Home");
+    }
+
+    /// The tree's rows fill the left dock's width, up to the line along
+    /// its edge, 29 points high each, one under the other from 8 points
+    /// below its top, a folder's arrow 16 points right of its parent's.
+    #[test]
+    fn the_tree_s_rows_fill_the_left_dock() {
+        let dir = photos_folder();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Expand Home");
+        let dock = panel(&harness, "left_dock");
+        let home = harness.get_by_label("Home").rect();
+        let dcim = harness.get_by_label("DCIM").rect();
+        assert_eq!(home.top(), dock.top() + 8.0, "{home:?} in {dock:?}");
+        assert_eq!(home.left(), dock.left(), "{home:?} in {dock:?}");
+        assert_eq!(home.right(), dock.right() - 1.0, "{home:?} in {dock:?}");
+        assert_eq!((home.height(), dcim.height()), (29.0, 29.0));
+        assert_eq!(dcim.top(), home.bottom());
+        let arrow = |label| harness.get_by_label(label).rect();
+        let (home_arrow, dcim_arrow) = (arrow("Collapse Home"), arrow("Expand DCIM"));
+        assert_eq!(home_arrow.size(), egui::vec2(16.0, 16.0));
+        assert_eq!(home_arrow.center().x, dock.left() + 10.0);
+        assert_eq!(dcim_arrow.center().x - home_arrow.center().x, 16.0);
+    }
+
+    /// A click on a folder selects it, and its row says so.
+    #[test]
+    fn a_click_on_a_folder_selects_it() {
+        let dir = photos_folder();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Expand Home");
+        assert!(!is_selected(&harness, "DCIM"));
+        click(&mut harness, "DCIM");
+        assert!(is_selected(&harness, "DCIM"));
+        assert!(!is_selected(&harness, "Home"));
+        let dcim = dir.path().join("DCIM");
+        assert_eq!(
+            harness.state().browser.tree().selected(),
+            Some(dcim.as_path())
+        );
+        // Selecting leaves it collapsed.
+        assert!(harness.query_by_label("100NIKON").is_none());
+    }
+
+    /// What is expanded and selected in the tree is saved, and restored on
+    /// the next run.
+    #[test]
+    fn the_tree_s_expanded_and_selected_folders_are_saved_and_restored() {
+        let dir = photos_folder();
+        let mut storage = MemoryStorage::default();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Expand Home");
+        click(&mut harness, "Expand DCIM");
+        click(&mut harness, "100NIKON");
+        harness.state_mut().save(&mut storage);
+        drop(harness);
+
+        let (harness, _) = harness_on(Some(&storage), vec![home(dir.path())]);
+        harness.get_by_label("Collapse DCIM");
+        assert!(is_selected(&harness, "100NIKON"));
+    }
+
+    /// A volume mounted while the app runs shows once the disk sees the
+    /// roots change, and goes when it is unmounted.
+    #[test]
+    fn a_volume_shows_when_it_is_mounted_and_goes_when_it_is_not() {
+        let dir = photos_folder();
+        let card = tempfile::tempdir().unwrap();
+        let (mut harness, roots) = harness_on(None, vec![home(dir.path())]);
+        assert!(harness.query_by_label("EOS_DIGITAL").is_none());
+        let volume = Root::new(Place::Volume, "EOS_DIGITAL", card.path());
+        roots.lock().unwrap().push(volume);
+        harness.run();
+        harness.get_by_label("EOS_DIGITAL");
+        roots.lock().unwrap().pop();
+        harness.run();
+        assert!(harness.query_by_label("EOS_DIGITAL").is_none());
+        harness.get_by_label("Home");
+    }
+
+    /// An idle window draws nothing: once the tree is shown and the app
+    /// has settled, no frame is asked for, now or later, as the cards and
+    /// drives are watched off the window's thread.
+    #[test]
+    fn an_idle_window_asks_for_no_frame() {
+        let dir = photos_folder();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Expand Home");
+        wait(&mut harness, 3.0);
+        harness.get_by_label("DCIM");
+        let output = &harness.output().viewport_output[&ViewportId::ROOT];
+        assert_eq!(output.repaint_delay, std::time::Duration::MAX);
+    }
+
+    /// A folder made while the window was in the background shows once
+    /// the window is back in front.
+    #[test]
+    fn coming_back_to_the_window_reads_the_tree_again() {
+        let dir = photos_folder();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Expand Home");
+        std::fs::create_dir(dir.path().join("Trip")).unwrap();
+        wait(&mut harness, 2.0);
+        assert!(harness.query_by_label("Trip").is_none());
+
+        for focused in [false, true] {
+            harness.input_mut().focused = focused;
+            let event = egui::Event::WindowFocused(focused);
+            harness.input_mut().events.push(event);
+            harness.step();
+        }
+        harness.run();
+        harness.get_by_label("Trip");
     }
 
     #[test]
