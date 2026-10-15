@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Which entries of a folder the catalog shows, and what each one is: the
-//! one rule every listing of a folder follows.
+//! one rule every listing of a folder follows. A listing that leaves
+//! symbolic links out, as the list of volumes does, can tell them too.
 //!
 //! An entry is shown when the system's file manager would show it, and
 //! when it is a file or a folder once a symbolic link is followed.
@@ -27,24 +28,45 @@ pub(crate) enum Visible {
     Folder,
 }
 
+/// An entry the catalog shows: what it is, and whether it is a symbolic
+/// link to that.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Shown {
+    /// What the entry is, once a symbolic link is followed.
+    pub(crate) visible: Visible,
+    /// Whether the entry is itself a symbolic link.
+    pub(crate) link: bool,
+}
+
 /// Whether the catalog shows `entry`, and as what: `None` for an entry
 /// that is hidden, that is neither a file nor a folder, or that cannot be
 /// read, a symbolic link whose target is missing among them.
 pub(crate) fn visible(entry: &DirEntry) -> Option<Visible> {
+    shown(entry).map(|shown| shown.visible)
+}
+
+/// What [`visible`] says of `entry`, and whether the entry is a symbolic
+/// link, for a listing that leaves links out. Telling a link costs no
+/// lookup of its own: the rule reads the entry's own type anyway.
+pub(crate) fn shown(entry: &DirEntry) -> Option<Shown> {
     if entry.file_name().as_encoded_bytes().starts_with(b".") {
         return None;
     }
-    let mut file_type = shown_type(entry)?;
-    if file_type.is_symlink() {
-        file_type = std::fs::metadata(entry.path()).ok()?.file_type();
-    }
-    if file_type.is_file() {
-        Some(Visible::File)
-    } else if file_type.is_dir() {
-        Some(Visible::Folder)
+    let own_type = shown_type(entry)?;
+    let link = own_type.is_symlink();
+    let file_type = if link {
+        std::fs::metadata(entry.path()).ok()?.file_type()
     } else {
-        None
-    }
+        own_type
+    };
+    let visible = if file_type.is_file() {
+        Visible::File
+    } else if file_type.is_dir() {
+        Visible::Folder
+    } else {
+        return None;
+    };
+    Some(Shown { visible, link })
 }
 
 /// The entry's own type, a symbolic link not followed, or `None` when the
@@ -141,6 +163,33 @@ mod tests {
         assert_eq!(seen["to-photo"], Some(Visible::File));
         assert_eq!(seen["to-trip"], Some(Visible::Folder));
         assert_eq!(seen["broken"], None);
+    }
+
+    /// A listing that leaves links out can tell them, and only them.
+    #[cfg(unix)]
+    #[test]
+    fn a_symbolic_link_is_told_from_what_it_points_at() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("photo.nef"), b"").unwrap();
+        fs::create_dir(dir.path().join("Trip")).unwrap();
+        symlink(dir.path().join("photo.nef"), dir.path().join("to-photo")).unwrap();
+        symlink(dir.path().join("Trip"), dir.path().join("to-trip")).unwrap();
+        let shown: BTreeMap<_, _> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                (
+                    entry.file_name().to_string_lossy().into_owned(),
+                    shown(&entry),
+                )
+            })
+            .collect();
+        let as_what = |visible, link| Some(Shown { visible, link });
+        assert_eq!(shown["photo.nef"], as_what(Visible::File, false));
+        assert_eq!(shown["Trip"], as_what(Visible::Folder, false));
+        assert_eq!(shown["to-photo"], as_what(Visible::File, true));
+        assert_eq!(shown["to-trip"], as_what(Visible::Folder, true));
     }
 
     /// A socket, neither a file nor a folder, is not shown.
