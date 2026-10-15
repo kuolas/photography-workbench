@@ -13,17 +13,22 @@
 //! egui's type out in full, so the two never blur.
 //!
 //! [`Theme::apply`] maps a theme's [`Palette`] onto egui's [`egui::Visuals`];
-//! Dark installs egui's stock dark visuals as they are, and its palette
-//! repeats their colours. Whatever the app paints itself, such as the title
+//! Dark keeps the colours of egui's stock dark visuals as they are, and its
+//! palette repeats them. Whatever the app paints itself, such as the title
 //! bar, the trays and the thumbnails, reads its colour from a [`Palette`]
 //! slot rather than hard-coding it, so every colour the app paints changes
 //! with the theme. Adding a theme is one [`Palette`] constructor, a [`Theme`]
 //! variant with its match arms, and an entry in [`Theme::ALL`].
 //!
-//! Themes set colours only; widget shapes, spacing and animation are egui's
-//! defaults.
+//! egui keeps the shape of its widgets with their colours, in the visuals,
+//! so every theme also gives buttons and fields the same rounded corners.
+//! The spacing is not part of a theme: see [`crate::style`].
 
-use egui::Color32;
+use egui::{Color32, CornerRadius};
+
+/// The corner radius of buttons, fields and the other controls, in every
+/// theme, in points; egui's own is 2 to 3.
+const CONTROL_CORNER_RADIUS: u8 = 10;
 
 /// `0xRRGGBB` → opaque [`Color32`]. Keeps the palette tables readable.
 const fn hex(rgb: u32) -> Color32 {
@@ -41,8 +46,8 @@ pub enum Theme {
     /// A near-black theme with vivid yellow links, for judging photos
     /// against neutral dark surroundings.
     Nexus,
-    /// egui's stock dark visuals (flat charcoal): installing it installs
-    /// `egui::Visuals::dark()` unchanged.
+    /// egui's stock dark colours (flat charcoal): those of
+    /// `egui::Visuals::dark()`, unchanged.
     Dark,
 }
 
@@ -78,10 +83,22 @@ impl Theme {
         self.palette().dark_mode
     }
 
-    /// The egui `Visuals` for this theme: the palette mapped onto the fills,
-    /// text and selection that most define the look, over the base dark or
-    /// light visuals. Dark's are egui's own, unchanged.
+    /// The egui `Visuals` for this theme: its colours, with the rounded
+    /// corners every theme shares. Labels, separators and frames, which are
+    /// not controls, keep egui's corners.
     fn visuals(self) -> egui::Visuals {
+        let mut v = self.colours();
+        let w = &mut v.widgets;
+        for state in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
+            state.corner_radius = CornerRadius::same(CONTROL_CORNER_RADIUS);
+        }
+        v
+    }
+
+    /// The egui `Visuals` for this theme's colours: the palette mapped onto
+    /// the fills, text and selection that most define the look, over the
+    /// base dark or light visuals. Dark's are egui's own, unchanged.
+    fn colours(self) -> egui::Visuals {
         if self == Self::Dark {
             return egui::Visuals::dark();
         }
@@ -354,8 +371,8 @@ mod tests {
         }
     }
 
-    /// Dark installs egui's stock visuals unmapped, so its palette must hold
-    /// their colours, or what the app paints itself would not match what
+    /// Dark keeps egui's stock colours unmapped, so its palette must hold
+    /// them, or what the app paints itself would not match what
     /// egui paints.
     #[test]
     fn the_dark_palette_holds_the_stock_dark_colours() {
@@ -369,5 +386,25 @@ mod tests {
         assert_eq!(p.text, v.widgets.noninteractive.fg_stroke.color);
         assert_eq!(p.link, v.hyperlink_color);
         assert_eq!(p.selection, v.selection.bg_fill);
+    }
+
+    /// Every theme rounds its controls alike, in every state they can be
+    /// in, and leaves egui's corners on what is not a control.
+    #[test]
+    fn every_theme_rounds_its_controls() {
+        let round = CornerRadius::same(CONTROL_CORNER_RADIUS);
+        let stock = egui::Visuals::dark().widgets.noninteractive.corner_radius;
+        for theme in Theme::ALL {
+            let w = theme.visuals().widgets;
+            for (state, visuals) in [
+                ("inactive", w.inactive),
+                ("hovered", w.hovered),
+                ("active", w.active),
+                ("open", w.open),
+            ] {
+                assert_eq!(visuals.corner_radius, round, "{}: {state}", theme.name());
+            }
+            assert_eq!(w.noninteractive.corner_radius, stock, "{}", theme.name());
+        }
     }
 }
