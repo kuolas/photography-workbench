@@ -42,8 +42,9 @@ Nothing has been released yet.
   hide the side docks or all of them, F6, F7 and F8 for the filmstrip
   and the left and right docks, Ctrl+Alt+1 for Library, Ctrl+, for
   Settings and Ctrl+Q to quit, with Cmd for Ctrl and Option for Alt on
-  macOS. Ctrl+/ opens a reference that lists them all. The shortcuts
-  stand down while a dialog is open.
+  macOS. Ctrl+/, or a button beside the settings gear, opens a
+  reference that lists them all. The shortcuts stand down while a
+  dialog is open.
 - The window opens at 1280 × 800 points the first time and cannot be made
   smaller, so every part of it fits on a handheld's screen.
 - Dragging the title bar moves the window, and double-clicking it maximizes
