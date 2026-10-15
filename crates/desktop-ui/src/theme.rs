@@ -15,7 +15,7 @@
 //! [`Theme::apply`] maps a theme's [`Palette`] onto egui's [`egui::Visuals`];
 //! Dark keeps the colours of egui's stock dark visuals as they are, and its
 //! palette repeats them. Whatever the app paints itself, such as the title
-//! bar, the trays and the thumbnails, reads its colour from a [`Palette`]
+//! bar, the docks and the thumbnails, reads its colour from a [`Palette`]
 //! slot rather than hard-coding it, so every colour the app paints changes
 //! with the theme. Adding a theme is one [`Palette`] constructor, a [`Theme`]
 //! variant with its match arms, and an entry in [`Theme::ALL`].
@@ -241,9 +241,8 @@ pub struct Palette {
     pub panel: Color32,
     /// The title bar.
     pub title_bar: Color32,
-    /// The status bar and the trays, the plates an action bar's buttons sit
-    /// on: one shade below [`Self::panel`] in every theme, so the two read as
-    /// one family.
+    /// A strip of chrome set into a panel: one shade below
+    /// [`Self::panel`] in every theme, so the two read as one family.
     pub strip: Color32,
     /// Modals, windows and popups such as menus and dropdowns (egui
     /// `window_fill`).
@@ -273,6 +272,10 @@ pub struct Palette {
     /// A see-through wash over a control under the pointer: white on a dark
     /// theme, black on a light one.
     pub hover_overlay: Color32,
+    /// Behind the icon of a bar's button that is on: opaque, twice as far
+    /// from [`Self::panel`] as [`Self::hover_overlay`] takes it, so a
+    /// button that is on stands out from one under the pointer.
+    pub button_on: Color32,
 
     // --- links, selection and accents ---
     /// Hyperlink colour, chosen to stay legible on [`Self::panel`]: at least
@@ -312,6 +315,7 @@ impl Palette {
             window_ctrl: hex(0x4A463C),
             // Light chrome darkens, rather than lightens, under the pointer.
             hover_overlay: Color32::from_black_alpha(20),
+            button_on: hex(0xCECDC6),
             link: hex(0x0A6CC4), // slightly deep blue for contrast on paper
             selection: hex(0xBFDBF5),
             accent: hex(0x0A6CC4), // the link blue
@@ -338,6 +342,7 @@ impl Palette {
             icon_inactive: Color32::from_gray(150),
             window_ctrl: Color32::from_gray(210),
             hover_overlay: Color32::from_white_alpha(28),
+            button_on: Color32::from_gray(129),
             // Its blue accent (#0078D7) lightened to stay legible on the
             // mid-grey panel.
             link: hex(0x7BBAEA),
@@ -358,7 +363,7 @@ impl Palette {
             dark_mode: true,
             panel: hex(0x333333),           // chrome bars and docks
             title_bar: hex(0x262626),       // a step below the chrome
-            strip: hex(0x292929),           // the trays, a shade below the chrome
+            strip: hex(0x292929),           // a shade below the chrome
             window: hex(0x242424),          // menus and dialogs, a step below the chrome
             field: hex(0x1A1A1A),           // text inputs sunk to the content-well tone
             chip: hex(0x404040),            // the raised control grey
@@ -369,6 +374,7 @@ impl Palette {
             icon_inactive: hex(0x9A9A9A),
             window_ctrl: hex(0xD2D2D2),
             hover_overlay: Color32::from_white_alpha(24),
+            button_on: hex(0x585858),
             link: hex(0xFFF800),      // vivid yellow
             selection: hex(0x404040), // selected rows: a raised grey, not the yellow — white text stays legible on it
             accent: hex(0xFFF800),    // the link yellow
@@ -397,6 +403,7 @@ impl Palette {
             icon_inactive: Color32::from_gray(120),
             window_ctrl: Color32::from_gray(180),
             hover_overlay: Color32::from_white_alpha(24),
+            button_on: Color32::from_gray(68),
             link: Color32::from_rgb(90, 170, 255),
             selection: Color32::from_rgb(0, 92, 128),
             accent: Color32::from_rgb(90, 170, 255), // the link blue
@@ -410,7 +417,7 @@ impl Palette {
 mod tests {
     use super::*;
 
-    /// The trays and the status bar are the panel's own colour a shade
+    /// A strip set into a panel is the panel's own colour a shade
     /// darker, never a separate surface: the mean of the three channels of
     /// `strip` is between 55 % and 96 % of `panel`'s, in every theme.
     #[test]
@@ -424,6 +431,27 @@ mod tests {
             assert!(
                 (0.55..=0.96).contains(&ratio),
                 "{}: strip / panel = {ratio:.2}, outside 0.55..=0.96",
+                theme.name()
+            );
+        }
+    }
+
+    /// A bar's button that is on stands out from one under the pointer: its
+    /// fill is opaque, and at least half again as far from the panel's
+    /// colour as one hover wash takes it, in every theme.
+    #[test]
+    fn a_button_that_is_on_stands_out_from_one_under_the_pointer() {
+        fn mean(c: Color32) -> f32 {
+            (f32::from(c.r()) + f32::from(c.g()) + f32::from(c.b())) / 3.0
+        }
+        for theme in Theme::ALL {
+            let p = theme.palette();
+            assert!(p.button_on.is_opaque(), "{}", theme.name());
+            let hovered = (mean(p.panel.blend(p.hover_overlay)) - mean(p.panel)).abs();
+            let on = (mean(p.button_on) - mean(p.panel)).abs();
+            assert!(
+                on >= 1.5 * hovered,
+                "{}: on {on:.1} from the panel, under the pointer {hovered:.1}",
                 theme.name()
             );
         }
