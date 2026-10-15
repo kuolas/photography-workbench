@@ -8,6 +8,7 @@ pub mod about;
 pub mod action_bar;
 pub mod chrome;
 pub mod dialog;
+pub mod dock;
 pub mod fonts;
 pub mod icons;
 pub mod style;
