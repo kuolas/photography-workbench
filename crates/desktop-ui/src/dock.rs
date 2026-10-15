@@ -11,6 +11,17 @@ use egui::{Align, FontFamily, FontId, Frame, Label, Layout, RichText};
 
 use crate::fonts;
 
+/// The edge of the window a dock is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    /// The left edge.
+    Left,
+    /// The bottom edge.
+    Bottom,
+    /// The right edge.
+    Right,
+}
+
 /// Show `panel` as a dock, sliding it out of view while `shown` is false
 /// and back in when it turns true. Returns `None` once the dock is out of
 /// view.
