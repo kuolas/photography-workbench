@@ -1,12 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Keyboard shortcuts: a key and the modifiers held with it ([`Chord`]),
-//! how a chord is spelled on each system, and whether it was pressed.
+//! how a chord is spelled on each system, and whether it was pressed; and
+//! the reference that lists an app's shortcuts ([`reference()`]).
 //!
 //! What a chord does is the app's business: an app keeps its own table of
-//! actions and their chords, and asks a chord whether it was pressed.
+//! actions and their chords, asks a chord whether it was pressed, and
+//! builds its reference from the same table, so the two cannot disagree.
 
-use egui::{Event, Key, Modifiers};
+use egui::{Event, FontFamily, FontId, Grid, Key, Label, Modifiers, RichText};
+
+use crate::fonts;
+
+/// The gap between a reference's chords and their descriptions.
+const COLUMN_GAP: f32 = 18.0;
+
+/// The narrowest a reference's descriptions are, however little room the
+/// chords leave them.
+const MIN_DESCRIPTION_WIDTH: f32 = 160.0;
 
 /// A key pressed with a set of modifiers, such as Ctrl+Q. Its
 /// [`Modifiers::COMMAND`] is Cmd on macOS and Ctrl elsewhere, so one chord
@@ -116,9 +127,67 @@ fn is_punctuation(key: Key) -> bool {
     )
 }
 
+/// One section of a shortcut reference: its title, and its rows, each a
+/// chord's label and what the chord does.
+pub struct Section<'a> {
+    /// The section's title.
+    pub title: &'a str,
+    /// The section's rows.
+    pub rows: Vec<(String, &'a str)>,
+}
+
+/// A reference of keyboard shortcuts: each section's title over its rows,
+/// the chord at the left and what it does at the right, with a line
+/// between sections. A section with no rows is left out.
+///
+/// The chords' column is as wide as the widest chord in any section, so
+/// the descriptions line up from one section to the next. A description
+/// longer than the room left beside the chords wraps.
+pub fn reference(ui: &mut egui::Ui, sections: &[Section<'_>]) {
+    let body = egui::TextStyle::Body.resolve(ui.style());
+    let chords_width = sections
+        .iter()
+        .flat_map(|section| &section.rows)
+        .map(|(chord, _)| {
+            ui.fonts_mut(|fonts| {
+                let layout = fonts.layout_no_wrap(chord.clone(), body.clone(), Default::default());
+                layout.size().x
+            })
+        })
+        .fold(0.0, f32::max);
+    let descriptions_width =
+        (ui.available_width() - chords_width - COLUMN_GAP).max(MIN_DESCRIPTION_WIDTH);
+    let title_font = FontId::new(body.size, FontFamily::Name(fonts::SEMIBOLD.into()));
+    let shown = sections.iter().filter(|section| !section.rows.is_empty());
+    for (index, section) in shown.enumerate() {
+        if index > 0 {
+            ui.add_space(4.0);
+            ui.separator();
+        }
+        ui.add_space(4.0);
+        let title = RichText::new(section.title).font(title_font.clone());
+        ui.add(Label::new(title).selectable(false));
+        ui.add_space(2.0);
+        Grid::new(("shortcuts", section.title))
+            .num_columns(2)
+            .min_col_width(chords_width)
+            .max_col_width(descriptions_width)
+            .spacing([COLUMN_GAP, 4.0])
+            .show(ui, |ui| {
+                for (chord, description) in &section.rows {
+                    ui.add(Label::new(chord.as_str()).selectable(false));
+                    ui.add(Label::new(*description).wrap().selectable(false));
+                    ui.end_row();
+                }
+            });
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use egui::{FontFamily, FontId, RawInput};
+    use egui::RawInput;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable as _;
 
     use super::*;
 
@@ -275,5 +344,75 @@ mod tests {
         let tab = Chord::new(Modifiers::NONE, Key::Tab);
         let presses = pressed_by(tab, Key::Tab, Modifiers::NONE, 3);
         assert_eq!(presses, [true, false, false]);
+    }
+
+    /// A reference of `sections` in a window `width` points wide, drawn
+    /// once the fonts are in: the first frame installs them and draws
+    /// nothing.
+    fn shown(width: f32, sections: fn() -> Vec<Section<'static>>) -> Harness<'static> {
+        let mut fonts_installed = false;
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(width, 400.0))
+            .build_ui(move |ui| {
+                if fonts_installed {
+                    reference(ui, &sections());
+                } else {
+                    fonts::install(ui.ctx());
+                    fonts_installed = true;
+                }
+            });
+        harness.run();
+        harness
+    }
+
+    fn two_sections() -> Vec<Section<'static>> {
+        vec![
+            Section {
+                title: "Views",
+                rows: vec![("G".to_owned(), "Thumbnail grid")],
+            },
+            Section {
+                title: "Window",
+                rows: vec![("Ctrl+Alt+Shift+Q".to_owned(), "Quit")],
+            },
+            Section {
+                title: "Nothing",
+                rows: vec![],
+            },
+        ]
+    }
+
+    #[test]
+    fn the_descriptions_line_up_from_section_to_section() {
+        let harness = shown(500.0, two_sections);
+        let grid = harness.get_by_label("Thumbnail grid").rect();
+        let quit = harness.get_by_label("Quit").rect();
+        assert_eq!(grid.left(), quit.left(), "{grid:?} {quit:?}");
+        let chord = harness.get_by_label("Ctrl+Alt+Shift+Q").rect();
+        assert!(chord.right() < quit.left(), "{chord:?} {quit:?}");
+    }
+
+    #[test]
+    fn a_section_with_no_rows_is_left_out() {
+        let harness = shown(500.0, two_sections);
+        assert!(harness.query_by_label("Views").is_some());
+        assert!(harness.query_by_label("Nothing").is_none());
+    }
+
+    #[test]
+    fn a_long_description_wraps_in_the_room_beside_the_chords() {
+        fn long() -> Vec<Section<'static>> {
+            let description = "Show or hide every dock the mode has, the side docks and \
+                the filmstrip together, as one";
+            vec![Section {
+                title: "Docks",
+                rows: vec![("Shift+Tab".to_owned(), description)],
+            }]
+        }
+        let harness = shown(300.0, long);
+        let row = harness.get_by_label_contains("Show or hide").rect();
+        assert!(row.right() <= 300.0, "{row:?}");
+        let chord = harness.get_by_label("Shift+Tab").rect();
+        assert!(row.height() > 2.0 * chord.height(), "{row:?}");
     }
 }
