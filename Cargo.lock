@@ -2591,6 +2591,7 @@ dependencies = [
 name = "photography-workbench"
 version = "0.1.0"
 dependencies = [
+ "catalog",
  "desktop-ui",
  "eframe",
  "egui",
@@ -2599,6 +2600,7 @@ dependencies = [
  "log",
  "muda",
  "raw-window-handle",
+ "tempfile",
  "toml",
  "winit",
  "winresource",

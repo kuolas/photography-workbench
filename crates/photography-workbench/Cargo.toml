@@ -13,6 +13,7 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+catalog.workspace = true
 desktop-ui.workspace = true
 # Desktop only (ADR007): eframe's default wgpu renderer, plus `persistence`,
 # which keeps the window geometry and the app's settings (such as the theme
@@ -35,6 +36,8 @@ winit.workspace = true
 
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["eframe"] }
+# Temporary folders for the folder tree's tests to browse.
+tempfile.workspace = true
 # tests/package_metadata.rs reads this file.
 toml.workspace = true
 

@@ -4,8 +4,8 @@
 //! right edge, and the docks, each one there when the mode's [`Layout`]
 //! has it.
 //!
-//! The left dock is where photos are browsed from: it will hold the
-//! folder tree, and is empty until then. The tool rail picks what the
+//! The left dock is where photos are browsed from: it holds the folder
+//! tree, which the app draws in it. The tool rail picks what the
 //! right dock shows, in Library one thing so far, the photo's
 //! information. The bottom dock is the filmstrip's, which only the viewer
 //! has: the grid shows the photos as thumbnails already. It is empty so
@@ -176,16 +176,21 @@ pub fn tool_rail(ui: &mut egui::Ui, palette: &Palette, docks: &mut Docks) {
     action_bar::show(ui, bar, palette, info, |_| {});
 }
 
-/// The side docks `layout` has, each shown or hidden as `docks` says.
-/// They come before anything along the bottom, so they run down to the
-/// window's bottom edge.
-pub fn side_docks(ui: &mut egui::Ui, layout: Layout, docks: &mut Docks) {
+/// The side docks `layout` has, each shown or hidden as `docks` says,
+/// `left` adding what the left dock holds. They come before anything
+/// along the bottom, so they run down to the window's bottom edge.
+pub fn side_docks(
+    ui: &mut egui::Ui,
+    layout: Layout,
+    docks: &mut Docks,
+    left: impl FnOnce(&mut egui::Ui),
+) {
     if layout.left_dock {
         let (width, widths) = LEFT_DOCK;
         let panel = egui::Panel::left("left_dock")
             .default_size(width)
             .size_range(widths);
-        dock::show(panel, ui, &mut docks.left, |_| {});
+        dock::show(panel, ui, &mut docks.left, left);
     }
     if layout.right_dock {
         let (width, widths) = RIGHT_DOCK;

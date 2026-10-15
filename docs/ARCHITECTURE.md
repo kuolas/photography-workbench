@@ -38,8 +38,11 @@ relative to `crates/photography-workbench`:
 | `src/view.rs` | `View`, the ways Library shows a folder's photos (a grid of thumbnails, or one photo in the viewer): each one's name and icon | `desktop_ui` (tests only) |
 | `src/keymap.rs` | the keyboard shortcuts: one table of what each chord does (switch mode, switch view, show or hide docks, open Settings or the reference, quit), on which surfaces (the grid, the viewer), and the group and description the reference lists it under; the actions they do, which buttons and menu items do too; `pressed` and `pressed_actions`, which the handlers ask, `chord_for`, the chord a control names in its tooltip, `chord_everywhere`, the one a menu item carries, and the reference's `sections`, built from the same table. A shortcut to a mode not built yet does nothing and is not listed ([ADR015](architecture-decisions/adr015-the-keys.md)) | `egui`, `desktop_ui` |
 | `src/menu.rs` | the menu bar at the top of the screen on macOS: the app menu (About, Settings, Quit), View (the views and the docks), Window (the modes) and Help (the reference of keyboard shortcuts), whose items ask for the app's actions; `State`, what the items show of the app, which can be chosen and which are checked, worked out on every system; and `MacMenu`, which hands the menus to the system and passes their clicks on, a stand-in never made elsewhere. Only the chords that hold Cmd are the items' key equivalents, so the keys without Cmd stay the window's, and not those of a toggle, which the system would repeat while the keys are held | `eframe`, `desktop_ui`; on macOS `log`, `muda`, `raw-window-handle` |
-| `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the right dock's message when no photo is selected, and the filmstrip's backdrop), the title bar's toggles for them, and `Docks`, which of them are shown, shown or hidden together by a key, saved and restored | `eframe`, `egui`, `desktop_ui` |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher, settings gear and button for the reference of keyboard shortcuts, the toolbar under the centre with the mode's own controls (Library's view buttons), the order the window's panels are laid out in, the keyboard shortcuts it handles and the menu bar it gives macOS, `perform`, which does each action whatever asked for it, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode, docks and view it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
+| `src/disk.rs` | `Disk`, which reads the disk off the window's thread: a folder's subfolders, as `catalog` reads them, each read on a short-lived thread of its own, so a listing that hangs on a network share that has gone holds up no other, and the roots of the folder tree, watched on a thread of their own that reads them every 2 seconds and wakes the window only when they change, so an idle window draws nothing. The window takes the answers at the start of a frame; a thread asks for a frame when it has one. With no thread to be had, a listing is done on the window's thread rather than never, and the roots are read there once, which the log warns of | `catalog`, `egui`, `log` |
+| `src/browse.rs` | `Browser`, which keeps the folder tree fed from disk, once per frame before anything is drawn: it hands the tree what the disk has read, has the disk watch the roots from the first frame on, as memory cards and drives come and go and no system tells a portable app at once, refreshes the tree when the window comes back to the front, so a folder changed meanwhile in the system's file manager is read again, and lists the folders the tree asks for, one read per folder at a time; and what is expanded and selected in the tree, saved and restored | `catalog`, `eframe`, `egui` |
+| `src/folder_tree.rs` | the folder tree in Library's left dock: a row per folder shown, indented by its depth, with the arrow that expands or collapses it, an icon for the home folder, a volume or any other folder, and its name, cut short with "…" where it does not fit and dimmed where the folder cannot be read; a click elsewhere on the row selects it. Only the rows in view are laid out | `catalog`, `egui`, `desktop_ui` |
+| `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the folder tree the app gives the left dock, the right dock's message when no photo is selected, and the filmstrip's backdrop), the title bar's toggles for them, and `Docks`, which of them are shown, shown or hidden together by a key, saved and restored | `eframe`, `egui`, `desktop_ui` |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher, settings gear and button for the reference of keyboard shortcuts, the toolbar under the centre with the mode's own controls (Library's view buttons), the order the window's panels are laid out in, the keyboard shortcuts it handles and the menu bar it gives macOS, `perform`, which does each action whatever asked for it, the folder tree it keeps fed from disk and shows in Library's left dock, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode, docks, view and folder tree it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name, tagline and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp`'s constants, and that every crate's version is the workspace's | the library, `toml` |
@@ -71,7 +74,8 @@ Paths are relative to `crates/desktop-ui`:
 ### catalog
 
 The catalog reads the disk but starts no thread of its own: whoever
-calls it decides where the waiting happens. It has no GUI dependency, so
+calls it decides where the waiting happens, which in the app is on
+threads of its own (`src/disk.rs`). It has no GUI dependency, so
 its tests run on a machine with no display, over temporary folders.
 Paths are relative to `crates/catalog`:
 
@@ -95,18 +99,19 @@ display.
 `PhotographyWorkbenchApp::ui` every frame; egui is immediate-mode, so the UI
 is rebuilt from the app's state each time rather than kept as a widget tree.
 The only state so far is the theme choice, the mode, Library's view,
-which docks are shown and which dialogs are open; the window shows its own title bar,
-which holds the app's icon (which opens About; not on macOS), the mode
-switcher, the button for the reference of keyboard shortcuts, the
-settings gear, a toggle for each of the mode's docks and the window
-controls. Only Library is
+which docks are shown, the folder tree and which dialogs are open; the
+window shows its own title bar, which holds the app's icon (which opens
+About; not on macOS), the mode switcher, the button for the reference
+of keyboard shortcuts, the settings gear, a toggle for each of the
+mode's docks and the window controls. Only Library is
 built: the switcher shows Organizer and Develop disabled. Below the
 title bar the panels
 ([ADR014](architecture-decisions/adr014-the-parts-of-the-window.md))
 are laid out in an order that gives each its place:
 first the tool rail, so it takes the window's right edge below the title
-bar; then the side docks, the right one inside the tool rail, so they
-run down to the window's bottom; then the toolbar along the bottom
+bar; then the side docks, the left one holding the folder tree, the
+right one inside the tool rail, so they run down to the window's
+bottom; then the toolbar along the bottom
 between them, holding the mode's own controls (in Library, a button per
 view); then, in Library's viewer, the bottom dock above the toolbar,
 for the filmstrip, which the grid has no need of; and last the centre,
@@ -129,6 +134,15 @@ since they type nothing. Its items stand down while a dialog is open,
 all but the reference's own, which closes it; a click is checked again
 when it is done, and the frame's last step shows the items the app as
 the frame left it, the mode, the view and the docks shown checked.
+After the keys, still before anything is drawn, the folder tree takes
+what the disk has read since the last frame, and starts reading what it
+needs next, each read on a thread of its own that asks for a frame when
+it is done: the whole tree again when the window comes back to the
+front, and the folders the tree asks for, one read per folder at a
+time, so the tree drawn in the frame is as up to date as the disk has
+answered. The roots are watched on a thread of their own, started on
+the first frame, which reads them every 2 seconds and wakes the window
+only when they change, so an idle window draws nothing.
 The Settings dialog only records
 the choice; the next frame installs it, so no frame is painted in two
 themes. The same step keeps
@@ -141,9 +155,9 @@ Windows, so pinning it under System would freeze the theme at the one the
 OS had at launch.
 
 **Persisted state.** eframe's `persistence` feature saves the window geometry,
-egui's own settings and the app's theme choice, mode, docks and view in a
-per-user directory named after the app id, which `main.rs` sets to the
-binary's name (for example
+egui's own settings and the app's theme choice, mode, docks, view and
+folder tree in a per-user directory named after the app id, which
+`main.rs` sets to the binary's name (for example
 `~/Library/Application Support/photography-workbench` on macOS). The theme
 choice is stored as text under the key `theme`: the theme's display name, or
 `System`; a missing or unrecognised value means System, so renaming a theme
@@ -153,7 +167,12 @@ Library. Whether each dock is shown is stored under `show_left_dock`,
 `show_right_dock` and `show_bottom_dock`, as `true` or `false`; anything
 else, or nothing, means shown. The docks' sizes are egui's own settings.
 Library's view is stored under `view`, as its name; a missing or
-unrecognised value means the grid. egui's own
+unrecognised value means the grid. The folder tree's selected folder is
+stored under `folder`, as its path, and its expanded folders under
+`expanded_folders`, their paths one per line; a missing or empty value
+means none. A path that is not valid Unicode, or holds a line break,
+cannot be stored as a line of text, and is not kept: that folder is
+not selected or expanded on the next run. egui's own
 theme preference is not where the theme lives: the app sets it from the
 choice each frame, as above. Renaming the binary moves that directory,
 which resets those settings.
