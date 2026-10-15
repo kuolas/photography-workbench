@@ -11,6 +11,7 @@ pub mod dialog;
 pub mod dock;
 pub mod fonts;
 pub mod icons;
+pub mod keys;
 pub mod style;
 pub mod theme;
 pub mod toolbar;
