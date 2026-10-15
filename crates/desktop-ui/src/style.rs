@@ -10,6 +10,10 @@
 //! own, such as the window controls and the title bar's icon buttons, keep
 //! it.
 //!
+//! The scroll bars float over what they scroll, so one appearing never
+//! moves the content, and stay visible at rest whenever there is something
+//! to scroll, so the reader sees there is more without moving the pointer.
+//!
 //! The pace: how long egui's animations take, from a section opening to a
 //! tooltip, menu or dialog fading in and a scroll bar appearing. egui's own
 //! is brisk; the window's is unhurried.
@@ -32,6 +36,10 @@ pub fn install(ctx: &egui::Context) {
         spacing.interact_size.y = 26.0;
         spacing.menu_margin = egui::Margin::same(8);
         spacing.window_margin = egui::Margin::same(12);
+        // egui's floating bars vanish at rest; these stay faintly visible.
+        spacing.scroll = egui::style::ScrollStyle::floating();
+        spacing.scroll.dormant_background_opacity = 0.3;
+        spacing.scroll.dormant_handle_opacity = 0.7;
         style.animation_time = ANIMATION_TIME;
     });
 }
@@ -55,6 +63,9 @@ mod tests {
             assert_eq!(spacing.interact_size.y, 26.0, "{theme:?}");
             assert_eq!(spacing.menu_margin, egui::Margin::same(8), "{theme:?}");
             assert_eq!(spacing.window_margin, egui::Margin::same(12), "{theme:?}");
+            assert!(spacing.scroll.floating, "{theme:?}");
+            assert_eq!(spacing.scroll.dormant_background_opacity, 0.3, "{theme:?}");
+            assert_eq!(spacing.scroll.dormant_handle_opacity, 0.7, "{theme:?}");
             assert_eq!(ctx.style_of(theme).animation_time, 0.4, "{theme:?}");
         }
     }
