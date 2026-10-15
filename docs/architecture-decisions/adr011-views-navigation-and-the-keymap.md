@@ -1,6 +1,6 @@
 # ADR011: Views, navigation and the keymap
 
-- Status: Accepted
+- Status: Accepted; its choice of keys superseded by [ADR015](adr015-the-keys.md)
 - Date: 2026-10-14
 - Issue: #4
 
