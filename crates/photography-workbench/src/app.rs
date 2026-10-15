@@ -4,12 +4,14 @@
 //! dialogs.
 
 use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
+use desktop_ui::dock::Side;
 use desktop_ui::fonts;
 use desktop_ui::style;
 use desktop_ui::theme::{self, Theme};
 use desktop_ui::toolbar;
 
 use crate::dialogs;
+use crate::keymap::{self, Action, Surface};
 use crate::layout::{self, Docks};
 use crate::mode::{Layout, Mode};
 use crate::view::View;
@@ -45,6 +47,8 @@ pub struct PhotographyWorkbenchApp {
     show_settings: bool,
     /// Whether the About dialog is open.
     show_about: bool,
+    /// Whether the reference of keyboard shortcuts is open.
+    show_shortcuts: bool,
     /// [`Self::icon`] as a texture, for the title bar and About; made the
     /// first time one of them is shown.
     icon_texture: Option<egui::TextureHandle>,
@@ -81,6 +85,10 @@ impl PhotographyWorkbenchApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         fonts::install(&cc.egui_ctx);
         style::install(&cc.egui_ctx);
+        // Quitting is the keymap's, like every other shortcut: egui's own
+        // Ctrl+Q would close the window even with a dialog open. On macOS
+        // the system's app menu takes Cmd+Q before the window sees it.
+        cc.egui_ctx.options_mut(|o| o.quit_shortcuts.clear());
         let saved = |key| cc.storage.and_then(|storage| storage.get_string(key));
         let theme =
             saved(THEME_KEY).and_then(|name| Theme::ALL.into_iter().find(|t| t.name() == name));
@@ -203,6 +211,68 @@ impl PhotographyWorkbenchApp {
         );
     }
 
+    /// Where the keyboard shortcuts apply: the view Library shows.
+    fn surface(&self) -> Surface {
+        match self.view {
+            View::Grid => Surface::Grid,
+            View::Viewer => Surface::Viewer,
+        }
+    }
+
+    /// Do what the keyboard shortcuts pressed in this frame ask. They
+    /// stand down while a dialog is open, all but the reference's own
+    /// chord, which closes it, and while a text field has the keyboard,
+    /// as what is typed there is the field's.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
+        let surface = self.surface();
+        let pressed = |action| keymap::pressed(ctx, surface, action);
+        if self.show_shortcuts && pressed(Action::Shortcuts) {
+            self.show_shortcuts = false;
+            return;
+        }
+        if ctx.memory(|m| m.top_modal_layer().is_some()) || ctx.text_edit_focused() {
+            return;
+        }
+        for mode in Mode::ALL {
+            if mode.is_available() && pressed(Action::Mode(mode)) {
+                self.mode = mode;
+            }
+        }
+        for view in View::ALL {
+            if pressed(Action::View(view)) {
+                self.view = view;
+            }
+        }
+        let parts = self.parts();
+        let toggles = [
+            (Action::SideDocks, &[Side::Left, Side::Right][..]),
+            (Action::AllDocks, &[Side::Left, Side::Right, Side::Bottom]),
+            (Action::Dock(Side::Left), &[Side::Left]),
+            (Action::Dock(Side::Right), &[Side::Right]),
+            (Action::Dock(Side::Bottom), &[Side::Bottom]),
+        ];
+        for (action, sides) in toggles {
+            if pressed(action) {
+                self.docks.toggle(parts, sides);
+            }
+        }
+        // egui moves the keyboard focus to the next widget on Tab, and to
+        // the one before on Shift+Tab; here those keys show and hide the
+        // docks instead.
+        if pressed(Action::SideDocks) || pressed(Action::AllDocks) {
+            ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+        }
+        if pressed(Action::Settings) {
+            self.show_settings = true;
+        }
+        if pressed(Action::Shortcuts) {
+            self.show_shortcuts = true;
+        }
+        if pressed(Action::Quit) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
     /// The parts of the window shown around the centre: the mode's, but
     /// in Library's grid without the bottom dock, the filmstrip's, as the
     /// grid shows the photos as thumbnails already.
@@ -290,6 +360,8 @@ impl eframe::App for PhotographyWorkbenchApp {
             ui.reset_style();
         }
 
+        self.shortcuts(ui.ctx());
+
         let palette = theme::resolve(self.theme, ui.ctx()).palette();
         egui::Panel::top("title_bar")
             .exact_size(TITLE_BAR_HEIGHT)
@@ -339,6 +411,9 @@ impl eframe::App for PhotographyWorkbenchApp {
                 self.show_about = false;
             }
         }
+        if self.show_shortcuts && dialogs::shortcuts(ui.ctx(), &keymap::sections()) {
+            self.show_shortcuts = false;
+        }
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
@@ -355,6 +430,7 @@ mod tests {
 
     use eframe::{App as _, Storage as _};
     use egui::accesskit::{Role, Toggled};
+    use egui::{Key, Modifiers, ViewportCommand, ViewportId};
     use egui_kittest::Harness;
     use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
@@ -527,6 +603,186 @@ mod tests {
         harness.run();
         let docks = harness.state().docks;
         assert!(!docks.left && !docks.bottom && docks.right, "{docks:?}");
+    }
+
+    /// Press `key` with `modifiers` held, and let the app settle.
+    fn press(harness: &mut Harness<'_, PhotographyWorkbenchApp>, modifiers: Modifiers, key: Key) {
+        harness.key_press_modifiers(modifiers, key);
+        harness.run();
+    }
+
+    #[test]
+    fn g_and_e_switch_the_view_and_esc_goes_back_to_the_grid() {
+        let mut harness = harness();
+        press(&mut harness, Modifiers::NONE, Key::E);
+        assert_eq!(harness.state().view, View::Viewer);
+        press(&mut harness, Modifiers::NONE, Key::G);
+        assert_eq!(harness.state().view, View::Grid);
+        press(&mut harness, Modifiers::NONE, Key::E);
+        press(&mut harness, Modifiers::NONE, Key::Escape);
+        assert_eq!(harness.state().view, View::Grid);
+    }
+
+    /// Tab hides the side docks together while either is shown, and shows
+    /// them both otherwise. It takes the keyboard focus nowhere, as egui's
+    /// own Tab would.
+    #[test]
+    fn tab_shows_and_hides_the_side_docks() {
+        let mut harness = viewer_harness();
+        let docks = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let docks = harness.state().docks;
+            (docks.left, docks.right, docks.bottom)
+        };
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+        assert_eq!(docks(&harness), (false, false, true));
+        assert_eq!(harness.ctx.memory(|m| m.focused()), None);
+        press(&mut harness, Modifiers::NONE, Key::F7);
+        assert_eq!(docks(&harness), (true, false, true));
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+        assert_eq!(docks(&harness), (false, false, true));
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+        assert_eq!(docks(&harness), (true, true, true));
+    }
+
+    /// Shift+Tab shows and hides every dock the view has: with the grid,
+    /// which has no filmstrip, the side docks.
+    #[test]
+    fn shift_tab_shows_and_hides_every_dock_the_view_has() {
+        let mut harness = viewer_harness();
+        press(&mut harness, Modifiers::SHIFT, Key::Tab);
+        assert_eq!(
+            harness.state().docks,
+            Docks {
+                left: false,
+                right: false,
+                bottom: false
+            }
+        );
+        assert_eq!(harness.ctx.memory(|m| m.focused()), None);
+        press(&mut harness, Modifiers::SHIFT, Key::Tab);
+        assert_eq!(harness.state().docks, Docks::default());
+
+        let mut harness = self::harness();
+        press(&mut harness, Modifiers::SHIFT, Key::Tab);
+        assert_eq!(
+            harness.state().docks,
+            Docks {
+                left: false,
+                right: false,
+                bottom: true
+            }
+        );
+    }
+
+    /// F6, F7 and F8 show and hide the filmstrip, the left dock and the
+    /// right dock; F6 only with the viewer, which has the filmstrip.
+    #[test]
+    fn the_function_keys_show_and_hide_a_dock_each() {
+        let mut harness = viewer_harness();
+        press(&mut harness, Modifiers::NONE, Key::F6);
+        assert_eq!(
+            harness.state().docks,
+            Docks {
+                left: true,
+                right: true,
+                bottom: false
+            }
+        );
+        press(&mut harness, Modifiers::NONE, Key::F7);
+        press(&mut harness, Modifiers::NONE, Key::F8);
+        assert_eq!(
+            harness.state().docks,
+            Docks {
+                left: false,
+                right: false,
+                bottom: false
+            }
+        );
+
+        let mut harness = self::harness();
+        press(&mut harness, Modifiers::NONE, Key::F6);
+        assert_eq!(harness.state().docks, Docks::default());
+    }
+
+    #[test]
+    fn a_mode_not_built_yet_is_not_switched_to_from_the_keyboard() {
+        let mut harness = harness();
+        let ctrl_alt = Modifiers::COMMAND | Modifiers::ALT;
+        for key in [Key::Num2, Key::Num3, Key::Num1] {
+            press(&mut harness, ctrl_alt, key);
+            assert_eq!(harness.state().mode, Mode::Library, "{key:?}");
+        }
+    }
+
+    /// Ctrl+Alt+1 switches to Library from another mode.
+    #[test]
+    fn ctrl_alt_1_switches_to_library() {
+        let mut harness = harness();
+        harness.state_mut().mode = Mode::Develop;
+        harness.run();
+        assert_eq!(harness.state().mode, Mode::Develop);
+        press(&mut harness, Modifiers::COMMAND | Modifiers::ALT, Key::Num1);
+        assert_eq!(harness.state().mode, Mode::Library);
+    }
+
+    #[test]
+    fn ctrl_comma_opens_settings() {
+        let mut harness = harness();
+        press(&mut harness, Modifiers::COMMAND, Key::Comma);
+        assert!(harness.state().show_settings);
+    }
+
+    #[test]
+    fn ctrl_q_closes_the_window() {
+        let mut harness = harness();
+        // In one frame, whose output holds what it sent the window: the
+        // harness's own key presses run a frame per event.
+        harness.input_mut().events.push(egui::Event::Key {
+            key: Key::Q,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::COMMAND,
+        });
+        harness.step();
+        let sent = harness
+            .output()
+            .viewport_output
+            .get(&ViewportId::ROOT)
+            .map(|viewport| viewport.commands.clone())
+            .unwrap_or_default();
+        assert!(sent.contains(&ViewportCommand::Close), "{sent:?}");
+    }
+
+    /// Ctrl+/ opens the reference, which lists the shortcuts, and closes
+    /// it again.
+    #[test]
+    fn ctrl_slash_opens_the_reference_and_closes_it() {
+        let mut harness = harness();
+        let row = "Back to the thumbnail grid";
+        assert!(harness.query_by_label(row).is_none());
+        press(&mut harness, Modifiers::COMMAND, Key::Slash);
+        assert!(harness.state().show_shortcuts);
+        assert!(harness.query_by_label(row).is_some());
+        press(&mut harness, Modifiers::COMMAND, Key::Slash);
+        assert!(!harness.state().show_shortcuts);
+        assert!(harness.query_by_label(row).is_none());
+    }
+
+    /// While a dialog is open, the keys are the dialog's: G does not
+    /// switch the view behind it, and Esc closes the dialog alone, leaving
+    /// the viewer as it is.
+    #[test]
+    fn the_shortcuts_stand_down_while_a_dialog_is_open() {
+        let mut harness = viewer_harness();
+        press(&mut harness, Modifiers::COMMAND, Key::Comma);
+        press(&mut harness, Modifiers::NONE, Key::G);
+        press(&mut harness, Modifiers::COMMAND, Key::Slash);
+        assert_eq!(harness.state().view, View::Viewer);
+        assert!(!harness.state().show_shortcuts);
+        press(&mut harness, Modifiers::NONE, Key::Escape);
+        assert!(!harness.state().show_settings);
+        assert_eq!(harness.state().view, View::Viewer);
     }
 
     /// Which docks are shown is saved, and restored on the next run. A

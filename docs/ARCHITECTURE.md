@@ -33,11 +33,12 @@ relative to `crates/photography-workbench`:
 |---|---|---|
 | `src/main.rs` | the binary: sets up logging and the window (its size, and its frame on each system), then hands control to eframe | the library, `eframe`, `env_logger` |
 | `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` | its own modules |
-| `src/dialogs.rs` | the app's dialogs, in the frame `desktop_ui::dialog` gives every dialog: Settings, which holds the theme choice, and About, which `desktop_ui::about` draws from the app's name, tagline, version, copyright, licence and home page | `egui`, `desktop_ui` |
+| `src/dialogs.rs` | the app's dialogs, in the frame `desktop_ui::dialog` gives every dialog: Settings, which holds the theme choice, About, which `desktop_ui::about` draws from the app's name, tagline, version, copyright, licence and home page, and the reference of keyboard shortcuts, which `desktop_ui::keys` draws from the keymap's sections | `egui`, `desktop_ui` |
 | `src/mode.rs` | `Mode`, the app's modes (Library, Organizer, Develop): each one's name and icon, whether it is built yet, and its `Layout`, the parts of the window it has around its centre | `desktop_ui` (tests only) |
 | `src/view.rs` | `View`, the ways Library shows a folder's photos (a grid of thumbnails, or one photo in the viewer): each one's name and icon | `desktop_ui` (tests only) |
-| `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the right dock's message when no photo is selected, and the filmstrip's backdrop), the title bar's toggles for them, and `Docks`, which of them are shown, saved and restored | `eframe`, `egui`, `desktop_ui` |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher and settings gear, the toolbar under the centre with the mode's own controls (Library's view buttons), the order the window's panels are laid out in, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode, docks and view it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
+| `src/keymap.rs` | the keyboard shortcuts: one table of what each chord does (switch mode, switch view, show or hide docks, open Settings or the reference, quit), on which surfaces (the grid, the viewer), and the group and description the reference lists it under; `pressed`, which the handlers ask, and the reference's `sections`, built from the same table. A shortcut to a mode not built yet does nothing and is not listed | `egui`, `desktop_ui` |
+| `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the right dock's message when no photo is selected, and the filmstrip's backdrop), the title bar's toggles for them, and `Docks`, which of them are shown, shown or hidden together by a key, saved and restored | `eframe`, `egui`, `desktop_ui` |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher and settings gear, the toolbar under the centre with the mode's own controls (Library's view buttons), the order the window's panels are laid out in, the keyboard shortcuts it handles, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode, docks and view it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name, tagline and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp`'s constants, and that every crate's version is the workspace's | the library, `toml` |
@@ -95,7 +96,14 @@ for the filmstrip, which the grid has no need of; and last the centre,
 empty so far, which takes what is left. Each frame starts by resolving the theme
 choice against the OS light/dark preference and, when the resulting theme
 changed, reinstalling egui's visuals and restyling the frame's root `Ui`,
-which took its style before the app ran. The Settings dialog only records
+which took its style before the app ran. Next come the keyboard
+shortcuts pressed in the frame, before anything is drawn, so a key that
+switches the view or hides a dock shows in that same frame. They stand
+down while a dialog is open, all but the reference's own key, which
+closes it, and while a text field has the keyboard. egui's own Ctrl+Q
+is turned off, so quitting follows the same rules everywhere but on
+macOS, where the system's app menu takes Cmd+Q before the window sees
+it. The Settings dialog only records
 the choice; the next frame installs it, so no frame is painted in two
 themes. The same step keeps
 egui's theme preference in line with the choice. egui passes that

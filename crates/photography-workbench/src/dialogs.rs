@@ -5,6 +5,7 @@
 
 use desktop_ui::about::{self, AboutInfo};
 use desktop_ui::dialog;
+use desktop_ui::keys;
 use desktop_ui::theme::{self, Theme};
 
 use crate::PhotographyWorkbenchApp as App;
@@ -23,6 +24,28 @@ pub fn settings(ctx: &egui::Context, theme: &mut Option<Theme>) -> bool {
         ui.add_space(2.0);
         let label = ui.label("Theme");
         theme::picker(ui, "theme", theme).labelled_by(label.id);
+    })
+    .should_close()
+}
+
+/// The width of the reference of keyboard shortcuts, in points, which its
+/// descriptions wrap in.
+const SHORTCUTS_WIDTH: f32 = 480.0;
+
+/// The tallest the reference's list grows before it scrolls, in points.
+const SHORTCUTS_HEIGHT: f32 = 460.0;
+
+/// The reference of keyboard shortcuts, `sections`. Returns whether the
+/// dialog is to close.
+pub fn shortcuts(ctx: &egui::Context, sections: &[keys::Section<'_>]) -> bool {
+    dialog::show(ctx, "shortcuts", |ui| {
+        ui.set_width(SHORTCUTS_WIDTH);
+        ui.heading("Keyboard shortcuts");
+        ui.add_space(2.0);
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .max_height(SHORTCUTS_HEIGHT)
+            .show(ui, |ui| keys::reference(ui, sections));
     })
     .should_close()
 }

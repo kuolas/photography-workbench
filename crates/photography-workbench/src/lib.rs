@@ -8,6 +8,7 @@
 
 mod app;
 mod dialogs;
+mod keymap;
 mod layout;
 mod mode;
 mod view;

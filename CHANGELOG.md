@@ -36,6 +36,14 @@ Nothing has been released yet.
 - In Library, two buttons on a toolbar under the centre choose how the
   centre shows a folder's photos: as a grid of thumbnails, or one at a
   time in a viewer. The choice is remembered between runs.
+- Keyboard shortcuts, the ones established photography tools use for
+  the same things: G and E for the thumbnail grid and the image viewer,
+  Esc from the viewer back to the grid, Tab and Shift+Tab to show or
+  hide the side docks or all of them, F6, F7 and F8 for the filmstrip
+  and the left and right docks, Ctrl+Alt+1 for Library, Ctrl+, for
+  Settings and Ctrl+Q to quit, with Cmd for Ctrl and Option for Alt on
+  macOS. Ctrl+/ opens a reference that lists them all. The shortcuts
+  stand down while a dialog is open.
 - The window opens at 1280 × 800 points the first time and cannot be made
   smaller, so every part of it fits on a handheld's screen.
 - Dragging the title bar moves the window, and double-clicking it maximizes
