@@ -193,16 +193,18 @@ impl PhotographyWorkbenchApp {
                 // controls, or from the window's edge on macOS.
                 ui.add_space(10.0);
                 let (parts, surface) = (self.parts(), self.surface());
-                layout::dock_toggles(ui, palette, parts, surface, &mut self.docks);
+                if let Some(side) = layout::dock_toggles(ui, palette, parts, surface, self.docks) {
+                    self.perform(ui.ctx(), Action::Dock(side));
+                }
                 let [gear, shortcuts] = TITLE_BAR_ICONS;
                 let chord = keymap::chord_for(surface, Action::Settings);
                 if chrome::icon_button(ui, palette, gear, "Settings", chord).clicked() {
-                    self.show_settings = true;
+                    self.perform(ui.ctx(), Action::Settings);
                 }
                 let label = "Keyboard shortcuts";
                 let chord = keymap::chord_for(surface, Action::Shortcuts);
                 if chrome::icon_button(ui, palette, shortcuts, label, chord).clicked() {
-                    self.show_shortcuts = true;
+                    self.perform(ui.ctx(), Action::Shortcuts);
                 }
             },
         );
@@ -240,34 +242,11 @@ impl PhotographyWorkbenchApp {
         let surface = self.surface();
         let pressed = |action| keymap::pressed(ctx, surface, action);
         if self.show_shortcuts && pressed(Action::Shortcuts) {
-            self.show_shortcuts = false;
+            self.perform(ctx, Action::Shortcuts);
             return;
         }
         if ctx.memory(|m| m.top_modal_layer().is_some()) || ctx.text_edit_focused() {
             return;
-        }
-        for mode in Mode::ALL {
-            if mode.is_available() && pressed(Action::Mode(mode)) {
-                self.mode = mode;
-            }
-        }
-        for view in View::ALL {
-            if pressed(Action::View(view)) {
-                self.view = view;
-            }
-        }
-        let parts = self.parts();
-        let toggles = [
-            (Action::SideDocks, &[Side::Left, Side::Right][..]),
-            (Action::AllDocks, &[Side::Left, Side::Right, Side::Bottom]),
-            (Action::Dock(Side::Left), &[Side::Left]),
-            (Action::Dock(Side::Right), &[Side::Right]),
-            (Action::Dock(Side::Bottom), &[Side::Bottom]),
-        ];
-        for (action, sides) in toggles {
-            if pressed(action) {
-                self.docks.toggle(parts, sides);
-            }
         }
         // egui moves the keyboard focus to the next widget on Tab, and to
         // the one before on Shift+Tab; here those keys show and hide the
@@ -275,14 +254,32 @@ impl PhotographyWorkbenchApp {
         if pressed(Action::SideDocks) || pressed(Action::AllDocks) {
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
-        if pressed(Action::Settings) {
-            self.show_settings = true;
+        for action in keymap::pressed_actions(ctx, surface) {
+            self.perform(ctx, action);
         }
-        if pressed(Action::Shortcuts) {
-            self.show_shortcuts = true;
-        }
-        if pressed(Action::Quit) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    /// Do what `action` asks, whether a key, a button or a menu item asked
+    /// for it, so each asks for the same thing in the same way (ADR010).
+    fn perform(&mut self, ctx: &egui::Context, action: Action) {
+        let parts = self.parts();
+        match action {
+            Action::Mode(mode) => {
+                if mode.is_available() {
+                    self.mode = mode;
+                }
+            }
+            Action::View(view) => self.view = view,
+            Action::SideDocks => self.docks.toggle(parts, &[Side::Left, Side::Right]),
+            Action::AllDocks => {
+                self.docks
+                    .toggle(parts, &[Side::Left, Side::Right, Side::Bottom]);
+            }
+            Action::Dock(side) => self.docks.toggle(parts, &[side]),
+            Action::Settings => self.show_settings = true,
+            Action::Shortcuts => self.show_shortcuts = !self.show_shortcuts,
+            Action::About => self.show_about = true,
+            Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
     }
 
@@ -308,7 +305,7 @@ impl PhotographyWorkbenchApp {
                     if toolbar::button(ui, palette, view.icon(), view.name(), selected, chord)
                         .clicked()
                     {
-                        self.view = view;
+                        self.perform(ui.ctx(), Action::View(view));
                     }
                 }
             }
@@ -324,7 +321,7 @@ impl PhotographyWorkbenchApp {
             .sense(egui::Sense::click())
             .alt_text(&about);
         if ui.add(icon).on_hover_text(about).clicked() {
-            self.show_about = true;
+            self.perform(ui.ctx(), Action::About);
         }
     }
 
@@ -346,7 +343,7 @@ impl PhotographyWorkbenchApp {
                 .inner
                 .on_disabled_hover_text("Coming in a later release");
             if response.clicked() {
-                self.mode = mode;
+                self.perform(ui.ctx(), Action::Mode(mode));
             }
         }
     }
@@ -460,8 +457,8 @@ mod tests {
     use desktop_ui::{icons, theme};
 
     use super::{
-        Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, THEME_KEY, TITLE_BAR_ICONS, Theme,
-        VIEW_KEY, View,
+        Action, Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, Side, THEME_KEY, TITLE_BAR_ICONS,
+        Theme, VIEW_KEY, View,
     };
 
     /// Settings kept in memory, in place of eframe's file.
@@ -778,6 +775,49 @@ mod tests {
             .map(|viewport| viewport.commands.clone())
             .unwrap_or_default();
         assert!(sent.contains(&ViewportCommand::Close), "{sent:?}");
+    }
+
+    /// An action asked for directly, as a menu item asks for it, does what
+    /// the key or button that asks for it does.
+    #[test]
+    fn an_action_does_what_its_key_or_button_does() {
+        let ctx = egui::Context::default();
+        let mut app = PhotographyWorkbenchApp {
+            view: View::Viewer,
+            ..PhotographyWorkbenchApp::default()
+        };
+        app.perform(&ctx, Action::About);
+        assert!(app.show_about);
+        app.perform(&ctx, Action::Settings);
+        assert!(app.show_settings);
+        app.perform(&ctx, Action::Shortcuts);
+        assert!(app.show_shortcuts, "the reference opens");
+        app.perform(&ctx, Action::Shortcuts);
+        assert!(!app.show_shortcuts, "and closes");
+
+        app.perform(&ctx, Action::Dock(Side::Bottom));
+        assert_eq!(app.docks, docks(true, true, false));
+        app.perform(&ctx, Action::SideDocks);
+        assert_eq!(app.docks, docks(false, false, false));
+        app.perform(&ctx, Action::AllDocks);
+        assert_eq!(app.docks, docks(true, true, true));
+
+        app.perform(&ctx, Action::View(View::Grid));
+        assert_eq!(app.view, View::Grid);
+        app.mode = Mode::Develop;
+        app.perform(&ctx, Action::Mode(Mode::Library));
+        assert_eq!(app.mode, Mode::Library);
+        app.perform(&ctx, Action::Mode(Mode::Organizer));
+        assert_eq!(app.mode, Mode::Library, "a mode not built yet");
+    }
+
+    /// The docks shown: the left, right and bottom ones.
+    fn docks(left: bool, right: bool, bottom: bool) -> Docks {
+        Docks {
+            left,
+            right,
+            bottom,
+        }
     }
 
     /// Rest the pointer on `label` until a tooltip saying `tip` shows, or

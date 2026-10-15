@@ -26,7 +26,7 @@ pub enum Surface {
     Viewer,
 }
 
-/// What a shortcut does.
+/// What a shortcut, a button or a menu item does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     /// Switch to a mode, if it is built.
@@ -43,6 +43,8 @@ pub enum Action {
     Settings,
     /// Open the reference of keyboard shortcuts, or close it.
     Shortcuts,
+    /// Open About, which no shortcut does.
+    About,
     /// Close the window, which quits the app.
     Quit,
 }
@@ -233,6 +235,21 @@ pub fn pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bool {
     })
 }
 
+/// The actions whose chords were pressed in this frame on `surface`, in
+/// the table's order, each once, however many of its chords were pressed.
+pub fn pressed_actions(ctx: &egui::Context, surface: Surface) -> Vec<Action> {
+    let mut actions = Vec::new();
+    for binding in BINDINGS {
+        if binding.surfaces.contains(&surface)
+            && !actions.contains(&binding.action)
+            && binding.chord.pressed(ctx)
+        {
+            actions.push(binding.action);
+        }
+    }
+    actions
+}
+
 /// The chord that does `action` on `surface`, for a control that does the
 /// same to name in its tooltip: the first in the table, when more than
 /// one does. `None` when no chord does it there, or the action does
@@ -289,6 +306,30 @@ mod tests {
             assert!(!binding.surfaces.is_empty(), "{:?}", binding.action);
             assert!(!binding.description.is_empty(), "{:?}", binding.action);
         }
+    }
+
+    /// An action pressed by two of its chords in one frame is done once,
+    /// as a toggle done twice would undo itself.
+    #[test]
+    fn an_action_pressed_twice_in_a_frame_is_done_once() {
+        let press = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: NONE,
+        };
+        let input = egui::RawInput {
+            events: vec![press(Key::G), press(Key::Escape)],
+            ..egui::RawInput::default()
+        };
+        let mut actions = Vec::new();
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(input, |ui| {
+            actions = pressed_actions(ui.ctx(), Surface::Viewer);
+        });
+        output.textures_delta.clear();
+        assert_eq!(actions, [Action::View(View::Grid)]);
     }
 
     /// A control is named the chord that does what it does where it is,
