@@ -4,7 +4,7 @@
 //! dialogs.
 
 use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
-use desktop_ui::icons;
+use desktop_ui::fonts;
 use desktop_ui::style;
 use desktop_ui::theme::{self, Theme};
 
@@ -64,11 +64,11 @@ impl PhotographyWorkbenchApp {
     /// culls on. Every layout is designed and tested at this size (ADR010).
     pub const MIN_WINDOW: egui::Vec2 = egui::vec2(1280.0, 800.0);
 
-    /// Called once, before the first frame. Installs the icon font and the
+    /// Called once, before the first frame. Installs the fonts and the
     /// style, and restores the saved theme choice and mode; with none
     /// saved, or an unreadable one, takes the default.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        icons::install(&cc.egui_ctx);
+        fonts::install(&cc.egui_ctx);
         style::install(&cc.egui_ctx);
         let saved = |key| cc.storage.and_then(|storage| storage.get_string(key));
         let theme =
@@ -497,6 +497,22 @@ mod tests {
         assert!(icons::resolves("x"));
         let (glyph, font) = icons::glyph("x", 14.0, '?');
         assert!(harness.ctx.fonts_mut(|fonts| fonts.has_glyph(&font, glyph)));
+    }
+
+    /// The window's text is in Inter, and its headings in Inter's
+    /// semibold weight.
+    #[test]
+    fn the_typeface_is_installed_at_start() {
+        let harness = harness();
+        let first = harness.ctx.fonts(|fonts| {
+            fonts.definitions().families[&egui::FontFamily::Proportional][0].clone()
+        });
+        assert_eq!(first, "Inter");
+        let heading = egui::TextStyle::Heading.resolve(&harness.ctx.global_style());
+        assert_eq!(
+            heading.family,
+            egui::FontFamily::Name(desktop_ui::fonts::SEMIBOLD.into())
+        );
     }
 
     #[test]

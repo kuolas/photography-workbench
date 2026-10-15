@@ -16,7 +16,7 @@
 //! tooltip, menu or dialog fading in and a dock sliding out. egui's own is
 //! brisk; the window's is unhurried.
 
-use egui::{FontId, TextStyle};
+use egui::TextStyle;
 
 /// How long every animation takes, in seconds; egui's own is 0.2.
 const ANIMATION_TIME: f32 = 0.4;
@@ -35,10 +35,11 @@ pub fn install(ctx: &egui::Context) {
         // them lines up.
         spacing.interact_size.y = 22.0;
         let sizes = [(TextStyle::Small, 11.0), (TextStyle::Heading, 16.0)];
+        // Only the size: the face is the fonts' to set.
         for (text_style, size) in sizes {
-            style
-                .text_styles
-                .insert(text_style, FontId::proportional(size));
+            if let Some(font) = style.text_styles.get_mut(&text_style) {
+                font.size = size;
+            }
         }
         style.animation_time = ANIMATION_TIME;
     });

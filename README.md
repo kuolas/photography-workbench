@@ -85,3 +85,7 @@ version.
 This program is distributed in the hope that it will be useful, but WITHOUT
 ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
 FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
+
+The Inter typeface in `crates/desktop-ui/assets/fonts/` is copyright The
+Inter Project Authors and licensed under the SIL Open Font License, version
+1.1; see [its licence](crates/desktop-ui/assets/fonts/LICENSE-Inter.txt).

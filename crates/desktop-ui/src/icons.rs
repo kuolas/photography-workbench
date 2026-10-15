@@ -33,11 +33,17 @@ fn resolve(name: &str) -> Option<(char, FontFamily)> {
 /// [`lucide`] or [`glyph`] panics.
 ///
 /// It sets egui's font definitions to egui's defaults plus the icon font,
-/// so a font added later must be added after it.
+/// so a font added later must be added after it; [`crate::fonts::install`]
+/// installs the icon font along with the window's typeface.
 pub fn install(ctx: &egui::Context) {
     let mut defs = egui::FontDefinitions::default();
-    // egui's own fonts back the icon family up, so a character the icon
-    // font lacks still has a glyph.
+    add_to(&mut defs);
+    ctx.set_fonts(defs);
+}
+
+/// Add the icon font to `defs`, backed up by every font already in it, so
+/// a character the icon font lacks still has a glyph.
+pub fn add_to(defs: &mut egui::FontDefinitions) {
     let fallbacks: Vec<String> = defs.font_data.keys().cloned().collect();
     for font in iconflow::fonts() {
         defs.font_data.insert(
@@ -51,7 +57,6 @@ pub fn install(ctx: &egui::Context) {
         family.push(font.family.to_owned());
         family.extend(fallbacks.iter().cloned());
     }
-    ctx.set_fonts(defs);
 }
 
 /// The Lucide icon `name` at `size` points, as text for a label or a

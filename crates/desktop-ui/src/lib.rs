@@ -7,6 +7,7 @@
 pub mod about;
 pub mod chrome;
 pub mod dialog;
+pub mod fonts;
 pub mod icons;
 pub mod style;
 pub mod theme;
