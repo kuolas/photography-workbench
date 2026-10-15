@@ -503,7 +503,7 @@ mod tests {
     fn the_style_is_installed_at_start() {
         let harness = harness();
         let padding = harness.ctx.global_style().spacing.button_padding;
-        assert_eq!(padding, egui::vec2(10.0, 6.0));
+        assert_eq!(padding, egui::vec2(8.0, 3.0));
     }
 
     #[test]
