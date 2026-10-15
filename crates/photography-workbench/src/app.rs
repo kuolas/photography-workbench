@@ -158,7 +158,9 @@ impl PhotographyWorkbenchApp {
             |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 chrome::window_controls(ui, palette);
-                ui.add_space(8.0);
+                // The first icon's square ends 16 points from the window
+                // controls, or from the window's edge on macOS.
+                ui.add_space(10.0);
                 let gear = ("settings", '⚙');
                 if chrome::icon_button(ui, palette, gear, "Settings").clicked() {
                     self.show_settings = true;
@@ -171,6 +173,7 @@ impl PhotographyWorkbenchApp {
                 .max_rect(bar)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
             |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
                 let pad = chrome::title_bar_left_pad(ui.ctx(), self.mac_window_buttons);
                 ui.add_space(pad);
                 if !cfg!(target_os = "macos") {
