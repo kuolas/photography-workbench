@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The parts of a title bar the app draws itself: the bar's frame, the
-//! region that drags the window, the window controls, and the strips along
-//! the window's edges that resize it.
+//! region that drags the window, the buttons the bar holds, the window
+//! controls, and the strips along the window's edges that resize it.
 //!
 //! On Windows and Linux the app turns the system's frame off, so it draws
 //! the close, maximize and minimize buttons and handles resizing itself. On
@@ -39,6 +39,9 @@ const TITLE_BAR_LEFT_MARGIN: i8 = 8;
 
 /// The width of each window control.
 const WINDOW_CONTROL_WIDTH: f32 = 46.0;
+
+/// The width of an [`icon_button`].
+const ICON_BUTTON_WIDTH: f32 = 36.0;
 
 /// Whether the system draws the window's controls and resizes it at its
 /// edges, which it does on macOS only.
@@ -121,6 +124,46 @@ pub fn title_bar_drag_region(ui: &mut egui::Ui, bar: Rect) {
     }
 }
 
+/// A title-bar button showing only the Lucide icon `icon.0`, or the
+/// character `icon.1` if the name does not resolve. `label` is its tooltip
+/// and the name screen readers and the tests know it by.
+pub fn icon_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    icon: (&str, char),
+    label: &str,
+) -> egui::Response {
+    let colours = (palette.icon_inactive, palette.icon_active);
+    let fill = palette.hover_overlay;
+    let size = vec2(ICON_BUTTON_WIDTH, TITLE_BAR_HEIGHT);
+    painted_button(ui, size, (icon, 16.0), colours, fill, label)
+}
+
+/// A title-bar button with the Lucide icon `icon.0` (or the text `icon.1`
+/// if the name does not resolve) before the word `label`, shown selected
+/// when `selected`: one of a row of buttons choosing one of several
+/// things. Screen readers and the tests know it by `label` alone. Disabled
+/// when added to a disabled `ui`.
+pub fn selectable_button(
+    ui: &mut egui::Ui,
+    icon: (&str, &str),
+    label: &str,
+    selected: bool,
+) -> egui::Response {
+    let text = icons::labeled(ui, icon.0, icon.1, label);
+    let response = ui.add(egui::Button::new(text).selected(selected));
+    // egui names a button by all its text, the icon's character included.
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::Button,
+            response.enabled(),
+            selected,
+            label,
+        )
+    });
+    response
+}
+
 /// The close, maximize (or restore) and minimize buttons, in a
 /// right-to-left layout, so close ends up at the far right as on Windows
 /// and Linux. On macOS they add nothing: the system's own buttons are there.
@@ -152,9 +195,7 @@ fn draw_window_controls(ui: &mut egui::Ui, palette: &Palette) {
 
 /// One window control, the title bar's full height: the Lucide icon
 /// `icon.0`, or the character `icon.1` if it does not resolve. `danger`
-/// turns its hover red, for the close button. The icon is painted rather
-/// than added as a widget, so the control gives screen readers and the
-/// tests `label` as its name itself.
+/// turns its hover red, for the close button.
 fn window_control(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -162,21 +203,39 @@ fn window_control(
     label: &str,
     danger: bool,
 ) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(WINDOW_CONTROL_WIDTH, TITLE_BAR_HEIGHT), Sense::click());
-    let hovered = response.hovered();
-    let colour = match (hovered, danger) {
-        (true, true) => {
-            ui.painter().rect_filled(rect, 0.0, palette.danger);
-            palette.on_danger
-        }
-        (true, false) => {
-            ui.painter().rect_filled(rect, 0.0, palette.hover_overlay);
-            palette.window_ctrl
-        }
-        (false, _) => palette.window_ctrl,
+    let (hover_glyph, fill) = if danger {
+        (palette.on_danger, palette.danger)
+    } else {
+        (palette.window_ctrl, palette.hover_overlay)
     };
-    let (glyph, font) = icons::glyph(icon.0, 14.0, icon.1);
+    let colours = (palette.window_ctrl, hover_glyph);
+    let size = vec2(WINDOW_CONTROL_WIDTH, TITLE_BAR_HEIGHT);
+    painted_button(ui, size, (icon, 14.0), colours, fill, label)
+}
+
+/// A button of `size` that paints its own icon: the Lucide icon
+/// `icon.0.0`, or the character `icon.0.1` if it does not resolve, at
+/// `icon.1` points. The icon is `colours.0`, and `colours.1` on `fill`
+/// while the pointer is over the button. The icon is painted rather than
+/// added as a widget, so the button gives screen readers and the tests
+/// `label` as its name itself; `label` is its tooltip too.
+fn painted_button(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    icon: ((&str, char), f32),
+    colours: (egui::Color32, egui::Color32),
+    fill: egui::Color32,
+    label: &str,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let colour = if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, fill);
+        colours.1
+    } else {
+        colours.0
+    };
+    let ((name, fallback), points) = icon;
+    let (glyph, font) = icons::glyph(name, points, fallback);
     ui.painter()
         .text(rect.center(), Align2::CENTER_CENTER, glyph, font, colour);
     response.widget_info(|| {
@@ -259,9 +318,13 @@ fn resize_strips(window: Rect) -> [(Rect, ResizeDirection, CursorIcon); 8] {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    use egui::accesskit::Toggled;
     use egui::{Event, Modifiers, PointerButton, Pos2, ViewportId};
     use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable as _;
+    use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
     use super::*;
     use crate::theme::Theme;
@@ -457,6 +520,39 @@ mod tests {
         };
         assert_eq!(pad(true), 2.0);
         assert_eq!(pad(false), left_pad(SYSTEM_FRAME, None, 1.0));
+    }
+
+    #[test]
+    fn an_icon_button_is_named_by_its_label_and_reports_its_click() {
+        let clicks = Rc::new(Cell::new(0));
+        let counted = Rc::clone(&clicks);
+        let palette = Theme::Paper.palette();
+        let mut harness = harness(vec2(200.0, TITLE_BAR_HEIGHT), false, move |ui| {
+            if icon_button(ui, &palette, ("settings", '⚙'), "Settings").clicked() {
+                counted.set(counted.get() + 1);
+            }
+        });
+        harness.get_by_label("Settings").click();
+        harness.run();
+        assert_eq!(clicks.get(), 1);
+    }
+
+    #[test]
+    fn a_selectable_button_is_named_by_its_word_and_says_whether_it_is_selected() {
+        let harness = harness(vec2(400.0, TITLE_BAR_HEIGHT), false, |ui| {
+            ui.horizontal(|ui| {
+                selectable_button(ui, ("images", "▦"), "Library", true);
+                ui.add_enabled_ui(false, |ui| {
+                    selectable_button(ui, ("import", "⇩"), "Organizer", false);
+                });
+            });
+        });
+        let library = harness.get_by_label("Library").accesskit_node();
+        assert_eq!(library.toggled(), Some(Toggled::True));
+        assert!(!library.is_disabled());
+        let organizer = harness.get_by_label("Organizer").accesskit_node();
+        assert_eq!(organizer.toggled(), Some(Toggled::False));
+        assert!(organizer.is_disabled());
     }
 
     /// A window 400 × 300 pt with nothing in it but the resize strips.
