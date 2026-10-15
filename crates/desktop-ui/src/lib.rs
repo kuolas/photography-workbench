@@ -5,6 +5,7 @@
 //! other app, can use it as they are. See `docs/ARCHITECTURE.md`.
 
 pub mod chrome;
+pub mod dialog;
 pub mod icons;
 pub mod style;
 pub mod theme;

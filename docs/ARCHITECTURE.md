@@ -19,7 +19,7 @@ never:
 |---|---|---|
 | `crates/catalog` | the photos on disk: the folder tree, a folder's photo list, the current photo. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
-| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the icons and the parts of the title bar. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
+| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the style, the icons, the parts of the title bar and the dialogs' frame. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
 | `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | any other crate here, and any external one |
 
 ### photography-workbench
@@ -51,9 +51,10 @@ Paths are relative to `crates/desktop-ui`:
 |---|---|---|
 | `src/lib.rs` | the library root | its own modules |
 | `src/chrome.rs` | the parts of the title bar the app draws itself: its frame and height, the region that drags the window and maximizes it on a double-click, its buttons (one showing an icon, and one showing an icon and a word that can be shown selected), the close, maximize and minimize buttons, the strips along the window's edges that resize it, and the gap that keeps the bar clear of macOS's window buttons. The window controls and the strips add nothing on macOS, where the system's frame provides them | `egui`, its own `icons` and `theme` |
+| `src/dialog.rs` | dialogs: the frame every dialog shares (the theme's popup frame with 16 points of room inside), and `show`, which shows one. A dialog closes on Esc or a click outside it, never acting as it closes | `egui` |
 | `src/icons.rs` | the icons: Lucide's icon font, given to egui once by `install`, and an icon by its Lucide name as text (`lucide`), before a word as one run of text for a button (`labeled`), or as a character and a font to paint (`glyph`), with a fallback for a name that does not resolve | `egui`, `iconflow` |
 | `src/style.rs` | the style every part of the window shares apart from its colours: the spacing (the room inside buttons, the gaps between widgets, the height of a control, the margins of menus and windows, how tall a drop-down list grows), the scroll bars, which float over what they scroll and stay visible at rest, and the pace of its animations, installed once in both of egui's styles so a change of theme keeps it | `egui` |
-| `src/theme.rs` | the colour themes: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one, and each theme's `Palette`, the colours of every part of the window, and how it maps onto egui's visuals (Dark keeps the colours of egui's stock dark visuals as they are, and its palette repeats them), and the rounded corners every theme gives buttons and fields | `egui` |
+| `src/theme.rs` | the colour themes: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one and `picker` offers in a drop-down list, and each theme's `Palette`, the colours of every part of the window, and how it maps onto egui's visuals (Dark keeps the colours of egui's stock dark visuals as they are, and its palette repeats them), and the rounded corners every theme gives buttons and fields | `egui` |
 
 ### catalog and previews
 

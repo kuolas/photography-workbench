@@ -36,7 +36,7 @@ const fn hex(rgb: u32) -> Color32 {
 }
 
 /// A concrete theme: colours that [`Self::apply`] installs on egui.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Theme {
     /// A warm "paper" theme for well-lit rooms.
     Paper,
@@ -152,6 +152,30 @@ pub fn resolve(choice: Option<Theme>, ctx: &egui::Context) -> Theme {
         Some(egui::Theme::Light) => Theme::Paper,
         _ => Theme::Graphite, // OS dark, or preference unknown
     })
+}
+
+/// The name of the user's `choice`: the theme's [`Theme::name`], or
+/// "System" for `None`.
+pub fn choice_name(choice: Option<Theme>) -> &'static str {
+    choice.map_or("System", Theme::name)
+}
+
+/// The width of [`picker`], in points.
+const PICKER_WIDTH: f32 = 190.0;
+
+/// A drop-down list of the theme choices, System first and then every
+/// theme, lightest to darkest. Picking one sets `choice`.
+pub fn picker(ui: &mut egui::Ui, id_salt: &str, choice: &mut Option<Theme>) -> egui::Response {
+    egui::ComboBox::from_id_salt(id_salt)
+        .selected_text(choice_name(*choice))
+        .width(PICKER_WIDTH)
+        .show_ui(ui, |ui| {
+            ui.selectable_value(choice, None, choice_name(None));
+            for theme in Theme::ALL {
+                ui.selectable_value(choice, Some(theme), theme.name());
+            }
+        })
+        .response
 }
 
 /// The egui theme preference (`egui::Options::theme_preference`) that goes
@@ -386,6 +410,30 @@ mod tests {
         assert_eq!(p.text, v.widgets.noninteractive.fg_stroke.color);
         assert_eq!(p.link, v.hyperlink_color);
         assert_eq!(p.selection, v.selection.bg_fill);
+    }
+
+    #[test]
+    fn the_picker_offers_every_choice_and_sets_the_one_picked() {
+        use egui::accesskit::Role;
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable as _;
+
+        let mut harness = Harness::builder().build_ui_state(
+            |ui, choice: &mut Option<Theme>| {
+                picker(ui, "theme", choice);
+            },
+            None,
+        );
+        assert!(harness.query_by_label("Graphite").is_none());
+        harness.get_by_role(Role::ComboBox).click();
+        harness.run();
+        harness.get_by_label("System");
+        for theme in Theme::ALL {
+            harness.get_by_label(theme.name());
+        }
+        harness.get_by_label("Graphite").click();
+        harness.run();
+        assert_eq!(*harness.state(), Some(Theme::Graphite));
     }
 
     /// Every theme rounds its controls alike, in every state they can be
