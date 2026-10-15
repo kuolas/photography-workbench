@@ -33,7 +33,8 @@ relative to `crates/photography-workbench`:
 |---|---|---|
 | `src/main.rs` | the binary: sets up logging and the window (its size, and its frame on each system), then hands control to eframe | the library, `eframe`, `env_logger` |
 | `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` | its own modules |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar, panels, menus and icon, and the theme choice it saves and applies | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
+| `src/mode.rs` | `Mode`, the app's modes (Library, Organizer, Develop): each one's name and icon, and whether it is built yet | `desktop_ui` (tests only) |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its mode switcher, panels, menus and icon, the theme choice it saves and applies, and the mode it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp::NAME`, and that every crate's version is the workspace's | the library, `toml` |
@@ -64,10 +65,12 @@ machine with no display.
 **Data flow.** eframe owns the event loop and calls
 `PhotographyWorkbenchApp::ui` every frame; egui is immediate-mode, so the UI
 is rebuilt from the app's state each time rather than kept as a widget tree.
-The only state so far is the theme choice; the window shows its own title
-bar, which holds the File and View menus and the window controls, and an
-empty view. Each frame starts by resolving the choice against the OS
-light/dark preference and, when the resulting theme changed, reinstalling
+The only state so far is the theme choice and the mode; the window shows
+its own title bar, which holds the mode switcher, the File and View menus
+and the window controls, and an empty view. Only Library is built: the
+switcher shows Organizer and Develop disabled. Each frame starts by
+resolving the theme choice against the OS light/dark preference and, when
+the resulting theme changed, reinstalling
 egui's visuals and restyling the frame's root `Ui`, which took its style
 before the app ran. The theme menu only records the choice; the next frame
 installs it, so no frame is painted in two themes. The same step keeps
@@ -80,13 +83,15 @@ Windows, so pinning it under System would freeze the theme at the one the
 OS had at launch.
 
 **Persisted state.** eframe's `persistence` feature saves the window geometry,
-egui's own settings and the app's theme choice in a
+egui's own settings and the app's theme choice and mode in a
 per-user directory named after the app id, which `main.rs` sets to the
 binary's name (for example
 `~/Library/Application Support/photography-workbench` on macOS). The theme
 choice is stored as text under the key `theme`: the theme's display name, or
 `System`; a missing or unrecognised value means System, so renaming a theme
-resets users who chose it. egui's own
+resets users who chose it. The mode is stored under the key `mode`, as
+its name; a missing or unrecognised value, or a mode not built yet, means
+Library. egui's own
 theme preference is not where the theme lives: the app sets it from the
 choice each frame, as above. Renaming the binary moves that directory,
 which resets those settings.

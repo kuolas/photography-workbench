@@ -20,6 +20,9 @@ Nothing has been released yet.
   Paper, Graphite, Nexus and Dark themes, plus System, which follows the OS
   (Paper when it is light, Graphite otherwise); the window size and theme are
   remembered between runs.
+- The title bar has a mode switcher, for the app's three modes: Library,
+  where photos are browsed and culled, and Organizer and Develop, which are
+  shown disabled until a later release. The mode is remembered between runs.
 - The window opens at 1280 × 800 points the first time and cannot be made
   smaller, so every part of it fits on a handheld's screen.
 - Dragging the title bar moves the window, and double-clicking it maximizes
