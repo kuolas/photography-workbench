@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The app's name and copyright are written out in Cargo.toml for each
-//! packaging tool, and the name again in the code. These tests keep the
+//! The app's name, tagline and copyright are written out in Cargo.toml for
+//! each packaging tool, and again in the code. These tests keep the
 //! copies in step, so a rename cannot miss one, and keep every crate's
 //! version where the workspace sets it.
 
@@ -43,6 +43,18 @@ fn every_display_name_is_the_window_title() {
             path.join(".")
         );
     }
+}
+
+/// About shows the same tagline and copyright the packages carry.
+#[test]
+fn about_matches_the_bundle() {
+    let manifest = manifest();
+    let bundle = |key| string(&manifest, &["package", "metadata", "bundle", key]);
+    assert_eq!(
+        bundle("short_description"),
+        PhotographyWorkbenchApp::TAGLINE
+    );
+    assert_eq!(bundle("copyright"), PhotographyWorkbenchApp::COPYRIGHT);
 }
 
 #[test]
