@@ -1,6 +1,6 @@
 # ADR010: Three modes in one window with its own title bar
 
-- Status: Accepted
+- Status: Accepted; the parts of the window and the title bar's layout superseded by [ADR014](adr014-the-parts-of-the-window.md)
 - Date: 2026-10-14
 - Issue: #4
 
