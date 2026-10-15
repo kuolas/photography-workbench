@@ -16,6 +16,11 @@ use crate::layout::{self, Docks};
 use crate::mode::{Layout, Mode};
 use crate::view::View;
 
+/// The Lucide icons of the title bar's settings gear and of its button
+/// for the reference of keyboard shortcuts, and the text shown in place
+/// of each if its name does not resolve.
+const TITLE_BAR_ICONS: [(&str, char); 2] = [("settings", '⚙'), ("circle-question-mark", '?')];
+
 /// The [`eframe::Storage`] key the theme choice is saved under, as the
 /// theme's [`Theme::name`], or `"System"` for none. The display name is the
 /// saved value, so renaming a theme resets users who chose it to System.
@@ -166,8 +171,9 @@ impl PhotographyWorkbenchApp {
 
     /// The title bar's contents: the app's icon (except on macOS) and the
     /// mode switcher at the left, past the space macOS's window buttons
-    /// take, and the window controls, the toggles for the mode's docks and
-    /// the settings gear at the right.
+    /// take, and the window controls, the toggles for the mode's docks, the
+    /// settings gear and the button for the reference of keyboard
+    /// shortcuts at the right.
     /// The icon opens About; on macOS, About belongs in the app menu at the
     /// top of the screen, and an icon beside the system's window buttons
     /// would look out of place. The whole bar drags the window, so it is
@@ -187,9 +193,13 @@ impl PhotographyWorkbenchApp {
                 // controls, or from the window's edge on macOS.
                 ui.add_space(10.0);
                 layout::dock_toggles(ui, palette, self.parts(), &mut self.docks);
-                let gear = ("settings", '⚙');
+                let [gear, shortcuts] = TITLE_BAR_ICONS;
                 if chrome::icon_button(ui, palette, gear, "Settings", None).clicked() {
                     self.show_settings = true;
+                }
+                let label = "Keyboard shortcuts";
+                if chrome::icon_button(ui, palette, shortcuts, label, None).clicked() {
+                    self.show_shortcuts = true;
                 }
             },
         );
@@ -437,7 +447,10 @@ mod tests {
     use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
     use desktop_ui::{icons, theme};
 
-    use super::{Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, THEME_KEY, Theme, VIEW_KEY, View};
+    use super::{
+        Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, THEME_KEY, TITLE_BAR_ICONS, Theme,
+        VIEW_KEY, View,
+    };
 
     /// Settings kept in memory, in place of eframe's file.
     #[derive(Default)]
@@ -505,13 +518,14 @@ mod tests {
     /// order, clear of the system's window buttons on macOS, and of the
     /// window controls elsewhere.
     #[test]
-    fn the_title_bar_holds_the_modes_the_gear_the_dock_toggles_and_the_window_controls() {
+    fn the_title_bar_holds_its_buttons_and_the_window_controls() {
         let harness = viewer_harness();
         let mut last = egui::Rect::NOTHING;
         let names = [
             "Library",
             "Organizer",
             "Develop",
+            "Keyboard shortcuts",
             "Settings",
             LEFT_TOGGLE,
             BOTTOM_TOGGLE,
@@ -752,6 +766,28 @@ mod tests {
             .map(|viewport| viewport.commands.clone())
             .unwrap_or_default();
         assert!(sent.contains(&ViewportCommand::Close), "{sent:?}");
+    }
+
+    /// The button beside the gear opens the reference of keyboard
+    /// shortcuts.
+    #[test]
+    fn the_title_bar_s_button_opens_the_reference() {
+        let mut harness = harness();
+        harness.get_by_label("Keyboard shortcuts").click();
+        harness.run();
+        assert!(harness.state().show_shortcuts);
+        assert!(
+            harness
+                .query_by_label("Back to the thumbnail grid")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn every_title_bar_icon_resolves() {
+        for (name, _) in TITLE_BAR_ICONS {
+            assert!(icons::resolves(name), "{name}");
+        }
     }
 
     /// Ctrl+/ opens the reference, which lists the shortcuts, and closes

@@ -38,7 +38,7 @@ relative to `crates/photography-workbench`:
 | `src/view.rs` | `View`, the ways Library shows a folder's photos (a grid of thumbnails, or one photo in the viewer): each one's name and icon | `desktop_ui` (tests only) |
 | `src/keymap.rs` | the keyboard shortcuts: one table of what each chord does (switch mode, switch view, show or hide docks, open Settings or the reference, quit), on which surfaces (the grid, the viewer), and the group and description the reference lists it under; `pressed`, which the handlers ask, and the reference's `sections`, built from the same table. A shortcut to a mode not built yet does nothing and is not listed | `egui`, `desktop_ui` |
 | `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the right dock's message when no photo is selected, and the filmstrip's backdrop), the title bar's toggles for them, and `Docks`, which of them are shown, shown or hidden together by a key, saved and restored | `eframe`, `egui`, `desktop_ui` |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher and settings gear, the toolbar under the centre with the mode's own controls (Library's view buttons), the order the window's panels are laid out in, the keyboard shortcuts it handles, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode, docks and view it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher, settings gear and button for the reference of keyboard shortcuts, the toolbar under the centre with the mode's own controls (Library's view buttons), the order the window's panels are laid out in, the keyboard shortcuts it handles, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode, docks and view it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name, tagline and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp`'s constants, and that every crate's version is the workspace's | the library, `toml` |
@@ -81,8 +81,9 @@ is rebuilt from the app's state each time rather than kept as a widget tree.
 The only state so far is the theme choice, the mode, Library's view,
 which docks are shown and which dialogs are open; the window shows its own title bar,
 which holds the app's icon (which opens About; not on macOS), the mode
-switcher, the settings gear, a toggle for each of the mode's docks and
-the window controls. Only Library is
+switcher, the button for the reference of keyboard shortcuts, the
+settings gear, a toggle for each of the mode's docks and the window
+controls. Only Library is
 built: the switcher shows Organizer and Develop disabled. Below the
 title bar the panels
 ([ADR014](architecture-decisions/adr014-the-parts-of-the-window.md))
