@@ -233,6 +233,19 @@ pub fn pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bool {
     })
 }
 
+/// The chord that does `action` on `surface`, for a control that does the
+/// same to name in its tooltip: the first in the table, when more than
+/// one does. `None` when no chord does it there, or the action does
+/// nothing yet.
+pub fn chord_for(surface: Surface, action: Action) -> Option<Chord> {
+    BINDINGS
+        .iter()
+        .find(|binding| {
+            binding.action == action && binding.surfaces.contains(&surface) && binding.is_live()
+        })
+        .map(|binding| binding.chord)
+}
+
 /// The reference's sections: a section per group, each listing the
 /// shortcuts that do something, with their chords spelled as this
 /// system spells them.
@@ -276,6 +289,20 @@ mod tests {
             assert!(!binding.surfaces.is_empty(), "{:?}", binding.action);
             assert!(!binding.description.is_empty(), "{:?}", binding.action);
         }
+    }
+
+    /// A control is named the chord that does what it does where it is,
+    /// and none where no chord does, or where it does nothing yet.
+    #[test]
+    fn a_control_s_chord_is_the_first_that_does_its_action_there() {
+        let label = |surface, action| chord_for(surface, action).map(|c| c.label_for(false));
+        let grid = Action::View(View::Grid);
+        assert_eq!(label(Surface::Viewer, grid).as_deref(), Some("G"));
+        assert_eq!(label(Surface::Grid, grid).as_deref(), Some("G"));
+        let filmstrip = Action::Dock(Side::Bottom);
+        assert_eq!(label(Surface::Viewer, filmstrip).as_deref(), Some("F6"));
+        assert_eq!(label(Surface::Grid, filmstrip), None);
+        assert_eq!(label(Surface::Grid, Action::Mode(Mode::Organizer)), None);
     }
 
     /// The reference lists every shortcut that does something, under its

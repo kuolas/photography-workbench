@@ -43,7 +43,8 @@ Nothing has been released yet.
   and the left and right docks, Ctrl+Alt+1 for Library, Ctrl+, for
   Settings and Ctrl+Q to quit, with Cmd for Ctrl and Option for Alt on
   macOS. Ctrl+/, or a button beside the settings gear, opens a
-  reference that lists them all. The shortcuts stand down while a
+  reference that lists them all, and a button's tooltip names the
+  shortcut that does what it does. The shortcuts stand down while a
   dialog is open.
 - The window opens at 1280 × 800 points the first time and cannot be made
   smaller, so every part of it fits on a handheld's screen.

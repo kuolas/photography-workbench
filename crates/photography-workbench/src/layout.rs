@@ -16,6 +16,7 @@ use desktop_ui::chrome;
 use desktop_ui::dock::{self, Side};
 use desktop_ui::theme::Palette;
 
+use crate::keymap::{self, Action, Surface};
 use crate::mode::Layout;
 
 /// The width the left dock opens at the first time, and the widths it can
@@ -114,8 +115,16 @@ impl Docks {
 }
 
 /// The title bar's toggles for the docks `layout` has, in a right-to-left
-/// layout, so they read left, bottom, right, as the docks lie.
-pub fn dock_toggles(ui: &mut egui::Ui, palette: &Palette, layout: Layout, docks: &mut Docks) {
+/// layout, so they read left, bottom, right, as the docks lie. Each
+/// names in its tooltip the chord that shows or hides its dock on
+/// `surface`.
+pub fn dock_toggles(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    layout: Layout,
+    surface: Surface,
+    docks: &mut Docks,
+) {
     let toggles = [
         (
             layout.right_dock,
@@ -137,7 +146,8 @@ pub fn dock_toggles(ui: &mut egui::Ui, palette: &Palette, layout: Layout, docks:
         ),
     ];
     for (has, side, shown, label) in toggles {
-        if has && chrome::dock_toggle(ui, palette, side, *shown, label, None).clicked() {
+        let chord = keymap::chord_for(surface, Action::Dock(side));
+        if has && chrome::dock_toggle(ui, palette, side, *shown, label, chord).clicked() {
             *shown = !*shown;
         }
     }
