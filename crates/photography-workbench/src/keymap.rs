@@ -8,7 +8,7 @@
 //!
 //! The keys are the ones established photography tools use for the same
 //! thing, so a photographer's hands already know them, with Cmd for Ctrl
-//! on macOS.
+//! on macOS (ADR015).
 
 use desktop_ui::dock::Side;
 use desktop_ui::keys::{self, Chord};
