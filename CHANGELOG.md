@@ -26,6 +26,11 @@ Nothing has been released yet.
 - The title bar has a mode switcher, for the app's three modes: Library,
   where photos are browsed and culled, and Organizer and Develop, which are
   shown disabled until a later release. The mode is remembered between runs.
+- In Library, docks surround the centre of the window: one on the left
+  for folders and one on the right for a photo's information, each
+  resized by dragging its edge. A bar of buttons along the right edge
+  picks what the right dock shows. The docks are empty so far: the right
+  one says no photo is selected.
 - The window opens at 1280 × 800 points the first time and cannot be made
   smaller, so every part of it fits on a handheld's screen.
 - Dragging the title bar moves the window, and double-clicking it maximizes
