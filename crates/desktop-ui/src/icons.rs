@@ -7,9 +7,8 @@
 //! [`install`] gives egui the font, once, before the first frame. An icon
 //! is asked for by its Lucide name, such as `"settings"`: as text for a
 //! label or a button ([`lucide`]), or as a character and a font for a
-//! widget that paints its own ([`glyph`]). egui lays out an icon and a
-//! word side by side when a button is given both:
-//! `egui::Button::new((icons::lucide("images", 14.0, "▦"), "Library"))`.
+//! widget that paints its own ([`glyph`]), or before a word, as one run
+//! of text for a button ([`labeled`]).
 //!
 //! A name that doesn't resolve shows the caller's `fallback` instead, so a
 //! misspelt name degrades rather than panics; [`resolves`] lets a test
@@ -17,7 +16,8 @@
 
 use std::sync::Arc;
 
-use egui::{FontFamily, FontId, RichText};
+use egui::text::{LayoutJob, TextFormat};
+use egui::{Color32, FontFamily, FontId, RichText, WidgetText};
 use iconflow::{Pack, Size, Style, try_icon};
 
 /// The Lucide icon `name` as a character, and the font family that holds it.
@@ -65,6 +65,30 @@ pub fn lucide(name: &str, size: f32, fallback: &str) -> RichText {
     }
 }
 
+/// The Lucide icon `name` followed by the word `text`, both at the size of
+/// `ui`'s body text, as one run of text for a button; `fallback` in place
+/// of the icon if the name doesn't resolve. The colour is left to the
+/// widget, as with [`lucide`].
+pub fn labeled(ui: &egui::Ui, name: &str, fallback: &str, text: &str) -> WidgetText {
+    /// The gap between the icon and the word, in points.
+    const GAP: f32 = 6.0;
+    let size = egui::TextStyle::Body.resolve(ui.style()).size;
+    let format = |font_id| TextFormat {
+        font_id,
+        color: Color32::PLACEHOLDER,
+        ..TextFormat::default()
+    };
+    let mut job = LayoutJob::default();
+    match resolve(name) {
+        Some((glyph, family)) => {
+            job.append(&glyph.to_string(), 0.0, format(FontId::new(size, family)));
+        }
+        None => job.append(fallback, 0.0, format(FontId::proportional(size))),
+    }
+    job.append(text, GAP, format(FontId::proportional(size)));
+    job.into()
+}
+
 /// The Lucide icon `name` as a character and the font to paint it in at
 /// `size` points, for a widget that paints its own icon; `fallback` in the
 /// proportional font if the name doesn't resolve.
@@ -104,6 +128,24 @@ mod tests {
         assert_eq!(glyph(name, 16.0, '?'), ('?', FontId::proportional(16.0)));
         assert_eq!(lucide(name, 16.0, "?").text(), "?");
         assert!(!resolves(name));
+    }
+
+    #[test]
+    fn labeled_puts_the_icon_before_the_word_at_the_body_size() {
+        egui::__run_test_ui(|ui| {
+            let body = egui::TextStyle::Body.resolve(ui.style()).size;
+            let text = labeled(ui, "settings", "?", "Settings");
+            let (glyph, _) = glyph("settings", body, '?');
+            assert_eq!(text.text(), format!("{glyph}Settings"));
+            let WidgetText::LayoutJob(job) = text else {
+                panic!("not a layout job");
+            };
+            let sizes: Vec<f32> = job.sections.iter().map(|s| s.format.font_id.size).collect();
+            assert_eq!(sizes, [body, body]);
+            assert_eq!(job.sections[1].leading_space, 6.0);
+
+            assert_eq!(labeled(ui, "no-such-icon", "?", "X").text(), "?X");
+        });
     }
 
     /// After [`install`] and one pass, egui has a glyph for an icon in the
