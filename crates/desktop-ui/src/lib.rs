@@ -13,3 +13,4 @@ pub mod fonts;
 pub mod icons;
 pub mod style;
 pub mod theme;
+pub mod toolbar;
