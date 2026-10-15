@@ -19,7 +19,7 @@ never:
 |---|---|---|
 | `crates/catalog` | the photos on disk: the folder tree, a folder's photo list, the current photo. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
-| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the style, the typeface, the icons, the parts of the title bar, the action bars, the docks, the dialogs' frame and the About dialog. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
+| `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the style, the typeface, the icons, the parts of the title bar, the action bars, the docks, the toolbar, the dialogs' frame and the About dialog. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
 | `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | any other crate here, and any external one |
 
 ### photography-workbench
@@ -60,6 +60,7 @@ Paths are relative to `crates/desktop-ui`:
 | `src/icons.rs` | the icons: Lucide's icon font, given to egui once by `install`, or added to a set of fonts by `add_to`, and an icon by its Lucide name as text (`lucide`), before a word as one run of text for a button (`labeled`), or as a character and a font to paint (`glyph`), with a fallback for a name that does not resolve | `egui`, `iconflow` |
 | `src/style.rs` | the style every part of the window shares apart from its colours: the spacing (the room inside buttons, the gaps between widgets, the height of a control), the sizes of small print and headings, and the pace of its animations, installed once in both of egui's styles so a change of theme keeps it | `egui` |
 | `src/theme.rs` | the colour themes: the concrete `Theme`, the saved choice (an `Option<Theme>`, `None` for System) that `resolve` turns into one and `picker` offers in a drop-down list, and each theme's `Palette`, the colours of every part of the window, and how it maps onto egui's visuals (Dark keeps the colours of egui's stock dark visuals as they are, and its palette repeats them), and the rounded corners every theme gives buttons and fields, and the shadows it gives popups and dialogs | `egui` |
+| `src/toolbar.rs` | the toolbar, the fixed row of controls under the window's centre: filled like the docks and marked off from the centre by a line, with controls running from both its ends, and its buttons, which look like an action bar's, smaller | `egui`, its own `action_bar` and `theme` |
 | `assets/fonts/` | Inter's regular and semibold weights, from the font's own release, and its licence, the SIL Open Font License | — |
 
 ### catalog and previews

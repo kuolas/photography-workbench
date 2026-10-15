@@ -26,8 +26,9 @@ const END_MARGIN: i8 = 8;
 /// The gap between two buttons.
 const BUTTON_GAP: f32 = 6.0;
 
-/// The side of the rounded square behind a button's icon.
-const PLATE_SIZE: f32 = 32.0;
+/// The side of the rounded square behind a button's icon, as wide as a
+/// toolbar's button.
+pub(crate) const PLATE_SIZE: f32 = 32.0;
 
 /// The radius of that square's corners, as a control's.
 const PLATE_CORNER_RADIUS: f32 = 4.0;
@@ -100,7 +101,23 @@ pub fn button(
     label: &str,
     selected: bool,
 ) -> egui::Response {
-    let size = vec2(ACTION_BAR_WIDTH, BUTTON_HEIGHT);
+    let size = (vec2(ACTION_BAR_WIDTH, BUTTON_HEIGHT), ICON_SIZE);
+    icon_button(ui, palette, size, (icon, label), selected)
+}
+
+/// A button `size.0` in size showing only the Lucide icon `icon.0`, at
+/// `size.1` (or the character `icon.1` if the name does not resolve),
+/// with the action bar's button's look: a rounded square behind the icon
+/// while `selected` or under the pointer, and the icon brighter. `label`
+/// is its tooltip and the name screen readers and the tests know it by.
+pub(crate) fn icon_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    size: (egui::Vec2, f32),
+    (icon, label): ((&str, char), &str),
+    selected: bool,
+) -> egui::Response {
+    let (size, icon_size) = size;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let square = Rect::from_center_size(rect.center(), egui::Vec2::splat(PLATE_SIZE));
     let plate = if selected {
@@ -116,7 +133,7 @@ pub fn button(
     } else {
         palette.icon_inactive
     };
-    let (glyph, font) = icons::glyph(icon.0, ICON_SIZE, icon.1);
+    let (glyph, font) = icons::glyph(icon.0, icon_size, icon.1);
     ui.painter()
         .text(rect.center(), Align2::CENTER_CENTER, glyph, font, colour);
     response.widget_info(|| {
