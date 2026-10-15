@@ -7,7 +7,9 @@
 //! The left dock is where photos are browsed from: it will hold the
 //! folder tree, and is empty until then. The tool rail picks what the
 //! right dock shows, in Library one thing so far, the photo's
-//! information.
+//! information. The bottom dock is the filmstrip's, which only the viewer
+//! has: the grid shows the photos as thumbnails already. It is empty so
+//! far.
 
 use desktop_ui::action_bar::{self, Edge};
 use desktop_ui::dock;
@@ -24,6 +26,10 @@ const LEFT_DOCK: (f32, std::ops::RangeInclusive<f32>) = (268.0, 200.0..=380.0);
 /// be dragged to.
 const RIGHT_DOCK: (f32, std::ops::RangeInclusive<f32>) = (270.0, 250.0..=460.0);
 
+/// The height of the bottom dock, which holds the filmstrip: fixed, as
+/// the filmstrip's cells are.
+const FILMSTRIP_HEIGHT: f32 = 142.0;
+
 /// What the right dock can show: the tool rail's button for it.
 const INFO: ((&str, char), &str) = (("info", 'ℹ'), "Info");
 
@@ -35,6 +41,8 @@ pub struct Docks {
     pub left: bool,
     /// Whether the right dock is shown.
     pub right: bool,
+    /// Whether the bottom dock is shown.
+    pub bottom: bool,
 }
 
 impl Default for Docks {
@@ -43,6 +51,7 @@ impl Default for Docks {
         Self {
             left: true,
             right: true,
+            bottom: true,
         }
     }
 }
@@ -79,6 +88,28 @@ pub fn side_docks(ui: &mut egui::Ui, layout: Layout, docks: &mut Docks) {
             .size_range(widths);
         dock::show(panel, ui, &mut docks.right, info);
     }
+}
+
+/// The bottom dock, if `layout` has it, shown or hidden as `docks` says.
+/// It comes after the side docks, so it runs between them, under the
+/// centre only. Without it, the widgets after it keep the ids they have
+/// with it, as they do when it is only hidden.
+pub fn bottom_dock(ui: &mut egui::Ui, palette: &Palette, layout: Layout, docks: &mut Docks) {
+    if layout.bottom_dock {
+        let panel = egui::Panel::bottom("bottom_dock")
+            .resizable(false)
+            .exact_size(FILMSTRIP_HEIGHT);
+        dock::show(panel, ui, &mut docks.bottom, |ui| filmstrip(ui, palette));
+    } else {
+        ui.skip_ahead_auto_ids(1);
+    }
+}
+
+/// The bottom dock: the filmstrip, on the viewer's backdrop, so it reads
+/// as part of the viewer above it.
+fn filmstrip(ui: &mut egui::Ui, palette: &Palette) {
+    ui.painter()
+        .rect_filled(ui.max_rect(), 0.0, palette.viewer_backdrop);
 }
 
 /// The right dock showing Info: the selected photo's information, or a

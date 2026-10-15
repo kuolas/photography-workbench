@@ -10,5 +10,6 @@ mod app;
 mod dialogs;
 mod layout;
 mod mode;
+mod view;
 
 pub use app::PhotographyWorkbenchApp;
