@@ -21,14 +21,39 @@
 //! variant with its match arms, and an entry in [`Theme::ALL`].
 //!
 //! egui keeps the shape of its widgets with their colours, in the visuals,
-//! so every theme also gives buttons and fields the same rounded corners.
-//! The spacing is not part of a theme: see [`crate::style`].
+//! so every theme also gives buttons and fields the same rounded corners,
+//! and popups and dialogs the same shadows. The spacing is not part of a
+//! theme: see [`crate::style`].
 
-use egui::{Color32, CornerRadius};
+use egui::{Color32, CornerRadius, Shadow};
 
 /// The corner radius of buttons, fields and the other controls, in every
 /// theme, in points; egui's own is 2 to 3.
-const CONTROL_CORNER_RADIUS: u8 = 10;
+const CONTROL_CORNER_RADIUS: u8 = 4;
+
+/// The shadow under a popup, such as a menu or a drop-down list, and
+/// under a dialog: straight down and soft, where egui's falls to the
+/// lower right. Its opacity is [`SHADOW_ALPHA`]'s.
+const POPUP_SHADOW: Shadow = shadow(4, 16);
+
+/// The shadow under a window, as [`POPUP_SHADOW`] but deeper.
+const WINDOW_SHADOW: Shadow = shadow(8, 30);
+
+/// The opacity of [`POPUP_SHADOW`] and [`WINDOW_SHADOW`] on a dark theme
+/// and on a light one, out of 255: a dark theme needs a darker shadow to
+/// show at all.
+const SHADOW_ALPHA: [(u8, u8); 2] = [(140, 160), (50, 60)];
+
+/// A black shadow `drop` points straight down, blurred over `blur` points;
+/// its colour is set per theme.
+const fn shadow(drop: i8, blur: u8) -> Shadow {
+    Shadow {
+        offset: [0, drop],
+        blur,
+        spread: 0,
+        color: Color32::BLACK,
+    }
+}
 
 /// `0xRRGGBB` → opaque [`Color32`]. Keeps the palette tables readable.
 const fn hex(rgb: u32) -> Color32 {
@@ -84,14 +109,23 @@ impl Theme {
     }
 
     /// The egui `Visuals` for this theme: its colours, with the rounded
-    /// corners every theme shares. Labels, separators and frames, which are
-    /// not controls, keep egui's corners.
+    /// corners and the shadows every theme shares. Labels, separators and
+    /// frames, which are not controls, keep egui's corners.
     fn visuals(self) -> egui::Visuals {
         let mut v = self.colours();
         let w = &mut v.widgets;
         for state in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.open] {
             state.corner_radius = CornerRadius::same(CONTROL_CORNER_RADIUS);
         }
+        let (popup, window) = SHADOW_ALPHA[usize::from(!v.dark_mode)];
+        v.popup_shadow = Shadow {
+            color: Color32::from_black_alpha(popup),
+            ..POPUP_SHADOW
+        };
+        v.window_shadow = Shadow {
+            color: Color32::from_black_alpha(window),
+            ..WINDOW_SHADOW
+        };
         v
     }
 
@@ -453,6 +487,27 @@ mod tests {
                 assert_eq!(visuals.corner_radius, round, "{}: {state}", theme.name());
             }
             assert_eq!(w.noninteractive.corner_radius, stock, "{}", theme.name());
+        }
+    }
+
+    /// Popups and windows cast their shadow straight down, darker on a
+    /// dark theme than on a light one.
+    #[test]
+    fn every_theme_drops_its_shadows_straight_down() {
+        for theme in Theme::ALL {
+            let v = theme.visuals();
+            for shadow in [v.popup_shadow, v.window_shadow] {
+                assert_eq!(shadow.offset[0], 0, "{}", theme.name());
+            }
+            assert_eq!(v.popup_shadow.offset[1], 4, "{}", theme.name());
+            assert_eq!(v.window_shadow.blur, 30, "{}", theme.name());
+            let alpha = v.popup_shadow.color.a();
+            assert_eq!(
+                alpha,
+                if theme.is_dark() { 140 } else { 50 },
+                "{}",
+                theme.name()
+            );
         }
     }
 }

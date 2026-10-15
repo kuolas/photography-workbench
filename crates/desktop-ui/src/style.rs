@@ -3,20 +3,20 @@
 //! The style every part of the window shares apart from its colours, which
 //! come with the theme ([`crate::theme`]).
 //!
-//! The spacing: the room inside buttons, the gaps between widgets, the
-//! height of a control, the margins of menus and windows, and how tall a
-//! drop-down list grows before it scrolls. egui's own suits a compact
-//! tool: a button's text sits a point from its edge, and controls are 18
-//! points high. Parts that are drawn at a size of their own, such as the
-//! window controls and the title bar's icon buttons, keep it.
+//! The spacing: the room inside buttons, the gaps between widgets and the
+//! height of a control. Controls are roomier than egui's own, 22 points
+//! high to its 18, and sit about as close together. Margins, drop-down
+//! lists and scroll bars keep egui's own.
 //!
-//! The scroll bars float over what they scroll, so one appearing never
-//! moves the content, and stay visible at rest whenever there is something
-//! to scroll, so the reader sees there is more without moving the pointer.
+//! The text: small print at 11 points, where egui has 9, so it stays
+//! legible, and headings at 16, where egui has 18, so a dock's heading
+//! does not crowd it. Body text and buttons keep egui's 13.
 //!
 //! The pace: how long egui's animations take, from a section opening to a
-//! tooltip, menu or dialog fading in and a scroll bar appearing. egui's own
-//! is brisk; the window's is unhurried.
+//! tooltip, menu or dialog fading in and a dock sliding out. egui's own is
+//! brisk; the window's is unhurried.
+
+use egui::{FontId, TextStyle};
 
 /// How long every animation takes, in seconds; egui's own is 0.2.
 const ANIMATION_TIME: f32 = 0.4;
@@ -28,22 +28,18 @@ pub fn install(ctx: &egui::Context) {
     ctx.all_styles_mut(|style| {
         let spacing = &mut style.spacing;
         // Room between a button's text and its edge.
-        spacing.button_padding = egui::vec2(10.0, 6.0);
-        // The gap between widgets: egui's across, more down.
-        spacing.item_spacing = egui::vec2(8.0, 6.0);
+        spacing.button_padding = egui::vec2(8.0, 3.0);
+        // The gap between widgets.
+        spacing.item_spacing = egui::vec2(6.0, 4.0);
         // The height of buttons, fields and other controls, so a row of
         // them lines up.
-        spacing.interact_size.y = 26.0;
-        spacing.menu_margin = egui::Margin::same(8);
-        spacing.window_margin = egui::Margin::same(12);
-        // How tall a drop-down list grows before it scrolls: egui's 200
-        // points hold six entries at this spacing, this about thirteen. A
-        // shorter list still fits its entries.
-        spacing.combo_height = 420.0;
-        // egui's floating bars vanish at rest; these stay faintly visible.
-        spacing.scroll = egui::style::ScrollStyle::floating();
-        spacing.scroll.dormant_background_opacity = 0.3;
-        spacing.scroll.dormant_handle_opacity = 0.7;
+        spacing.interact_size.y = 22.0;
+        let sizes = [(TextStyle::Small, 11.0), (TextStyle::Heading, 16.0)];
+        for (text_style, size) in sizes {
+            style
+                .text_styles
+                .insert(text_style, FontId::proportional(size));
+        }
         style.animation_time = ANIMATION_TIME;
     });
 }
@@ -61,17 +57,16 @@ mod tests {
         install(&ctx);
         Theme::Paper.apply(&ctx);
         for theme in [egui::Theme::Light, egui::Theme::Dark] {
-            let spacing = ctx.style_of(theme).spacing.clone();
-            assert_eq!(spacing.button_padding, egui::vec2(10.0, 6.0), "{theme:?}");
-            assert_eq!(spacing.item_spacing, egui::vec2(8.0, 6.0), "{theme:?}");
-            assert_eq!(spacing.interact_size.y, 26.0, "{theme:?}");
-            assert_eq!(spacing.menu_margin, egui::Margin::same(8), "{theme:?}");
-            assert_eq!(spacing.window_margin, egui::Margin::same(12), "{theme:?}");
-            assert_eq!(spacing.combo_height, 420.0, "{theme:?}");
-            assert!(spacing.scroll.floating, "{theme:?}");
-            assert_eq!(spacing.scroll.dormant_background_opacity, 0.3, "{theme:?}");
-            assert_eq!(spacing.scroll.dormant_handle_opacity, 0.7, "{theme:?}");
-            assert_eq!(ctx.style_of(theme).animation_time, 0.4, "{theme:?}");
+            let style = ctx.style_of(theme);
+            let spacing = &style.spacing;
+            assert_eq!(spacing.button_padding, egui::vec2(8.0, 3.0), "{theme:?}");
+            assert_eq!(spacing.item_spacing, egui::vec2(6.0, 4.0), "{theme:?}");
+            assert_eq!(spacing.interact_size.y, 22.0, "{theme:?}");
+            let small = egui::TextStyle::Small.resolve(&style);
+            assert_eq!(small.size, 11.0, "{theme:?}");
+            let heading = egui::TextStyle::Heading.resolve(&style);
+            assert_eq!(heading.size, 16.0, "{theme:?}");
+            assert_eq!(style.animation_time, 0.4, "{theme:?}");
         }
     }
 }
