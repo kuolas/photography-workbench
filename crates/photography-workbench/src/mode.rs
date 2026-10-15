@@ -4,6 +4,19 @@
 //! each with its own layout of the window, chosen in the title bar's mode
 //! switcher (ADR010).
 
+/// The parts of the window a mode has around its centre, besides the
+/// title bar, which every mode has.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Layout {
+    /// The action bar along the right edge, which picks what the right
+    /// dock shows.
+    pub tool_rail: bool,
+    /// The dock along the left side.
+    pub left_dock: bool,
+    /// The dock along the right side.
+    pub right_dock: bool,
+}
+
 /// One of the app's modes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Mode {
@@ -46,6 +59,19 @@ impl Mode {
         match self {
             Self::Library => true,
             Self::Organizer | Self::Develop => false,
+        }
+    }
+
+    /// The parts of the window the mode has. A mode not built yet has
+    /// none: it cannot be entered.
+    pub fn layout(self) -> Layout {
+        match self {
+            Self::Library => Layout {
+                tool_rail: true,
+                left_dock: true,
+                right_dock: true,
+            },
+            Self::Organizer | Self::Develop => Layout::default(),
         }
     }
 

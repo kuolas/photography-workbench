@@ -9,6 +9,7 @@ use desktop_ui::style;
 use desktop_ui::theme::{self, Theme};
 
 use crate::dialogs;
+use crate::layout::{self, Docks};
 use crate::mode::Mode;
 
 /// The [`eframe::Storage`] key the theme choice is saved under, as the
@@ -30,6 +31,8 @@ pub struct PhotographyWorkbenchApp {
     resolved_theme: Option<Theme>,
     /// The mode the window shows, saved between runs.
     mode: Mode,
+    /// Which docks are shown.
+    docks: Docks,
     /// Whether the Settings dialog is open.
     show_settings: bool,
     /// Whether the About dialog is open.
@@ -250,6 +253,15 @@ impl eframe::App for PhotographyWorkbenchApp {
             .frame(chrome::title_bar_frame(&palette))
             .show(ui, |ui| self.title_bar(ui, &palette));
 
+        // Each panel takes its edge of what the ones before it left: the
+        // tool rail the window's right edge, and the side docks the rest
+        // of the height, down to the window's bottom.
+        let parts = self.mode.layout();
+        if parts.tool_rail {
+            layout::tool_rail(ui, &palette, &mut self.docks);
+        }
+        layout::side_docks(ui, parts, &mut self.docks);
+
         egui::CentralPanel::default().show(ui, |ui| {
             ui.centered_and_justified(|ui| {
                 ui.label("No folder open");
@@ -291,7 +303,7 @@ mod tests {
     use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
     use desktop_ui::icons;
 
-    use super::{MODE_KEY, Mode, PhotographyWorkbenchApp, THEME_KEY, Theme};
+    use super::{Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, THEME_KEY, Theme};
 
     /// Settings kept in memory, in place of eframe's file.
     #[derive(Default)]
@@ -492,6 +504,122 @@ mod tests {
 
         storage.set_string(MODE_KEY, "Organizer".to_owned());
         assert_eq!(harness_from(&storage).state().mode, Mode::Library);
+    }
+
+    /// Where the panel `id` was laid out in the last frame.
+    fn panel(harness: &Harness<'_, PhotographyWorkbenchApp>, id: &str) -> egui::Rect {
+        egui::PanelState::load(&harness.ctx, egui::Id::new(id))
+            .unwrap_or_else(|| panic!("no panel {id}"))
+            .outer_rect
+    }
+
+    /// At the window's smallest, Library has every part in its place: the
+    /// tool rail and the side docks from the title bar down to the window's
+    /// bottom, leaving the centre room to work in.
+    #[test]
+    fn library_lays_out_its_bars_and_docks_around_the_centre() {
+        let harness = harness();
+        let window =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, PhotographyWorkbenchApp::MIN_WINDOW);
+        let title_bar = panel(&harness, "title_bar");
+        let between = egui::Rangef::new(title_bar.bottom(), window.bottom());
+        let tool_rail = panel(&harness, "tool_rail");
+        let left_dock = panel(&harness, "left_dock");
+        let right_dock = panel(&harness, "right_dock");
+        for rect in [tool_rail, left_dock, right_dock] {
+            assert_eq!(rect.y_range(), between, "{rect:?}");
+        }
+        assert_eq!(left_dock.left(), window.left());
+        assert_eq!(tool_rail.right(), window.right());
+        assert_eq!((left_dock.width(), right_dock.width()), (268.0, 270.0));
+        assert_eq!(right_dock.right(), tool_rail.left());
+
+        // Info, what a culler looks at most, heads the tool rail.
+        let info = harness.get_by_role_and_label(Role::Button, "Info").rect();
+        assert!(info.top() - tool_rail.top() < info.height(), "{info:?}");
+
+        let centre = harness.get_by_label("No folder open").rect();
+        assert!(
+            centre.width() >= 300.0 && centre.height() >= 300.0,
+            "{centre:?}"
+        );
+        assert!(left_dock.right() <= centre.left() && centre.right() <= right_dock.left());
+        assert!(title_bar.bottom() <= centre.top() && centre.bottom() <= window.bottom());
+    }
+
+    /// With the side docks dragged as wide as they go, the centre keeps
+    /// 300 points at the window's smallest.
+    #[test]
+    fn the_widest_side_docks_leave_the_centre_room() {
+        let harness = side_docks_dragged_to(1000.0);
+        let gap = panel(&harness, "right_dock").left() - panel(&harness, "left_dock").right();
+        assert!(gap >= 300.0, "{gap}");
+    }
+
+    /// Dragged as narrow as they go, the side docks keep room for their
+    /// contents: 200 points on the left, 250 on the right.
+    #[test]
+    fn the_narrowest_side_docks_keep_room_for_their_contents() {
+        let harness = side_docks_dragged_to(10.0);
+        let widths = (
+            panel(&harness, "left_dock").width(),
+            panel(&harness, "right_dock").width(),
+        );
+        assert_eq!(widths, (200.0, 250.0));
+    }
+
+    /// [`harness`], with both side docks as if dragged to `width`.
+    fn side_docks_dragged_to(width: f32) -> Harness<'static, PhotographyWorkbenchApp> {
+        let mut harness = harness();
+        for id in ["left_dock", "right_dock"] {
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 100.0));
+            let state = egui::PanelState { outer_rect: rect };
+            harness
+                .ctx
+                .data_mut(|d| d.insert_persisted(egui::Id::new(id), state));
+        }
+        harness.run();
+        harness
+    }
+
+    /// The right dock shows only what the tool rail picked, with no title
+    /// over it: Info says when there is no photo to show the information
+    /// of.
+    #[test]
+    fn the_right_dock_shows_only_the_photo_s_information() {
+        let harness = harness();
+        harness.get_by_label("No photo selected");
+        harness.get_by_label("Select a photo to see its information");
+        // The tool rail's button alone is named Info.
+        assert_eq!(harness.query_all_by_label("Info").count(), 1);
+    }
+
+    /// A click on an action bar's button shows the dock it picks for, if
+    /// that dock is hidden. The button is shown selected while its dock
+    /// shows what it picks.
+    #[test]
+    fn an_action_bar_button_shows_its_dock() {
+        let mut harness = harness();
+        harness.state_mut().docks = Docks {
+            left: false,
+            right: false,
+        };
+        harness.run();
+        let shown = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            harness.query_by_label("No photo selected").is_some()
+        };
+        let selected = |harness: &Harness<'_, PhotographyWorkbenchApp>, label| {
+            let button = harness.get_by_role_and_label(Role::Button, label);
+            button.accesskit_node().toggled() == Some(Toggled::True)
+        };
+        assert!(!shown(&harness));
+        assert!(!selected(&harness, "Info"));
+        harness.get_by_role_and_label(Role::Button, "Info").click();
+        harness.run();
+        assert!(shown(&harness));
+        assert!(selected(&harness, "Info"));
+        let docks = harness.state().docks;
+        assert!(!docks.left && docks.right, "{docks:?}");
     }
 
     #[test]

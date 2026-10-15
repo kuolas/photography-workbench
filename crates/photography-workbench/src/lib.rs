@@ -8,6 +8,7 @@
 
 mod app;
 mod dialogs;
+mod layout;
 mod mode;
 
 pub use app::PhotographyWorkbenchApp;

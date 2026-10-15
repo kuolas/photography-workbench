@@ -34,8 +34,9 @@ relative to `crates/photography-workbench`:
 | `src/main.rs` | the binary: sets up logging and the window (its size, and its frame on each system), then hands control to eframe | the library, `eframe`, `env_logger` |
 | `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` | its own modules |
 | `src/dialogs.rs` | the app's dialogs, in the frame `desktop_ui::dialog` gives every dialog: Settings, which holds the theme choice, and About, which `desktop_ui::about` draws from the app's name, tagline, version, copyright, licence and home page | `egui`, `desktop_ui` |
-| `src/mode.rs` | `Mode`, the app's modes (Library, Organizer, Develop): each one's name and icon, and whether it is built yet | `desktop_ui` (tests only) |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher and settings gear, panels and icon, the dialogs it opens, the theme choice it saves and applies, and the mode it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
+| `src/mode.rs` | `Mode`, the app's modes (Library, Organizer, Develop): each one's name and icon, whether it is built yet, and its `Layout`, the parts of the window it has around its centre | `desktop_ui` (tests only) |
+| `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the right dock's message when no photo is selected), and `Docks`, which of them are shown | `egui`, `desktop_ui` |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher and settings gear, the order the window's panels are laid out in, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name, tagline and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp`'s constants, and that every crate's version is the workspace's | the library, `toml` |
@@ -74,11 +75,16 @@ machine with no display.
 **Data flow.** eframe owns the event loop and calls
 `PhotographyWorkbenchApp::ui` every frame; egui is immediate-mode, so the UI
 is rebuilt from the app's state each time rather than kept as a widget tree.
-The only state so far is the theme choice, the mode and which dialogs
-are open; the window shows its own title bar, which holds the app's icon
-(which opens About; not on macOS), the mode switcher, the settings gear
-and the window controls, and an empty view. Only Library is built: the switcher shows
-Organizer and Develop disabled. Each frame starts by resolving the theme
+The only state so far is the theme choice, the mode, which docks are
+shown and which dialogs are open; the window shows its own title bar,
+which holds the app's icon (which opens About; not on macOS), the mode
+switcher, the settings gear and the window controls. Only Library is
+built: the switcher shows Organizer and Develop disabled. Below the
+title bar the panels are laid out in an order that gives each its place:
+first the tool rail, so it takes the window's right edge below the title
+bar; then the side docks, the right one inside the tool rail, so they
+run down to the window's bottom; and last the centre, empty so far,
+which takes what is left. Each frame starts by resolving the theme
 choice against the OS light/dark preference and, when the resulting theme
 changed, reinstalling egui's visuals and restyling the frame's root `Ui`,
 which took its style before the app ran. The Settings dialog only records
