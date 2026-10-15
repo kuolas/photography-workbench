@@ -12,6 +12,7 @@
 use egui::{Align, Frame, Layout, Margin, UiBuilder, vec2};
 
 use crate::action_bar;
+use crate::keys::Chord;
 use crate::theme::Palette;
 
 /// The height of the toolbar.
@@ -81,17 +82,19 @@ pub fn show(
 /// A button for the toolbar, 32 points square, showing only the Lucide
 /// icon `icon.0` (or the character `icon.1` if the name does not
 /// resolve). While `selected` it has a rounded square behind its icon, as
-/// an action bar's button has. `label` is its tooltip and the name screen
-/// readers and the tests know it by.
+/// an action bar's button has. `label` is the name screen readers and the
+/// tests know it by, and its tooltip, with the `chord` that does the same,
+/// if any ([`crate::keys::tooltip`]).
 pub fn button(
     ui: &mut egui::Ui,
     palette: &Palette,
     icon: (&str, char),
     label: &str,
     selected: bool,
+    chord: Option<Chord>,
 ) -> egui::Response {
     let size = (egui::Vec2::splat(BUTTON_SIZE), ICON_SIZE);
-    action_bar::icon_button(ui, palette, size, (icon, label), selected)
+    action_bar::icon_button(ui, palette, size, (icon, label), selected, chord)
 }
 
 #[cfg(test)]
@@ -109,9 +112,9 @@ mod tests {
     use crate::theme::Theme;
 
     /// A toolbar with "Grid" and "Viewer" at its start, "Grid" selected
-    /// when `selected`, and "Zoom" at its end. The bar's rectangle goes
-    /// into `bar`; the first frame installs the icon font, which egui uses
-    /// from the next frame on, and draws nothing.
+    /// when `selected` and with G as its chord, and "Zoom" at its end. The
+    /// bar's rectangle goes into `bar`; the first frame installs the icon
+    /// font, which egui uses from the next frame on, and draws nothing.
     fn toolbar(selected: bool, bar: Rc<Cell<Rect>>) -> Harness<'static> {
         let palette = Theme::Paper.palette();
         let mut fonts_installed = false;
@@ -124,11 +127,19 @@ mod tests {
                     return;
                 }
                 let start = |ui: &mut egui::Ui| {
-                    button(ui, &palette, ("layout-grid", '▦'), "Grid", selected);
-                    button(ui, &palette, ("image", '▣'), "Viewer", false);
+                    let g = Chord::new(egui::Modifiers::NONE, egui::Key::G);
+                    button(
+                        ui,
+                        &palette,
+                        ("layout-grid", '▦'),
+                        "Grid",
+                        selected,
+                        Some(g),
+                    );
+                    button(ui, &palette, ("image", '▣'), "Viewer", false, None);
                 };
                 let end = |ui: &mut egui::Ui| {
-                    button(ui, &palette, ("zoom-in", '+'), "Zoom", false);
+                    button(ui, &palette, ("zoom-in", '+'), "Zoom", false, None);
                 };
                 let shown = show(ui, "toolbar", &palette, start, end);
                 bar.set(shown.rect);
@@ -160,6 +171,18 @@ mod tests {
                 if points[0].y == bar.top() + 0.5 && points[1].y == points[0].y)
         });
         assert!(top_line, "no line along the bar's top");
+    }
+
+    #[test]
+    fn a_button_s_tooltip_names_its_chord() {
+        let mut harness = toolbar(false, Rc::new(Cell::new(Rect::NOTHING)));
+        harness.get_by_label("Grid").hover();
+        // egui shows a tooltip once the pointer has rested a moment.
+        let shown = (0..20).any(|_| {
+            harness.step();
+            harness.query_by_label("Grid (G)").is_some()
+        });
+        assert!(shown, "no tooltip naming the chord");
     }
 
     #[test]

@@ -127,6 +127,16 @@ fn is_punctuation(key: Key) -> bool {
     )
 }
 
+/// What the tooltip of a control with a chord says: its `label`, then,
+/// when it has one, the `chord` that does what a click on it does, in
+/// brackets: "Thumbnail grid (G)".
+pub fn tooltip(label: &str, chord: Option<Chord>) -> String {
+    match chord {
+        Some(chord) => format!("{label} ({})", chord.label()),
+        None => label.to_owned(),
+    }
+}
+
 /// One section of a shortcut reference: its title, and its rows, each a
 /// chord's label and what the chord does.
 pub struct Section<'a> {
@@ -344,6 +354,13 @@ mod tests {
         let tab = Chord::new(Modifiers::NONE, Key::Tab);
         let presses = pressed_by(tab, Key::Tab, Modifiers::NONE, 3);
         assert_eq!(presses, [true, false, false]);
+    }
+
+    #[test]
+    fn a_tooltip_names_the_chord_in_brackets() {
+        let g = Chord::new(Modifiers::NONE, Key::G);
+        assert_eq!(tooltip("Thumbnail grid", Some(g)), "Thumbnail grid (G)");
+        assert_eq!(tooltip("About", None), "About");
     }
 
     /// A reference of `sections` in a window `width` points wide, drawn

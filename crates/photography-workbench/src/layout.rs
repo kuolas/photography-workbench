@@ -111,7 +111,7 @@ pub fn dock_toggles(ui: &mut egui::Ui, palette: &Palette, layout: Layout, docks:
         ),
     ];
     for (has, side, shown, label) in toggles {
-        if has && chrome::dock_toggle(ui, palette, side, *shown, label).clicked() {
+        if has && chrome::dock_toggle(ui, palette, side, *shown, label, None).clicked() {
             *shown = !*shown;
         }
     }
