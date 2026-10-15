@@ -115,42 +115,45 @@ impl Docks {
 }
 
 /// The title bar's toggles for the docks `layout` has, in a right-to-left
-/// layout, so they read left, bottom, right, as the docks lie. Each
-/// names in its tooltip the chord that shows or hides its dock on
-/// `surface`.
+/// layout, so they read left, bottom, right, as the docks lie, each
+/// showing whether its dock is shown in `docks`. Each names in its
+/// tooltip the chord that shows or hides its dock on `surface`. The side
+/// of the dock whose toggle was clicked, if any.
 pub fn dock_toggles(
     ui: &mut egui::Ui,
     palette: &Palette,
     layout: Layout,
     surface: Surface,
-    docks: &mut Docks,
-) {
+    docks: Docks,
+) -> Option<Side> {
     let toggles = [
         (
             layout.right_dock,
             Side::Right,
-            &mut docks.right,
+            docks.right,
             "Show or hide the right dock",
         ),
         (
             layout.bottom_dock,
             Side::Bottom,
-            &mut docks.bottom,
+            docks.bottom,
             "Show or hide the filmstrip",
         ),
         (
             layout.left_dock,
             Side::Left,
-            &mut docks.left,
+            docks.left,
             "Show or hide the left dock",
         ),
     ];
+    let mut clicked = None;
     for (has, side, shown, label) in toggles {
         let chord = keymap::chord_for(surface, Action::Dock(side));
-        if has && chrome::dock_toggle(ui, palette, side, *shown, label, chord).clicked() {
-            *shown = !*shown;
+        if has && chrome::dock_toggle(ui, palette, side, shown, label, chord).clicked() {
+            clicked = Some(side);
         }
     }
+    clicked
 }
 
 /// The tool rail. A button is shown selected while the right dock shows
