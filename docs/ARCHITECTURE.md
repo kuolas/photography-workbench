@@ -35,7 +35,7 @@ relative to `crates/photography-workbench`:
 | `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` | its own modules |
 | `src/dialogs.rs` | the app's dialogs, in the frame `desktop_ui::dialog` gives every dialog: Settings, which holds the theme choice, and About, which `desktop_ui::about` draws from the app's name, tagline, version, copyright, licence and home page | `egui`, `desktop_ui` |
 | `src/mode.rs` | `Mode`, the app's modes (Library, Organizer, Develop): each one's name and icon, and whether it is built yet | `desktop_ui` (tests only) |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher and settings gear, panels, menu and icon, the dialogs it opens, the theme choice it saves and applies, and the mode it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher and settings gear, panels and icon, the dialogs it opens, the theme choice it saves and applies, and the mode it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name, tagline and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp`'s constants, and that every crate's version is the workspace's | the library, `toml` |
@@ -71,8 +71,8 @@ machine with no display.
 is rebuilt from the app's state each time rather than kept as a widget tree.
 The only state so far is the theme choice, the mode and which dialogs
 are open; the window shows its own title bar, which holds the app's icon
-(which opens About; not on macOS), the mode switcher, the File menu, the
-settings gear and the window controls, and an empty view. Only Library is built: the switcher shows
+(which opens About; not on macOS), the mode switcher, the settings gear
+and the window controls, and an empty view. Only Library is built: the switcher shows
 Organizer and Develop disabled. Each frame starts by resolving the theme
 choice against the OS light/dark preference and, when the resulting theme
 changed, reinstalling egui's visuals and restyling the frame's root `Ui`,
@@ -107,7 +107,7 @@ Choices that shape the code still to come, such as rating storage, are open
 **Decided, not yet built.** The first release's work fills `catalog`
 and `previews`, below the GUI-free line, and builds the window on them
 ([ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)),
-and puts the mode switcher on the title bar in place of the menus
+and adds the native menu bar on macOS
 ([ADR010](architecture-decisions/adr010-modes-and-the-window.md)). This
 file is rewritten with each of those changes, in the same pull request.
 
