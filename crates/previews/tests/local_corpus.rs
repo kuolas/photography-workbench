@@ -13,7 +13,9 @@
 //! a format raw-files reads or a JPEG's, and whose name does not start
 //! with a dot, is decoded as a thumbnail, on as many
 //! threads as the machine has cores, and the test fails listing those that
-//! could not be.
+//! could not be. A second test decodes each RAW file's largest preview
+//! whole, and fails listing those whose size it told before differs from
+//! the size decoded.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -28,10 +30,16 @@ const LONGEST: u32 = 512;
 /// app's photo list tells them, one of a format raw-files reads, or a
 /// JPEG.
 fn is_photo(extension: &str) -> bool {
-    raw_files::Format::from_extension(extension).is_some()
+    is_raw(extension)
         || ["jpg", "jpeg"]
             .iter()
             .any(|jpeg| extension.eq_ignore_ascii_case(jpeg))
+}
+
+/// Whether a file of this extension, in any case, is of a format
+/// raw-files reads.
+fn is_raw(extension: &str) -> bool {
+    raw_files::Format::from_extension(extension).is_some()
 }
 
 /// The photos under `folder`, at any depth, into `photos`. A folder that
@@ -58,17 +66,24 @@ fn find(folder: &Path, photos: &mut Vec<PathBuf>) {
     }
 }
 
-#[test]
-#[ignore = "needs PW_LOCAL_CORPUS, a folder of photos"]
-fn every_photo_of_the_local_corpus_decodes() {
+/// The photos of the folder `PW_LOCAL_CORPUS` names, sorted, or `None`
+/// when it names none.
+fn corpus() -> Option<Vec<PathBuf>> {
     let Some(folder) = env::var_os("PW_LOCAL_CORPUS") else {
         println!("skipped: PW_LOCAL_CORPUS names no folder");
-        return;
+        return None;
     };
     let mut photos = Vec::new();
     find(Path::new(&folder), &mut photos);
     photos.sort();
+    Some(photos)
+}
 
+/// `check` run on every one of `photos`, on as many threads as the
+/// machine has cores, and the test failed listing each photo it found
+/// wrong with what it said, after a line saying how many it checked in
+/// how long.
+fn check_each(photos: &[PathBuf], what: &str, check: impl Fn(&Path) -> Result<(), String> + Sync) {
     let start = Instant::now();
     let next = AtomicUsize::new(0);
     let failures = Mutex::new(Vec::new());
@@ -77,7 +92,7 @@ fn every_photo_of_the_local_corpus_decodes() {
         for _ in 0..threads {
             scope.spawn(|| {
                 while let Some(path) = photos.get(next.fetch_add(1, Ordering::Relaxed)) {
-                    if let Err(failure) = previews::decode(path, LONGEST) {
+                    if let Err(failure) = check(path) {
                         failures
                             .lock()
                             .unwrap()
@@ -91,15 +106,58 @@ fn every_photo_of_the_local_corpus_decodes() {
     failures.sort();
 
     println!(
-        "decoded {} of {} photos in {:.1} s on {threads} threads",
+        "{what} {} of {} photos in {:.1} s on {threads} threads",
         photos.len() - failures.len(),
         photos.len(),
         start.elapsed().as_secs_f64(),
     );
     assert!(
         failures.is_empty(),
-        "{} could not be decoded:\n{}",
+        "{} failed:\n{}",
         failures.len(),
         failures.join("\n")
     );
+}
+
+#[test]
+#[ignore = "needs PW_LOCAL_CORPUS, a folder of photos"]
+fn every_photo_of_the_local_corpus_decodes() {
+    let Some(photos) = corpus() else {
+        return;
+    };
+    check_each(&photos, "decoded", |path| {
+        previews::decode(path, LONGEST)
+            .map(drop)
+            .map_err(|failure| failure.to_string())
+    });
+}
+
+/// The size a thumbnail's decode tells of the largest preview is the one
+/// its frame header gives; decoded whole, the largest is measured by the
+/// decoder itself. The two must agree, or 100 % would change as larger
+/// decodes arrive.
+#[test]
+#[ignore = "needs PW_LOCAL_CORPUS, a folder of photos"]
+fn every_raw_file_of_the_local_corpus_tells_its_largest_preview_s_true_size() {
+    let Some(mut photos) = corpus() else {
+        return;
+    };
+    photos.retain(|path| {
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(is_raw)
+    });
+    check_each(&photos, "measured", |path| {
+        let told = previews::decode(path, LONGEST).map_err(|failure| failure.to_string())?;
+        let whole = previews::decode(path, u32::MAX).map_err(|failure| failure.to_string())?;
+        if told.largest() == whole.full() && whole.largest() == whole.full() {
+            Ok(())
+        } else {
+            Err(format!(
+                "told {:?}, decoded {:?}",
+                told.largest(),
+                whole.full()
+            ))
+        }
+    });
 }

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! A photo's file turned into a small upright image: [`decode`], which
-//! gives a [`Decoded`] holding the [`Image`] and the photo's full
-//! [`Size`], or the [`Failure`] that stopped it.
+//! gives a [`Decoded`] holding the [`Image`], the [`Size`] it was scaled
+//! down from and that of the largest image the file holds, or the
+//! [`Failure`] that stopped it.
 //!
 //! What a file holds is told by its content, never its name, as raw-files
 //! tells its formats: a file that starts as every JPEG does is decoded as
@@ -89,12 +90,13 @@ impl fmt::Debug for Image {
     }
 }
 
-/// A photo decoded: the image to show, and the size of what it was scaled
-/// down from.
+/// A photo decoded: the image to show, the size of what it was scaled
+/// down from, and the size of the largest image the file holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Decoded {
     image: Image,
     full: Size,
+    largest: Size,
 }
 
 impl Decoded {
@@ -105,9 +107,21 @@ impl Decoded {
 
     /// The size of the image decoded, upright, before it was scaled down:
     /// a JPEG's own size, or the size of the RAW file's preview that was
-    /// chosen. Showing the photo at 100 % shows this many pixels.
+    /// chosen, which may be smaller than the largest it holds.
     pub fn full(&self) -> Size {
         self.full
+    }
+
+    /// The size of the largest image the file holds, upright, whichever
+    /// was decoded: a JPEG's own size, or the size of the RAW file's
+    /// largest preview. Showing the photo at 100 % shows this many pixels.
+    ///
+    /// When the largest preview is the one decoded, this is
+    /// [`full`](Self::full), the size the decoder found; otherwise it is
+    /// the size the preview's own frame header gives, read when the file
+    /// was opened, which is where the decoder finds it too.
+    pub fn largest(&self) -> Size {
+        self.largest
     }
 }
 
@@ -119,7 +133,9 @@ impl Decoded {
 /// Of a RAW file's embedded previews, the smallest whose longer side is
 /// at least `longest` is decoded, or the largest when none is that long,
 /// and turned upright by the orientation the RAW file gives, which is the
-/// camera's at the moment of capture.
+/// camera's at the moment of capture. Whichever is decoded, the size of
+/// the largest is told too, at no cost: raw-files measures every preview
+/// when it opens the file.
 ///
 /// This reads the file and decodes it, which takes a while, so it belongs
 /// off the UI thread.
@@ -136,6 +152,8 @@ pub fn decode(path: &Path, longest: u32) -> Result<Decoded, Failure> {
     }
     let mut raw = RawFile::from_reader(file).map_err(|error| Failure::from_raw(&error))?;
     let preview = choose(raw.previews(), longest).ok_or(Failure::NoPreview)?;
+    // There is one whenever there is a preview to choose.
+    let largest = largest(raw.previews()).unwrap_or(preview);
     let bytes = raw
         .read_preview(&preview)
         .map_err(|error| Failure::from_raw(&error))?;
@@ -143,12 +161,21 @@ pub fn decode(path: &Path, longest: u32) -> Result<Decoded, Failure> {
     // The decoder copies the bytes into a buffer of its own, so a
     // preview is held twice while it is decoded: it takes a reader, and
     // raw-files hands out a preview's bytes, not a reader over them.
-    decode_jpeg(
+    let mut decoded = decode_jpeg(
         Cursor::new(bytes),
         Some(orientation),
         longest,
         MAX_PIXEL_BYTES,
-    )
+    )?;
+    if preview != largest {
+        // As its frame header gives it, which raw-files read.
+        decoded.largest = upright_size(
+            largest.width(),
+            largest.height(),
+            upright_by(largest.orientation()),
+        );
+    }
+    Ok(decoded)
 }
 
 /// Whether the file starts as every JPEG does. A file too short to hold
@@ -184,21 +211,45 @@ fn jpeg_file(mut file: File) -> Result<BufReader<Take<File>>, Failure> {
 /// The longer side is the same whichever way the preview is turned, so
 /// the orientation does not enter into it.
 fn choose(previews: &[Preview], longest: u32) -> Option<Preview> {
-    let mut jpegs = previews
-        .iter()
-        .filter(|preview| preview.format() == PreviewFormat::Jpeg);
-    jpegs
-        .clone()
+    jpegs(previews)
         .find(|preview| preview.width().max(preview.height()) >= longest)
-        .or_else(|| jpegs.next_back())
         .copied()
+        .or_else(|| largest(previews))
+}
+
+/// The largest JPEG of `previews`, which raw-files lists smallest first:
+/// the last. `None` when there is no JPEG.
+fn largest(previews: &[Preview]) -> Option<Preview> {
+    jpegs(previews).next_back().copied()
+}
+
+/// The JPEGs of `previews`, in their order.
+fn jpegs(previews: &[Preview]) -> impl DoubleEndedIterator<Item = &Preview> {
+    previews
+        .iter()
+        .filter(|preview| preview.format() == PreviewFormat::Jpeg)
+}
+
+/// The size of a `width` by `height` image turned upright by
+/// `orientation`: its width and height change places when it turns a
+/// quarter.
+fn upright_size(width: u32, height: u32, orientation: Orientation) -> Size {
+    if turns(orientation) {
+        Size {
+            width: height,
+            height: width,
+        }
+    } else {
+        Size { width, height }
+    }
 }
 
 /// The JPEG that `jpeg` reads decoded, scaled down so that its longer
 /// side is at most `longest`, then turned upright by `orientation`, or by
 /// the orientation of its own EXIF block when that is `None`. Scaling
 /// first leaves fewer pixels to turn. Its pixels may take at most
-/// `budget` bytes at once, which is checked before it is decoded.
+/// `budget` bytes at once, which is checked before it is decoded. It is
+/// taken for the largest image there is, as a JPEG file is.
 fn decode_jpeg<R: BufRead + Seek>(
     jpeg: R,
     orientation: Option<Orientation>,
@@ -243,14 +294,7 @@ fn decode_jpeg<R: BufRead + Seek>(
     };
     let mut upright = DynamicImage::ImageRgb8(small.into_rgb8());
     upright.apply_orientation(orientation);
-    let full = if turns(orientation) {
-        Size {
-            width: height,
-            height: width,
-        }
-    } else {
-        Size { width, height }
-    };
+    let full = upright_size(width, height, orientation);
     let upright = upright.into_rgb8();
     Ok(Decoded {
         image: Image {
@@ -259,6 +303,7 @@ fn decode_jpeg<R: BufRead + Seek>(
             pixels: upright.into_raw(),
         },
         full,
+        largest: full,
     })
 }
 
@@ -460,6 +505,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_jpeg_s_largest_size_is_its_own_upright_however_small_it_is_decoded() {
+        let largest = |orientation| {
+            decoded(&fixtures::jpeg(80, 40, RED, GREEN, orientation), 10)
+                .unwrap()
+                .largest()
+        };
+        assert_eq!(
+            largest(None),
+            Size {
+                width: 80,
+                height: 40
+            }
+        );
+        // A quarter turn.
+        assert_eq!(
+            largest(Some(6)),
+            Size {
+                width: 40,
+                height: 80
+            }
+        );
+    }
+
     /// A NEF holding a 160 × 120 preview, left half red and right half
     /// green, and a 640 × 480 one, left half blue and right half yellow,
     /// shown upright by a quarter turn clockwise. The small one's own EXIF
@@ -522,6 +591,42 @@ mod tests {
             }
         );
         assert_eq!(size(photo.image()), (480, 640));
+    }
+
+    /// The largest preview, turned upright by the RAW file's quarter
+    /// turn, whichever is decoded.
+    #[test]
+    fn a_raw_file_tells_its_largest_preview_s_upright_size_whichever_is_decoded() {
+        let largest = Size {
+            width: 480,
+            height: 640,
+        };
+        for longest in [100, 161, 4000] {
+            assert_eq!(
+                decoded(&nef(), longest).unwrap().largest(),
+                largest,
+                "{longest}"
+            );
+        }
+    }
+
+    /// The largest is told by size, not by where the file keeps it.
+    #[test]
+    fn a_raw_file_s_largest_preview_is_the_largest_wherever_it_is() {
+        let file = fixtures::nef(
+            &[
+                fixtures::jpeg(640, 480, BLUE, YELLOW, None),
+                fixtures::jpeg(120, 160, RED, GREEN, None),
+            ],
+            1,
+        );
+        assert_eq!(
+            decoded(&file, 150).unwrap().largest(),
+            Size {
+                width: 640,
+                height: 480
+            }
+        );
     }
 
     /// The previews are told apart by size, not by where the file keeps
