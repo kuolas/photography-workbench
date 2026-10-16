@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Reading the disk off the window's thread: the roots of the folder tree
-//! and a folder's subfolders, which `catalog` reads where its caller
-//! decides.
+//! Reading the disk off the window's thread: the roots of the folder tree,
+//! a folder's subfolders and a folder's photos, which `catalog` reads
+//! where its caller decides.
 //!
 //! A read can take a while, on a network share or a drive that has to
 //! wake up, and a window that waited for it would stop answering. So
@@ -18,12 +18,14 @@
 //! an idle window draws nothing.
 
 use std::io;
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
 use catalog::folders::{self, Folder, ListRequest, Root};
+use catalog::photos::PhotoList;
 
 /// How often the roots are read while they are watched. No system tells
 /// a portable app at once that a card was put in, so the app looks for
@@ -35,6 +37,13 @@ const ROOTS_EVERY: Duration = Duration::from_secs(2);
 pub enum Job {
     /// The subfolders of the folder the request names.
     Subfolders(ListRequest),
+    /// The photos in `folder`, for the read numbered `read`.
+    Photos {
+        /// The folder whose photos to read.
+        folder: PathBuf,
+        /// The read's number, which its answer carries back.
+        read: u64,
+    },
 }
 
 /// What a [`Job`] read: its answer, with the request it answers; or the
@@ -47,6 +56,16 @@ pub enum Done {
     /// The subfolders of the folder the request names, or why it could
     /// not be listed.
     Subfolders(ListRequest, io::Result<Vec<Folder>>),
+    /// The photos in `folder`, or why they could not be read, for the
+    /// read numbered `read`.
+    Photos {
+        /// The folder whose photos were read.
+        folder: PathBuf,
+        /// The read's number, as the job gave it.
+        read: u64,
+        /// The photos, or why they could not be read.
+        result: io::Result<PhotoList>,
+    },
 }
 
 /// Where the roots of the tree are read from.
@@ -84,6 +103,13 @@ enum Run {
         /// The roots sent last; `None` until they are watched.
         sent: Option<Vec<Root>>,
     },
+    /// Each job kept and never done, and the roots never read, so a test
+    /// sees which jobs were started and answers them itself.
+    #[cfg(test)]
+    Held {
+        /// The jobs started, in the order they were.
+        jobs: Vec<Job>,
+    },
 }
 
 impl Default for Disk {
@@ -117,6 +143,14 @@ impl Disk {
         Self::with(Arc::new(read), Run::Inline { sent: None })
     }
 
+    /// A disk that keeps the jobs it is given and does none, nor reads
+    /// the roots, so a test sees which jobs were started and answers them
+    /// itself.
+    #[cfg(test)]
+    pub fn held() -> Self {
+        Self::with(Arc::new(Vec::new), Run::Held { jobs: Vec::new() })
+    }
+
     /// A disk reading its roots from `roots`, doing its jobs as `run`
     /// says.
     fn with(roots: RootsSource, run: Run) -> Self {
@@ -134,20 +168,37 @@ impl Disk {
     ///
     /// Each job has a short-lived thread of its own, rather than a place
     /// in a queue: a listing that hangs on a network share that has gone
-    /// must not hold up the others. The caller keeps at most one job per
-    /// folder under way at a time, so there are never more threads than
-    /// folders being read.
-    pub fn start(&self, ctx: &egui::Context, job: Job) {
+    /// must not hold up the others. The caller keeps at most one listing
+    /// of a folder, and one read of its photos, under way at a time, so a
+    /// share that hangs holds no more threads however often its folders
+    /// are opened or chosen. The one exception is a read of photos left
+    /// hanging on a card taken out: the card put back is read afresh
+    /// beside it.
+    pub fn start(&mut self, ctx: &egui::Context, job: Job) {
+        #[cfg(test)]
+        if let Run::Held { jobs } = &mut self.run {
+            jobs.push(job);
+            return;
+        }
         let sender = self.sender.clone();
         let ctx = ctx.clone();
         let name = match job {
             Job::Subfolders(_) => "disk-subfolders",
+            Job::Photos { .. } => "disk-photos",
         };
         let work = move || {
             let done = match job {
                 Job::Subfolders(request) => {
                     let result = folders::subfolders(request.path());
                     Done::Subfolders(request, result)
+                }
+                Job::Photos { folder, read } => {
+                    let result = PhotoList::read(&folder);
+                    Done::Photos {
+                        folder,
+                        read,
+                        result,
+                    }
                 }
             };
             // The receiver goes only with the disk, when the window does,
@@ -214,6 +265,8 @@ impl Disk {
                 *sent = Some(read.clone());
                 let _ = sender.send(Done::Roots(read));
             }
+            #[cfg(test)]
+            Run::Held { .. } => {}
         }
     }
 
@@ -231,6 +284,16 @@ impl Disk {
             }
         }
         self.receiver.try_iter()
+    }
+
+    /// The jobs a held disk was given, in the order it was given them;
+    /// none on any other disk.
+    #[cfg(test)]
+    pub fn held_jobs(&self) -> &[Job] {
+        match &self.run {
+            Run::Held { jobs } => jobs,
+            _ => &[],
+        }
     }
 
     /// The next answer, waiting up to `timeout` for it.
@@ -302,6 +365,32 @@ mod tests {
         assert_eq!(answered, request);
         assert_eq!(folders, [Folder::new(dir.path().join("DCIM"))]);
         assert!(disk.finished().next().is_none());
+    }
+
+    /// A folder's photos are read on a thread of its own, and the answer
+    /// carries the folder and the read's number back.
+    #[test]
+    fn a_folder_s_photos_are_read_with_the_read_they_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("DSC_0001.NEF"), b"").unwrap();
+        let mut disk = Disk::new();
+        let job = Job::Photos {
+            folder: dir.path().to_path_buf(),
+            read: 7,
+        };
+        disk.start(&egui::Context::default(), job);
+        let done = disk.wait(Duration::from_secs(5));
+        let Some(Done::Photos {
+            folder,
+            read: 7,
+            result: Ok(list),
+        }) = done
+        else {
+            panic!("no photos: {done:?}");
+        };
+        assert_eq!(folder, dir.path());
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.photos()[0].name(), "DSC_0001.NEF");
     }
 
     /// The roots' watcher sends them as first read, then nothing while

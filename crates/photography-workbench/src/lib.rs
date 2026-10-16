@@ -11,6 +11,7 @@ mod browse;
 mod dialogs;
 mod disk;
 mod folder_tree;
+mod grid;
 mod keymap;
 mod layout;
 mod menu;
