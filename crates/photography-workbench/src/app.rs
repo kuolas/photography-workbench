@@ -3,6 +3,7 @@
 //! The top-level eframe application: the window's title bar, panels and
 //! dialogs.
 
+use catalog::photos::Photo;
 use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
 use desktop_ui::dock::{self, Side};
 use desktop_ui::fonts;
@@ -22,6 +23,7 @@ use crate::mode::{Layout, Mode};
 use crate::textures::Textures;
 use crate::view::View;
 use crate::viewer;
+use crate::zoom::{Framing, Stage, Zoom, Zooming};
 
 /// The Lucide icons of the title bar's settings gear and of its button
 /// for the reference of keyboard shortcuts, and the text shown in place
@@ -64,9 +66,9 @@ pub struct PhotographyWorkbenchApp {
     /// thread.
     textures: Textures,
     /// What the viewer keeps between frames: how large it shows the photo
-    /// and which part of it, kept from one photo to the next, and how long
-    /// it has waited for its picture, for it to say when the picture takes
-    /// a while. Not saved.
+    /// and which part of it, kept from one photo to the next and read by
+    /// the toolbar's zoom controls too, and how long it has waited for its
+    /// picture, for it to say when the picture takes a while. Not saved.
     viewer: viewer::State,
     /// How many tiles the grid laid out in a row the last time it was
     /// drawn, which the keys that move a row up or down go by. `None`
@@ -123,6 +125,11 @@ impl PhotographyWorkbenchApp {
         // Ctrl+Q would close the window even with a dialog open. On macOS
         // the menu bar's Quit takes Cmd+Q before the window sees it.
         cc.egui_ctx.options_mut(|o| o.quit_shortcuts.clear());
+        // Ctrl+=, Ctrl+- and Ctrl+0 zoom the viewer's photo, as they zoom
+        // a photo in the established photography tools. egui's own would
+        // zoom the whole window with them wherever the viewer's keys do
+        // not apply, as in the grid.
+        cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let saved = |key| cc.storage.and_then(|storage| storage.get_string(key));
         let theme =
             saved(THEME_KEY).and_then(|name| Theme::ALL.into_iter().find(|t| t.name() == name));
@@ -354,6 +361,7 @@ impl PhotographyWorkbenchApp {
             }
             Action::View(view) => self.view = view,
             Action::Photo(step) => self.step_photo(step),
+            Action::Zoom(zooming) => self.zoom(ctx, zooming),
             Action::SideDocks => self.docks.toggle(parts, &[Side::Left, Side::Right]),
             Action::AllDocks => {
                 self.docks
@@ -397,6 +405,39 @@ impl PhotographyWorkbenchApp {
                 self.browser.select_photo(index);
             }
         }
+    }
+
+    /// The current photo, if there is one.
+    fn current_photo(&self) -> Option<&Photo> {
+        let Photos::Read(list) = self.browser.photos() else {
+            return None;
+        };
+        list.photos().get(list.current()?)
+    }
+
+    /// Zoom the viewer's photo as `zooming` asks, in the room the viewer
+    /// was drawn in during the frame before. Nothing outside the viewer,
+    /// without a current photo, before its 100 % is known, or when the
+    /// viewer was not drawn in the frame before, until it is drawn again.
+    fn zoom(&mut self, ctx: &egui::Context, zooming: Zooming) {
+        if self.view != View::Viewer {
+            return;
+        }
+        let Some(path) = self.current_photo().map(|photo| photo.path().to_path_buf()) else {
+            return;
+        };
+        let largest = self.textures.largest(&path);
+        viewer::zoom(&mut self.viewer, ctx, &path, largest, zooming);
+    }
+
+    /// The zoom the toolbar shows in Library's viewer: the framing the
+    /// viewer draws the current photo with, and the stage it zooms it
+    /// on. `None` while the keys and the toolbar zoom nothing
+    /// ([`viewer::State::stage`]).
+    fn zoom_shown(&self, ctx: &egui::Context) -> Option<(Framing, Stage)> {
+        let largest = self.textures.largest(self.current_photo()?.path());
+        let stage = self.viewer.stage(ctx, largest)?;
+        Some((self.viewer.framing(), stage))
     }
 
     /// The parts of the window shown around the centre: the mode's, but
@@ -503,8 +544,90 @@ impl PhotographyWorkbenchApp {
     }
 }
 
-/// The size of the toolbar's count of photos.
+/// The size of the toolbar's count of photos, and of its zoom.
 const COUNT_SIZE: f32 = 12.5;
+
+/// The toolbar's zoom buttons in Library's viewer, from the left: what
+/// each asks for, its name, which screen readers and its tooltip give,
+/// and its Lucide icon, with the text shown in its place if the name does
+/// not resolve. The zoom shown sits between the first two.
+const ZOOM_BUTTONS: [(Zooming, &str, (&str, char)); 4] = [
+    (Zooming::Out, "Zoom out", ("zoom-out", '−')),
+    (Zooming::In, "Zoom in", ("zoom-in", '+')),
+    (Zooming::Fit, "Zoom to fit", ("maximize-2", '⤢')),
+    (Zooming::Full, "Zoom to 100 %", ("maximize", '1')),
+];
+
+/// The width of the zoom the toolbar shows, with room to spare for its
+/// widest, "800 %", so the controls beside it stay where they are as it
+/// changes.
+const ZOOM_LABEL_WIDTH: f32 = 52.0;
+
+/// The room between the toolbar's count and the zoom controls, on top of
+/// the toolbar's gap between two controls, so the two read apart.
+const ZOOM_GAP: f32 = 6.0;
+
+/// The zoom controls at the toolbar's end in Library's viewer, from the
+/// left: zoom out, the zoom shown ([`viewer::zoom_label`]), zoom in, fit
+/// and 100 %, drawn from the right, as the toolbar's end runs. `shown` is
+/// the framing the viewer draws its photo with and the stage it zooms it
+/// on, `None` while nothing can be zoomed, when every control is disabled
+/// and no zoom is shown. The zoom shown is a whole percent, fitted too,
+/// the fit's for the room the viewer was last drawn in, so it changes as
+/// the window or the docks do. Zooming in and out are disabled where they
+/// would change nothing; fit is shown selected while the photo is fitted,
+/// and 100 % while the zoom shown reads 100 %, fitted or not. What was
+/// clicked, if anything.
+fn zoom_controls(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    shown: Option<(Framing, Stage)>,
+) -> Option<Zooming> {
+    let percent = shown.map(|(framing, stage)| stage.percent(framing.zoom));
+    let mut clicked = None;
+    let mut button = |ui: &mut egui::Ui, (zooming, name, icon): (Zooming, &str, (&str, char))| {
+        let enabled = match zooming {
+            Zooming::In | Zooming::Out => {
+                shown.is_some_and(|(framing, stage)| stage.zoomed(framing, zooming) != framing)
+            }
+            _ => shown.is_some(),
+        };
+        let selected = match zooming {
+            Zooming::Fit => shown.is_some_and(|(framing, _)| framing.zoom == Zoom::Fit),
+            Zooming::Full => percent == Some(100),
+            _ => false,
+        };
+        let chord = keymap::chord_for(Surface::Viewer, Action::Zoom(zooming));
+        let response = ui
+            .add_enabled_ui(enabled, |ui| {
+                toolbar::button(ui, palette, icon, name, selected, chord)
+            })
+            .inner;
+        if response.clicked() {
+            clicked = Some(zooming);
+        }
+    };
+    // An id of its own, as the count beside it comes and goes, and the
+    // ids egui gives by position would shift with it.
+    let cluster = egui::UiBuilder::new()
+        .id(egui::Id::new("zoom_controls"))
+        .layout(egui::Layout::right_to_left(egui::Align::Center));
+    ui.scope_builder(cluster, |ui| {
+        let [out, zoom_in, fit, full] = ZOOM_BUTTONS;
+        button(ui, full);
+        button(ui, fit);
+        button(ui, zoom_in);
+        let text = egui::RichText::new(viewer::zoom_label(percent))
+            .size(COUNT_SIZE)
+            .color(palette.text);
+        let size = egui::vec2(ZOOM_LABEL_WIDTH, ui.available_height());
+        ui.add_enabled_ui(shown.is_some(), |ui| {
+            ui.add_sized(size, egui::Label::new(text).selectable(false));
+        });
+        button(ui, out);
+    });
+    clicked
+}
 
 /// What the centre says when it has no photos to show, as a title and
 /// the line under it: no folder is selected, it could not be read, or it
@@ -641,6 +764,12 @@ impl eframe::App for PhotographyWorkbenchApp {
         layout::side_docks(ui, parts, &mut self.docks, folders);
         if parts.toolbar {
             let position = position(self.browser.photos());
+            // The mode's own controls hold the app while the toolbar is
+            // drawn, so the zoom controls read the viewer's zoom before it,
+            // and a click on one is done after it, still before the centre.
+            let viewer = self.mode == Mode::Library && self.view == View::Viewer;
+            let zoom_shown = viewer.then(|| self.zoom_shown(ui.ctx()));
+            let mut zoomed = None;
             let start = |ui: &mut egui::Ui| self.mode_controls(ui, &palette);
             let end = |ui: &mut egui::Ui| {
                 if let Some(position) = position {
@@ -649,8 +778,15 @@ impl eframe::App for PhotographyWorkbenchApp {
                         .color(palette.text);
                     ui.add(egui::Label::new(text).selectable(false));
                 }
+                if let Some(shown) = zoom_shown {
+                    ui.add_space(ZOOM_GAP);
+                    zoomed = zoom_controls(ui, &palette, shown);
+                }
             };
             toolbar::show(ui, "toolbar", &palette, start, end);
+            if let Some(zooming) = zoomed {
+                self.perform(ui.ctx(), Action::Zoom(zooming));
+            }
         }
         // The same photos as the grid's, sharing the current one and the
         // thumbnails.
@@ -740,8 +876,8 @@ mod tests {
     use crate::disk::Disk;
 
     use super::{
-        Action, Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, Side, THEME_KEY, TITLE_BAR_ICONS,
-        Textures, Theme, VIEW_KEY, View,
+        Action, Docks, Framing, MODE_KEY, Mode, PhotographyWorkbenchApp, Side, THEME_KEY,
+        TITLE_BAR_ICONS, Textures, Theme, VIEW_KEY, View, ZOOM_BUTTONS,
     };
 
     /// Settings kept in memory, in place of eframe's file.
@@ -3940,6 +4076,520 @@ mod tests {
         assert_eq!(after, before);
         let largest = harness.state().textures.texture(&photos[1], 2048);
         assert_eq!(Some(texture), largest);
+    }
+
+    /// What the toolbar's zoom says: the text between its zoom out and
+    /// zoom in buttons.
+    fn zoom_shown(harness: &Harness<'_, PhotographyWorkbenchApp>) -> String {
+        let out = harness.get_by_label("Zoom out").rect();
+        let zoom_in = harness.get_by_label("Zoom in").rect();
+        harness
+            .query_all_by_role(Role::Label)
+            .filter(|node| {
+                let rect = node.rect();
+                rect.left() >= out.right() && rect.right() <= zoom_in.left()
+            })
+            .find_map(|node| node.accesskit_node().value())
+            .expect("no zoom shown")
+    }
+
+    /// Whether the control named `label` is shown on, as the toolbar's
+    /// fit and 100 % are when the photo is fitted or at 100 %.
+    fn is_on(harness: &Harness<'_, PhotographyWorkbenchApp>, label: &str) -> bool {
+        harness.get_by_label(label).accesskit_node().toggled() == Some(Toggled::True)
+    }
+
+    /// The scale the photos of [`zoom_harness`] fit at in the viewer's
+    /// room as it was last laid out.
+    fn fit(harness: &Harness<'_, PhotographyWorkbenchApp>) -> f32 {
+        let room = viewer_room(harness);
+        let ppp = harness.ctx.pixels_per_point();
+        ppp * (room.width() / 2400.0).min(room.height() / 1600.0)
+    }
+
+    /// What the toolbar says of the photos of [`zoom_harness`] fitted: the
+    /// fit's whole percent.
+    fn fitted_shown(harness: &Harness<'_, PhotographyWorkbenchApp>) -> String {
+        format!("{} %", (fit(harness) * 100.0).round())
+    }
+
+    /// The scale the first step past the fit of the photos of
+    /// [`zoom_harness`] goes to, which the toolbar reads in whole percent.
+    fn first_step(harness: &Harness<'_, PhotographyWorkbenchApp>) -> f32 {
+        let shown = (fit(harness) * 100.0).round() / 100.0;
+        crate::zoom::STEPS
+            .into_iter()
+            .find(|&step| step > shown)
+            .expect("a step past the fit")
+    }
+
+    /// The input of `key` pressed and let go, with nothing held, for one
+    /// frame.
+    fn push_key(harness: &mut Harness<'_, PhotographyWorkbenchApp>, key: Key) {
+        for pressed in [true, false] {
+            harness.input_mut().events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            });
+        }
+    }
+
+    /// Z and Space each show the fitted photo at 100 %, each of its pixels
+    /// a pixel of the screen, its middle at the room's middle, and fit it
+    /// again, gliding there as after a click; the toolbar says which, and
+    /// shows its fit or its 100 % on.
+    #[test]
+    fn z_and_space_switch_between_fitted_and_100_percent() {
+        for ppp in [1.0, 2.0] {
+            let (mut harness, _dir, _) = zoom_harness(ppp);
+            let room = viewer_room(&harness);
+            let (_, fitted) = viewer_texture(&harness);
+            assert_eq!(zoom_shown(&harness), fitted_shown(&harness));
+            assert!(is_on(&harness, "Zoom to fit"));
+            let size = egui::vec2(2400.0, 1600.0) / ppp;
+            for key in [Key::Z, Key::Space] {
+                let start = harness.ctx.input(|i| i.time) + 1.0;
+                push_key(&mut harness, key);
+                frame_at(&mut harness, start);
+                frame_at(&mut harness, start + crate::zoom::GLIDE / 2.0);
+                let (_, half) = viewer_texture(&harness);
+                let between = half.width() > fitted.width() + 1.0 && half.width() < size.x - 1.0;
+                assert!(between, "{ppp} {key:?}: not gliding: {half:?}");
+                assert_eq!(
+                    zoom_shown(&harness),
+                    "100 %",
+                    "{ppp} {key:?}: not the target"
+                );
+                frame_at(&mut harness, start + crate::zoom::GLIDE);
+                let (_, full) = viewer_texture(&harness);
+                assert!(near(full.size(), size, 0.01), "{ppp} {key:?}: {full:?}");
+                let middle = under(full, room.center());
+                assert!(near(middle, egui::vec2(0.5, 0.5), 0.001), "{ppp} {key:?}");
+                assert!(is_on(&harness, "Zoom to 100 %"));
+                assert!(!is_on(&harness, "Zoom to fit"));
+                push_key(&mut harness, key);
+                frame_at(&mut harness, start + 1.0);
+                frame_at(&mut harness, start + 1.0 + crate::zoom::GLIDE);
+                assert_fitted(viewer_texture(&harness).1, room, 1.5);
+                assert_eq!(
+                    zoom_shown(&harness),
+                    fitted_shown(&harness),
+                    "{ppp} {key:?}"
+                );
+            }
+        }
+    }
+
+    /// Fitted, the toolbar says the fit's whole percent for the room the
+    /// photo is shown in, and says another when the room changes, as when
+    /// the right dock is hidden.
+    #[test]
+    fn the_fitted_zoom_reads_the_fit_s_percent_for_the_room() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        // The scale the photo is drawn at, read from where it is drawn, in
+        // whole percent.
+        let drawn_at = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let drawn = viewer_photo(harness, "DSC_0001.jpg").expect("no photo");
+            let scale = drawn.width() * harness.ctx.pixels_per_point() / 2400.0;
+            format!("{} %", (scale * 100.0).round())
+        };
+        let before = zoom_shown(&harness);
+        assert_eq!(before, drawn_at(&harness));
+        press(&mut harness, Modifiers::NONE, Key::F8);
+        let after = zoom_shown(&harness);
+        assert_eq!(after, drawn_at(&harness));
+        assert_ne!(after, before);
+        assert!(is_on(&harness, "Zoom to fit"));
+    }
+
+    /// Ctrl+= zooms the fitted photo in to the first step past the fit,
+    /// keeping its middle at the room's middle, and so does Ctrl++, typed
+    /// with Shift on the `=` key as a US keyboard types it; Ctrl+- zooms
+    /// it out to fitted again. The toolbar says so.
+    #[test]
+    fn ctrl_equals_and_ctrl_minus_zoom_in_and_out_by_a_step() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let step = first_step(&harness);
+        let percent = format!("{} %", (step * 100.0).round());
+        // `key` typed on the keyboard's key `physical` with `modifiers`
+        // held, going down and coming back up.
+        let typed = |key, physical, modifiers| {
+            [true, false].map(|pressed| egui::Event::Key {
+                key,
+                physical_key: Some(physical),
+                pressed,
+                repeat: false,
+                modifiers,
+            })
+        };
+        let ctrl = Modifiers::COMMAND;
+        let zoom_in = [
+            typed(Key::Equals, Key::Equals, ctrl),
+            typed(Key::Plus, Key::Equals, ctrl | Modifiers::SHIFT),
+        ];
+        for (n, events) in zoom_in.into_iter().enumerate() {
+            harness.input_mut().events.extend(events);
+            harness.run();
+            assert_eq!(zoom_shown(&harness), percent, "{n}");
+            let (_, zoomed) = viewer_texture(&harness);
+            let size = egui::vec2(2400.0, 1600.0) * step;
+            assert!(near(zoomed.size(), size, 0.01), "{n}: {zoomed:?}");
+            let middle = under(zoomed, room.center());
+            assert!(near(middle, egui::vec2(0.5, 0.5), 0.001), "{n}: {zoomed:?}");
+            press(&mut harness, Modifiers::COMMAND, Key::Minus);
+            assert_eq!(zoom_shown(&harness), fitted_shown(&harness), "{n}");
+            assert_fitted(viewer_texture(&harness).1, room, 1.5);
+        }
+    }
+
+    /// Ctrl+Alt+0 shows the photo at 100 % and Ctrl+0 fits it, whatever
+    /// the zoom.
+    #[test]
+    fn ctrl_alt_0_shows_100_percent_and_ctrl_0_fits() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let ctrl_alt = Modifiers::COMMAND | Modifiers::ALT;
+        press(&mut harness, ctrl_alt, Key::Num0);
+        assert_eq!(zoom_shown(&harness), "100 %");
+        let full = egui::vec2(2400.0, 1600.0);
+        assert!(near(viewer_texture(&harness).1.size(), full, 0.01));
+        press(&mut harness, Modifiers::COMMAND, Key::Equals);
+        assert_eq!(zoom_shown(&harness), "200 %");
+        press(&mut harness, Modifiers::COMMAND, Key::Num0);
+        assert_eq!(zoom_shown(&harness), fitted_shown(&harness));
+        assert_fitted(viewer_texture(&harness).1, room, 1.5);
+        press(&mut harness, Modifiers::COMMAND, Key::Num0);
+        assert_eq!(zoom_shown(&harness), fitted_shown(&harness));
+    }
+
+    /// The toolbar's buttons zoom as the keys do: in by a step and out
+    /// again, to 100 % and to fit; zooming out is disabled while the photo
+    /// is fitted, and zooming in at 800 %.
+    #[test]
+    fn the_toolbar_s_zoom_buttons_zoom_as_the_keys_do() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let disabled = |harness: &Harness<'_, PhotographyWorkbenchApp>, label| {
+            harness.get_by_label(label).accesskit_node().is_disabled()
+        };
+        assert!(disabled(&harness, "Zoom out"));
+        let step = first_step(&harness);
+        click(&mut harness, "Zoom in");
+        assert_eq!(
+            zoom_shown(&harness),
+            format!("{} %", (step * 100.0).round())
+        );
+        assert!(!disabled(&harness, "Zoom out"));
+        click(&mut harness, "Zoom out");
+        assert_eq!(zoom_shown(&harness), fitted_shown(&harness));
+        click(&mut harness, "Zoom to 100 %");
+        assert_eq!(zoom_shown(&harness), "100 %");
+        assert!(is_on(&harness, "Zoom to 100 %"));
+        let full = egui::vec2(2400.0, 1600.0);
+        assert!(near(viewer_texture(&harness).1.size(), full, 0.01));
+        for _ in 0..3 {
+            click(&mut harness, "Zoom in");
+        }
+        assert_eq!(zoom_shown(&harness), "800 %");
+        assert!(disabled(&harness, "Zoom in"));
+        click(&mut harness, "Zoom to fit");
+        assert_eq!(zoom_shown(&harness), fitted_shown(&harness));
+        assert!(is_on(&harness, "Zoom to fit"));
+        assert_fitted(viewer_texture(&harness).1, room, 1.5);
+    }
+
+    /// The zoom controls are the viewer's: the grid has none.
+    #[test]
+    fn the_zoom_controls_come_with_the_viewer_only() {
+        let (dir, _) = folder_of_jpegs(600, 400);
+        let mut harness = grid_harness(dir.path());
+        for label in ["Zoom out", "Zoom in", "Zoom to fit", "Zoom to 100 %"] {
+            assert!(harness.query_by_label(label).is_none(), "{label}");
+        }
+        click(&mut harness, "Image viewer");
+        for label in ["Zoom out", "Zoom in", "Zoom to fit", "Zoom to 100 %"] {
+            assert!(harness.query_by_label(label).is_some(), "{label}");
+        }
+    }
+
+    /// Until a decode of the photo has told its 100 %, the zoom controls
+    /// are disabled, the toolbar shows no zoom, and the keys zoom
+    /// nothing; once one has, they zoom.
+    #[test]
+    fn the_zoom_waits_for_the_photo_s_100_percent() {
+        let (dir, _) = folder_of_jpegs(2400, 1600);
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        harness.state_mut().textures.stall(true);
+        click(&mut harness, "Home");
+        click(&mut harness, "Image viewer");
+        for label in ["Zoom out", "Zoom in", "Zoom to fit", "Zoom to 100 %"] {
+            let node = harness.get_by_label(label).accesskit_node();
+            assert!(node.is_disabled(), "{label}");
+            assert_ne!(node.toggled(), Some(Toggled::True), "{label}");
+        }
+        assert_eq!(zoom_shown(&harness), "");
+        press(&mut harness, Modifiers::NONE, Key::Z);
+        press(&mut harness, Modifiers::COMMAND, Key::Equals);
+        assert_eq!(harness.state().viewer.framing(), Framing::default());
+
+        harness.state_mut().textures.stall(false);
+        harness.run();
+        assert!(
+            !harness
+                .get_by_label("Zoom in")
+                .accesskit_node()
+                .is_disabled()
+        );
+        press(&mut harness, Modifiers::NONE, Key::Z);
+        assert_eq!(zoom_shown(&harness), "100 %");
+    }
+
+    /// The keys and the toolbar zoom in the room the viewer was drawn in
+    /// during the frame before, and in none once a frame has gone by
+    /// without it: back from the grid, the window resized meanwhile, they
+    /// zoom nothing until the viewer is drawn again, and then zoom in its
+    /// new room.
+    #[test]
+    fn the_zoom_waits_for_the_viewer_to_be_drawn_again() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let before = viewer_room(&harness);
+        press(&mut harness, Modifiers::NONE, Key::G);
+        assert_eq!(harness.state().view, View::Grid);
+        let size = PhotographyWorkbenchApp::MIN_WINDOW + egui::vec2(200.0, 100.0);
+        harness.set_size(size);
+        harness.run();
+
+        // Back in the viewer, before it is drawn.
+        harness.state_mut().view = View::Viewer;
+        let ctx = harness.ctx.clone();
+        assert_eq!(harness.state().zoom_shown(&ctx), None, "an old room");
+        harness
+            .state_mut()
+            .perform(&ctx, Action::Zoom(crate::zoom::Zooming::Full));
+        assert_eq!(harness.state().viewer.framing(), Framing::default());
+
+        harness.run();
+        let room = viewer_room(&harness);
+        assert_ne!(room, before);
+        let largest = previews::Size {
+            width: 2400,
+            height: 1600,
+        };
+        let (_, stage) = harness.state().zoom_shown(&ctx).expect("no zoom");
+        assert_eq!(stage, crate::zoom::Stage::new(largest, room, 1.0));
+        press(&mut harness, Modifiers::NONE, Key::Z);
+        assert_eq!(zoom_shown(&harness), "100 %");
+        let (_, full) = viewer_texture(&harness);
+        let middle = under(full, room.center());
+        assert!(near(middle, egui::vec2(0.5, 0.5), 0.001), "{full:?}");
+    }
+
+    /// Back in the viewer from the menu bar, in a frame with no input of
+    /// its own and none asked for after it, the toolbar shows the zoom and
+    /// its controls can be chosen at once: the viewer has the pass run
+    /// again when its room is new to the toolbar. Once it is drawn, with
+    /// its room the same, a frame runs a pass only.
+    #[test]
+    fn the_zoom_shows_at_once_back_in_the_viewer_from_the_menu_bar() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        press(&mut harness, Modifiers::NONE, Key::G);
+        assert_eq!(harness.state().view, View::Grid);
+        let ctx = harness.ctx.clone();
+        harness
+            .state_mut()
+            .perform_from_menu(&ctx, vec![Action::View(View::Viewer)]);
+        harness.try_run().expect("the window never settles");
+        assert_eq!(zoom_shown(&harness), fitted_shown(&harness));
+        let zoom_in = harness.get_by_label("Zoom in").accesskit_node();
+        assert!(!zoom_in.is_disabled());
+        let before = ctx.cumulative_pass_nr();
+        harness.step();
+        assert_eq!(ctx.cumulative_pass_nr(), before + 1, "run again");
+    }
+
+    /// Whether egui painted its warning that passes were run again in many
+    /// frames in a row, in the last frame.
+    fn warns_of_passes_run_again(harness: &Harness<'_, PhotographyWorkbenchApp>) -> bool {
+        harness
+            .output()
+            .shapes
+            .iter()
+            .any(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => text.galley.text().contains("PERF WARNING"),
+                _ => false,
+            })
+    }
+
+    /// While the window is resized, the viewer's room changing in every
+    /// frame, each frame runs a single pass, and egui has nothing to warn
+    /// of.
+    #[test]
+    fn a_resize_runs_each_frame_once() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let ctx = harness.ctx.clone();
+        for step in 1..=6 {
+            let grown = egui::vec2(10.0, 5.0) * step as f32;
+            harness.set_size(PhotographyWorkbenchApp::MIN_WINDOW + grown);
+            let before = ctx.cumulative_pass_nr();
+            harness.step();
+            assert_eq!(ctx.cumulative_pass_nr(), before + 1, "{step}");
+            assert!(!warns_of_passes_run_again(&harness), "{step}");
+        }
+    }
+
+    /// The window resized on an idle viewer has the toolbar show the new
+    /// fit's zoom once it settles: the frame that finds the room changed
+    /// asks for the next one.
+    #[test]
+    fn a_resized_idle_viewer_shows_the_new_fit() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let before = zoom_shown(&harness);
+        // Nothing decoded asks for a frame meanwhile.
+        harness.state_mut().textures.stall(true);
+        harness.set_size(PhotographyWorkbenchApp::MIN_WINDOW + egui::vec2(400.0, 300.0));
+        harness.run();
+        let after = zoom_shown(&harness);
+        assert_eq!(after, fitted_shown(&harness));
+        assert_ne!(after, before);
+    }
+
+    /// A dock shown or hidden from the menu bar on an idle viewer, its
+    /// room changing, has the toolbar show the new fit's zoom once the
+    /// window settles.
+    #[test]
+    fn a_dock_toggled_from_the_menu_bar_shows_the_new_fit() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let before = zoom_shown(&harness);
+        // Nothing decoded asks for a frame meanwhile.
+        harness.state_mut().textures.stall(true);
+        let ctx = harness.ctx.clone();
+        harness
+            .state_mut()
+            .perform_from_menu(&ctx, vec![Action::Dock(Side::Right)]);
+        harness.run();
+        let drawn = viewer_photo(&harness, "DSC_0001.jpg").expect("no photo");
+        let scale = drawn.width() * harness.ctx.pixels_per_point() / 2400.0;
+        let after = zoom_shown(&harness);
+        assert_eq!(after, format!("{} %", (scale * 100.0).round()));
+        assert_ne!(after, before);
+    }
+
+    /// Space in the viewer switches between fitted and 100 % once, and
+    /// does not also press the control that has the keyboard focus,
+    /// though egui takes Space for a click on it: zooming in does not zoom
+    /// in, and the grid's button does not switch to the grid.
+    #[test]
+    fn space_does_not_also_press_the_focused_control() {
+        for label in ["Zoom in", "Thumbnail grid"] {
+            let (mut harness, _dir, _) = zoom_harness(1.0);
+            focus(&mut harness, label);
+            press(&mut harness, Modifiers::NONE, Key::Space);
+            assert_eq!(harness.state().view, View::Viewer, "{label}");
+            assert_eq!(zoom_shown(&harness), "100 %", "{label}");
+        }
+    }
+
+    /// Space held down, the system repeating it, switches between fitted
+    /// and 100 % once.
+    #[test]
+    fn a_held_space_switches_once() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        for frame in 0..3 {
+            // egui counts a key that goes down again while it is down as
+            // repeating.
+            harness.input_mut().events.push(egui::Event::Key {
+                key: Key::Space,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            });
+            harness.step();
+            assert_eq!(zoom_shown(&harness), "100 %", "{frame}");
+        }
+    }
+
+    /// The zoom buttons name in their tooltips the chord that does what
+    /// they do, as this system spells it.
+    #[test]
+    fn a_zoom_button_s_tooltip_names_its_chord() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let chord = |modifiers, key| Chord::new(modifiers, key).label();
+        let ctrl_alt = Modifiers::COMMAND | Modifiers::ALT;
+        press(&mut harness, Modifiers::COMMAND, Key::Equals);
+        let tips = [
+            ("Zoom out", chord(Modifiers::COMMAND, Key::Minus)),
+            ("Zoom in", chord(Modifiers::COMMAND, Key::Equals)),
+            ("Zoom to fit", chord(Modifiers::COMMAND, Key::Num0)),
+            ("Zoom to 100 %", chord(ctrl_alt, Key::Num0)),
+        ];
+        for (label, chord) in tips {
+            let tip = format!("{label} ({chord})");
+            assert!(tooltip_shows(&mut harness, label, &tip), "{tip}");
+        }
+    }
+
+    /// The zoom shown takes the same width whatever it says, so the
+    /// controls beside it stay where they are as it changes.
+    #[test]
+    fn the_zoom_controls_stay_put_as_the_zoom_changes() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let out = harness.get_by_label("Zoom out").rect();
+        let zoom_in = harness.get_by_label("Zoom in").rect();
+        assert_eq!(zoom_in.left() - out.right(), 52.0 + 2.0 * 6.0);
+        for _ in 0..5 {
+            press(&mut harness, Modifiers::COMMAND, Key::Equals);
+            assert_eq!(harness.get_by_label("Zoom out").rect(), out);
+        }
+        assert_eq!(zoom_shown(&harness), "800 %");
+    }
+
+    /// With both side docks at their widest, at the window's smallest, the
+    /// toolbar holds the view buttons, the zoom controls and a count of a
+    /// thousand photos, none over another.
+    #[test]
+    fn the_zoom_controls_fit_the_narrowest_toolbar() {
+        let dir = folder_of_numbered_photos(1000);
+        let mut harness = filmstrip_harness(dir.path());
+        for id in ["left_dock", "right_dock"] {
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 100.0));
+            let state = egui::PanelState { outer_rect: rect };
+            harness
+                .ctx
+                .data_mut(|d| d.insert_persisted(egui::Id::new(id), state));
+        }
+        harness.run();
+        let toolbar = panel(&harness, "toolbar");
+        let viewer = harness.get_by_label("Image viewer").rect();
+        let out = harness.get_by_label("Zoom out").rect();
+        let full = harness.get_by_label("Zoom to 100 %").rect();
+        let count = harness.get_by_label("1 of 1000").rect();
+        assert!(viewer.right() < out.left(), "{viewer:?} {out:?}");
+        assert!(full.right() < count.left(), "{full:?} {count:?}");
+        assert!(count.right() <= toolbar.right(), "{count:?} {toolbar:?}");
+    }
+
+    /// Ctrl+=, Ctrl+- and Ctrl+0 leave the whole window's size alone where
+    /// they zoom no photo, as in the grid, though egui's own keys zoom it.
+    #[test]
+    fn the_zoom_keys_never_zoom_the_window() {
+        let (dir, _) = folder_of_jpegs(600, 400);
+        let mut harness = grid_harness(dir.path());
+        for key in [Key::Equals, Key::Minus, Key::Equals, Key::Num0] {
+            press(&mut harness, Modifiers::COMMAND, key);
+            assert_eq!(harness.ctx.zoom_factor(), 1.0, "{key:?}");
+        }
+    }
+
+    #[test]
+    fn every_zoom_icon_resolves() {
+        for (_, label, (name, _)) in ZOOM_BUTTONS {
+            assert!(icons::resolves(name), "{label}: {name}");
+        }
     }
 
     /// The reference lists the keys that move between photos, under

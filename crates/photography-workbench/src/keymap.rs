@@ -18,6 +18,7 @@ use egui::{Key, Modifiers};
 
 use crate::mode::Mode;
 use crate::view::View;
+use crate::zoom::Zooming;
 
 /// Where a shortcut applies: the view Library shows a folder's photos in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +38,8 @@ pub enum Action {
     View(View),
     /// Make another of the folder's photos the current one.
     Photo(Step),
+    /// Zoom the viewer's photo, once its 100 % is known.
+    Zoom(Zooming),
     /// Show or hide the side docks together.
     SideDocks,
     /// Show or hide every dock together.
@@ -79,6 +82,8 @@ pub enum Group {
     Views,
     /// Moving between the photos.
     Photos,
+    /// How large the viewer shows its photo.
+    Zoom,
     /// Which docks are shown.
     Docks,
     /// The modes, the dialogs, and quitting.
@@ -87,13 +92,20 @@ pub enum Group {
 
 impl Group {
     /// Every group, in the reference's order.
-    const ALL: [Self; 4] = [Self::Views, Self::Photos, Self::Docks, Self::General];
+    const ALL: [Self; 5] = [
+        Self::Views,
+        Self::Photos,
+        Self::Zoom,
+        Self::Docks,
+        Self::General,
+    ];
 
     /// The group's section title in the reference.
     fn title(self) -> &'static str {
         match self {
             Self::Views => "Views",
             Self::Photos => "Photos",
+            Self::Zoom => "Zoom",
             Self::Docks => "Docks",
             Self::General => "General",
         }
@@ -226,6 +238,58 @@ const BINDINGS: &[Binding] = &[
         GRID,
         "Last photo",
     )),
+    bind(
+        Group::Zoom,
+        (NONE, Key::Z),
+        Action::Zoom(Zooming::Toggle),
+        VIEWER,
+        "Switch between fitted and 100 %",
+    ),
+    bind(
+        Group::Zoom,
+        (NONE, Key::Space),
+        Action::Zoom(Zooming::Toggle),
+        VIEWER,
+        "Switch between fitted and 100 %",
+    ),
+    bind(
+        Group::Zoom,
+        (CTRL, Key::Equals),
+        Action::Zoom(Zooming::In),
+        VIEWER,
+        "Zoom in",
+    ),
+    // Where the keyboard types `+` with Shift on the `=` key, as a US one
+    // does, or on a key of its own, as a German one does, or on the
+    // keypad.
+    bind(
+        Group::Zoom,
+        (CTRL, Key::Plus),
+        Action::Zoom(Zooming::In),
+        VIEWER,
+        "Zoom in",
+    ),
+    bind(
+        Group::Zoom,
+        (CTRL, Key::Minus),
+        Action::Zoom(Zooming::Out),
+        VIEWER,
+        "Zoom out",
+    ),
+    bind(
+        Group::Zoom,
+        (CTRL, Key::Num0),
+        Action::Zoom(Zooming::Fit),
+        VIEWER,
+        "Zoom to fit",
+    ),
+    bind(
+        Group::Zoom,
+        (CTRL_ALT, Key::Num0),
+        Action::Zoom(Zooming::Full),
+        VIEWER,
+        "Zoom to 100 %",
+    ),
     bind(
         Group::Docks,
         (NONE, Key::Tab),
@@ -637,7 +701,7 @@ mod tests {
     fn the_reference_lists_the_photo_keys_after_the_views() {
         let sections = sections();
         let titles: Vec<_> = sections.iter().map(|section| section.title).collect();
-        assert_eq!(titles, ["Views", "Photos", "Docks", "General"]);
+        assert_eq!(titles, ["Views", "Photos", "Zoom", "Docks", "General"]);
         let label = |key: Key| Chord::new(NONE, key).label();
         let rows = [
             (label(Key::ArrowLeft), "Previous photo"),
@@ -648,6 +712,171 @@ mod tests {
             (label(Key::End), "Last photo"),
         ];
         assert_eq!(sections[1].rows, rows);
+    }
+
+    /// The reference lists the viewer's zoom keys under Zoom, the section
+    /// after Photos: Z and Space between fitted and 100 %, Ctrl+= and
+    /// Ctrl++ in, Ctrl+- out, Ctrl+0 to fit and Ctrl+Alt+0 to 100 %.
+    #[test]
+    fn the_reference_lists_the_zoom_keys_after_the_photos() {
+        let sections = sections();
+        assert_eq!(sections[2].title, "Zoom");
+        let label = |modifiers, key| Chord::new(modifiers, key).label();
+        let toggle = "Switch between fitted and 100 %";
+        let rows = [
+            (label(NONE, Key::Z), toggle),
+            (label(NONE, Key::Space), toggle),
+            (label(CTRL, Key::Equals), "Zoom in"),
+            (label(CTRL, Key::Plus), "Zoom in"),
+            (label(CTRL, Key::Minus), "Zoom out"),
+            (label(CTRL, Key::Num0), "Zoom to fit"),
+            (label(CTRL_ALT, Key::Num0), "Zoom to 100 %"),
+        ];
+        assert_eq!(sections[2].rows, rows);
+    }
+
+    /// The actions pressed on `surface` in a frame whose input is
+    /// `events`, in a context of its own, so every key goes down afresh.
+    fn pressed_in(surface: Surface, events: Vec<egui::Event>) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            events,
+            ..egui::RawInput::default()
+        };
+        let mut actions = Vec::new();
+        let mut output = ctx.run_ui(input, |ui| {
+            actions = take_pressed_actions(ui.ctx(), surface);
+        });
+        output.textures_delta.clear();
+        actions
+    }
+
+    /// `key` going down with `modifiers` held, typed on the keyboard's
+    /// key `physical`.
+    fn typed(key: Key, physical: Key, modifiers: Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: Some(physical),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    /// In the viewer, Z and Space each switch between fitted and 100 %,
+    /// Ctrl+= zooms in, and so does Ctrl++, typed with Shift on the `=`
+    /// key as a US keyboard types it, or on a key of its own; Ctrl+-
+    /// zooms out, Ctrl+0 fits and Ctrl+Alt+0 goes to 100 %.
+    #[test]
+    fn the_zoom_keys_zoom_in_the_viewer() {
+        let zoom = |zooming| vec![Action::Zoom(zooming)];
+        let cases = [
+            (typed(Key::Z, Key::Z, NONE), zoom(Zooming::Toggle)),
+            (typed(Key::Space, Key::Space, NONE), zoom(Zooming::Toggle)),
+            (typed(Key::Equals, Key::Equals, CTRL), zoom(Zooming::In)),
+            (
+                typed(Key::Plus, Key::Equals, CTRL.plus(SHIFT)),
+                zoom(Zooming::In),
+            ),
+            (typed(Key::Plus, Key::CloseBracket, CTRL), zoom(Zooming::In)),
+            (typed(Key::Minus, Key::Minus, CTRL), zoom(Zooming::Out)),
+            (typed(Key::Num0, Key::Num0, CTRL), zoom(Zooming::Fit)),
+            (typed(Key::Num0, Key::Num0, CTRL_ALT), zoom(Zooming::Full)),
+        ];
+        for (event, actions) in cases {
+            assert_eq!(
+                pressed_in(Surface::Viewer, vec![event.clone()]),
+                actions,
+                "{event:?}"
+            );
+        }
+        // Shift+= types `+` with no Ctrl, which zooms nothing.
+        let plus = typed(Key::Plus, Key::Equals, SHIFT);
+        assert_eq!(pressed_in(Surface::Viewer, vec![plus]), []);
+    }
+
+    /// The zoom keys do nothing in the grid, and are left in its input.
+    #[test]
+    fn the_zoom_keys_do_nothing_in_the_grid() {
+        let zoom_keys = BINDINGS
+            .iter()
+            .filter(|binding| matches!(binding.action, Action::Zoom(_)));
+        for binding in zoom_keys {
+            let Chord { modifiers, key } = binding.chord;
+            assert_eq!(binding.surfaces, VIEWER, "{}", binding.chord.label());
+            let ctx = egui::Context::default();
+            let input = egui::RawInput {
+                events: vec![typed(key, key, modifiers)],
+                ..egui::RawInput::default()
+            };
+            let (mut actions, mut left) = (Vec::new(), Vec::new());
+            let mut output = ctx.run_ui(input, |ui| {
+                actions = take_pressed_actions(ui.ctx(), Surface::Grid);
+                left = keys_left(ui.ctx());
+            });
+            output.textures_delta.clear();
+            assert_eq!(actions, [], "{}", binding.chord.label());
+            assert_eq!(left, [key], "{}", binding.chord.label());
+        }
+    }
+
+    /// Space or Z held down, the system repeating it, switches between
+    /// fitted and 100 % once, as a toggle does, and its repeats are taken
+    /// out of the input all the same.
+    #[test]
+    fn a_held_zoom_toggle_switches_once() {
+        for key in [Key::Space, Key::Z] {
+            let ctx = egui::Context::default();
+            let frames: Vec<(Vec<Action>, Vec<Key>)> = (0..3)
+                .map(|_| {
+                    // egui counts a key that goes down again while it is
+                    // down as repeating.
+                    let input = egui::RawInput {
+                        events: vec![typed(key, key, NONE)],
+                        ..egui::RawInput::default()
+                    };
+                    let mut frame = Default::default();
+                    let mut output = ctx.run_ui(input, |ui| {
+                        let actions = take_pressed_actions(ui.ctx(), Surface::Viewer);
+                        frame = (actions, keys_left(ui.ctx()));
+                    });
+                    output.textures_delta.clear();
+                    frame
+                })
+                .collect();
+            let toggle = Action::Zoom(Zooming::Toggle);
+            let once = [(vec![toggle], vec![]), (vec![], vec![]), (vec![], vec![])];
+            assert_eq!(frames, once, "{key:?}");
+        }
+    }
+
+    /// The toolbar's zoom controls are named the chords that do what they
+    /// do in the viewer, and none in the grid.
+    #[test]
+    fn the_zoom_controls_chords_are_the_viewer_s() {
+        let label = |surface, zooming| {
+            chord_for(surface, Action::Zoom(zooming)).map(|c| c.label_for(false))
+        };
+        assert_eq!(
+            label(Surface::Viewer, Zooming::Toggle).as_deref(),
+            Some("Z")
+        );
+        assert_eq!(
+            label(Surface::Viewer, Zooming::In).as_deref(),
+            Some("Ctrl+=")
+        );
+        assert_eq!(
+            label(Surface::Viewer, Zooming::Out).as_deref(), // egui spells the minus as the minus sign, not the hyphen.
+            Some("Ctrl+−")
+        );
+        assert_eq!(
+            label(Surface::Viewer, Zooming::Fit).as_deref(),
+            Some("Ctrl+0")
+        );
+        let full = label(Surface::Viewer, Zooming::Full);
+        assert_eq!(full.as_deref(), Some("Ctrl+Alt+0"));
+        assert_eq!(label(Surface::Grid, Zooming::In), None);
+        assert_eq!(chord_everywhere(Action::Zoom(Zooming::In)), None);
     }
 
     /// The window's typeface draws every chord the reference spells,

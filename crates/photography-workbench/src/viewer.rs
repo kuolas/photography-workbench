@@ -19,11 +19,18 @@
 //! ([`wheel`]), the wheel's events being read in every frame the viewer
 //! is drawn, its photo's 100 % known or not, so what egui smooths of them
 //! in the frames after is taken for what it is; a drag, and a trackpad's
-//! two fingers, move a photo larger than the room. Only the room shows
-//! the photo, so its margin stays clear however it is zoomed. The zoom
-//! and the pan are kept from one photo to the next, and bounded for each,
-//! and the pointer shows what a click or a drag on the photo does
-//! ([`cursor`]).
+//! two fingers, move a photo larger than the room. The keys and the
+//! toolbar zoom it too ([`zoom`]): between fitted and 100 %, to either,
+//! and in and out by steps, about the room's middle, gliding there as
+//! after a click. They act before the viewer is drawn in a frame, in the
+//! room it was drawn in during the frame before, and do nothing when it
+//! was not drawn then, until it is drawn again ([`State::stage`]); and the
+//! toolbar reads the same framing the photo is drawn with
+//! ([`State::framing`]), so it never says another zoom than the photo's.
+//! Only the room shows the photo, so its margin stays clear however it is
+//! zoomed. The zoom and the pan are kept from one photo to the next, and
+//! bounded for each, and the pointer shows what a click or a drag on the
+//! photo does ([`cursor`]).
 //!
 //! What is drawn is the photo's picture ([`crate::textures`]): the photo
 //! decoded at the long side of that room in the screen's pixels, rounded
@@ -63,7 +70,8 @@
 //! from, and the textures the app holds, and names the photo to screen
 //! readers by its file name. What it keeps between frames is its
 //! [`State`], which the app holds for it: the zoom and the pan, the glide
-//! a click began, what the wheel last was, and how long it has waited.
+//! a click, a key or the toolbar began, what the wheel last was, how long
+//! it has waited, and the room it last drew the photo in.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -77,7 +85,7 @@ use egui::{
 use previews::Size;
 
 use crate::textures::{self, CURRENT, CURRENT_PICTURE, NEIGHBOURS, Textures, Thumbnail};
-use crate::zoom::{self, Framing, Stage};
+use crate::zoom::{self, Framing, Stage, Zooming};
 
 /// The room kept between the centre's edges and the photo, on every
 /// side, so the photo stands clear of the parts of the window around it.
@@ -109,7 +117,8 @@ pub struct State {
     /// How large the photo is shown, and which part of it: kept from one
     /// photo to the next.
     framing: Framing,
-    /// The move a click began, once begun, until another photo is shown.
+    /// The move a click, a key or the toolbar began, once begun, until
+    /// another photo is shown.
     glide: Option<Glide>,
     /// What the wheel is, as its last event said, for what egui smooths of
     /// it in the frames after.
@@ -119,11 +128,16 @@ pub struct State {
     clicked: Option<f64>,
     /// How long the viewer has waited for the sharpest texture it wants.
     waiting: Waiting,
+    /// The room the photo was shown in when the viewer was last drawn, in
+    /// points, which the keys and the toolbar zoom it in, as they act
+    /// before the viewer is drawn in a frame, and the number of the pass
+    /// of egui's it was drawn in. `None` until it is first drawn.
+    room: Option<(Rect, u64)>,
 }
 
 impl State {
     /// Where the photo on `stage` is drawn at egui's time `now`: gliding
-    /// to where its framing puts it while a click's move is under way, and
+    /// to where its framing puts it while a move is under way, and
     /// there, its corner on a whole pixel at 100 %, once it is not.
     fn drawn(&self, stage: &Stage, now: f64) -> Rect {
         let to = stage.place(self.framing);
@@ -135,16 +149,89 @@ impl State {
         }
     }
 
-    /// Whether a click's move is under way at egui's time `now`.
+    /// Whether a move a click, a key or the toolbar began is under way at
+    /// egui's time `now`.
     fn gliding(&self, now: f64) -> bool {
         self.glide
             .as_ref()
             .is_some_and(|glide| zoom::gliding(glide.since, now))
     }
+
+    /// How large the photo is shown and which part of it: what the viewer
+    /// draws it with, and what the toolbar reads, so the two never
+    /// disagree. While a move is under way, where it goes.
+    pub fn framing(&self) -> Framing {
+        self.framing
+    }
+
+    /// The stage of a photo whose largest image is `largest`, in the room
+    /// the viewer was last drawn in, on the screen of `ctx`: what the keys
+    /// and the toolbar zoom it on. `None` until the viewer is first drawn,
+    /// and whenever it was drawn neither in this pass of egui's nor in the
+    /// one before, as while the grid is shown and until the viewer is
+    /// drawn again, since the window or the docks may have changed
+    /// meanwhile, and the room with them; and while the photo's 100 % is
+    /// not known, as before any of it is decoded. They zoom nothing then.
+    ///
+    /// The keys act before the viewer is drawn, so in a frame whose room
+    /// changes, as the window is resized or a dock is shown or hidden, a
+    /// key pressed then zooms about the middle of the room from the frame
+    /// before, and the toolbar shows that room's zoom for that frame, the
+    /// viewer asking for the next one ([`show`]). Coming back to the
+    /// viewer, the toolbar never shows an old room's zoom: the viewer has
+    /// egui run the pass again, so it reads the new room in the same
+    /// frame.
+    pub fn stage(&self, ctx: &egui::Context, largest: Option<Size>) -> Option<Stage> {
+        let (room, pass) = self.room?;
+        if ctx.cumulative_pass_nr() > pass + 1 {
+            return None;
+        }
+        Some(Stage::new(largest?, room, ctx.pixels_per_point()))
+    }
 }
 
-/// The move a click began, from where the photo was drawn then to where
-/// the click's framing puts it.
+/// Zoom the photo at `path`, whose largest image is `largest`, as
+/// `zooming` asks for a key or a button of the toolbar, before the viewer
+/// is drawn in the frame of `ctx`: the point of the photo at the room's
+/// middle stays there ([`Stage::zoomed`]), the photo gliding there as it
+/// does after a click. Nothing while there is no [`State::stage`], nor
+/// when the zoom would not change.
+pub fn zoom(
+    state: &mut State,
+    ctx: &egui::Context,
+    path: &Path,
+    largest: Option<Size>,
+    zooming: Zooming,
+) {
+    let Some(stage) = state.stage(ctx, largest) else {
+        return;
+    };
+    let framing = stage.zoomed(state.framing, zooming);
+    if framing == state.framing {
+        return;
+    }
+    // A move of another photo, stepped from in this frame, is over.
+    if state.glide.as_ref().is_some_and(|glide| glide.path != path) {
+        state.glide = None;
+    }
+    let now = ctx.input(|i| i.time);
+    state.glide = Some(Glide {
+        path: path.to_path_buf(),
+        from: state.drawn(&stage, now),
+        since: now,
+    });
+    state.framing = framing;
+}
+
+/// What the toolbar says of the zoom shown at `percent` of 100 %, as
+/// [`Stage::percent`] reads it, fitted or not: "200 %". Nothing while
+/// there is no percent to read, before the photo's 100 % is known.
+pub fn zoom_label(percent: Option<u32>) -> String {
+    percent.map_or_else(String::new, |percent| format!("{percent} %"))
+}
+
+/// The move a click, a key or the toolbar began, from where the photo was
+/// drawn then to where the new framing puts it.
 #[derive(Debug)]
 struct Glide {
     /// The file of the photo it moves: another photo shown ends it.
@@ -309,6 +396,27 @@ pub fn show(
     let path = photo.path();
     let centre = ui.max_rect();
     let room = room(centre);
+    let pass = ui.ctx().cumulative_pass_nr();
+    // The toolbar reads the room before the viewer is drawn.
+    match state.room {
+        // Drawn in the pass before: the toolbar read this room, or, when it
+        // changed, as the window is resized or a dock shown or hidden, the
+        // one before, and reads this one in the next frame, which is asked
+        // for, so an idle window has it too. Running the pass again
+        // instead would draw every frame of a resize twice.
+        Some((stored, drawn)) if pass <= drawn + 1 => {
+            if stored != room {
+                ui.ctx().request_repaint();
+            }
+        }
+        // Drawn again after a pass without the viewer, or for the first
+        // time: the toolbar read no room, so egui runs the pass again,
+        // once, and it reads this one in the same frame, even when no
+        // other frame follows. Run again, the room was drawn in the pass
+        // before, and asks for nothing more.
+        _ => ui.ctx().request_discard("the viewer is drawn again"),
+    }
+    state.room = Some((room, pass));
     let points = room.size().max_elem();
     let pixels_per_point = ui.pixels_per_point();
     // Asked every frame: what egui holds is the card's own limit once the
@@ -410,7 +518,6 @@ pub fn show(
         response.on_hover_text(failure.to_string());
     }
 
-    let pass = ui.ctx().cumulative_pass_nr();
     let waited = state.waiting.waited(path, sharpest, now, pass);
     match loading(shown.coming && !cannot, waited) {
         Loading::No => {}
@@ -434,7 +541,7 @@ pub fn show(
 /// click zooms it in or out, gliding there; a drag moves it while it is
 /// larger than the room; and while the pointer is over the viewer, the
 /// wheel, a pinch or a trackpad's two fingers zoom it about the pointer or
-/// move it. While a click's move is under way, only another click acts.
+/// move it. While a move is under way, only another click acts.
 fn steer(
     ui: &egui::Ui,
     response: &egui::Response,
@@ -667,7 +774,7 @@ mod tests {
 
     use super::{
         LOADING_AFTER, Loading, Waiting, Wanted, Wheel, counts, cursor, largest_side, loading,
-        painted, picture_side, room, want_order,
+        painted, picture_side, room, want_order, zoom_label,
     };
     use crate::textures::{self, CURRENT, CURRENT_PICTURE, NEIGHBOURS, Thumbnail, placed};
     use crate::zoom::{Framing, Stage, Zoom};
@@ -910,6 +1017,16 @@ mod tests {
             assert_eq!(of(unit, Modifiers::ALT), Some(Wheel::Other), "{unit:?}");
             assert_eq!(of(unit, Modifiers::COMMAND), None, "{unit:?}");
         }
+    }
+
+    /// The toolbar reads the zoom as a whole percent, with a space before
+    /// the sign, and says nothing with no percent to read.
+    #[test]
+    fn the_zoom_reads_as_a_whole_percent() {
+        assert_eq!(zoom_label(Some(100)), "100 %");
+        assert_eq!(zoom_label(Some(25)), "25 %");
+        assert_eq!(zoom_label(Some(800)), "800 %");
+        assert_eq!(zoom_label(None), "");
     }
 
     /// The wait for a picture runs from when its photo or its size last

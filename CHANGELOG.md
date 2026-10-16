@@ -61,6 +61,16 @@ Nothing has been released yet.
   trackpad's two fingers, moves a photo zoomed larger than the viewer.
   The zoom stays as it is from one photo to the next, and a photo
   zoomed past the screen's size is shown sharp from its largest image.
+- In Library's viewer, the keys established photography tools use zoom
+  the photo too: Z or Space to switch between fitted and 100 %, Ctrl+=
+  (or Ctrl++) to zoom in and Ctrl+- to zoom out, through 25, 50, 100,
+  200, 400 and 800 %, Ctrl+0 to fit the photo and Ctrl+Alt+0 to show it
+  at 100 %, with Cmd for Ctrl and Option for Alt on macOS. They keep the
+  middle of what is shown where it is, and the photo glides there. The
+  toolbar shows the zoom as a percentage, fitted too, beside buttons
+  that do the same, and the reference of keyboard shortcuts lists the keys
+  under Zoom. Elsewhere those keys do nothing; none of them changes the
+  size of the whole window.
 - In Library, with the viewer, the filmstrip under it shows the
   folder's photos in a row, each with its name and its format (NEF, ARW
   or JPEG) above its thumbnail, the current one outlined; a long name
