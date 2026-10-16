@@ -10,8 +10,17 @@
 //! takes one pixel of the screen, so the photo is as many points long as
 //! that image has pixels, divided by the screen's pixels a point. Zooming
 //! goes no further out than the fit and no further in than
-//! [`MAX_SCALE`]; only a click goes to 100 % when that is smaller than the
-//! fit, as a small photo is enlarged to fit.
+//! [`MAX_SCALE`]; only going to 100 %, by a click, a key or the toolbar,
+//! goes below the fit, when 100 % is smaller than it, as a small photo is
+//! enlarged to fit, and a step in from there may stay below it.
+//!
+//! The keys and the toolbar change the zoom by a [`Zooming`]: between
+//! fitted and 100 %, as a click does; to fitted or to 100 %; or in or out
+//! by a step of [`STEPS`], from the scale shown, in whole percent as the
+//! toolbar reads it, a fitted photo's being the fit's ([`Stage::percent`]),
+//! to the next step past it, zooming out to fitted rather than to a step
+//! no larger than the fit ([`Stage::zoomed`]). Unlike the pointer, they
+//! keep the point of the photo at the room's middle where it is.
 //!
 //! Which part of a photo larger than the room is shown is its pan: the
 //! point of the photo at the room's middle, in fractions of the photo's
@@ -29,7 +38,8 @@
 //! ([`Stage::pan_by`]). A photo drawn at 100 % has its corner put on a
 //! whole pixel of the screen ([`Stage::snapped`]), so each of its pixels
 //! falls on one of the screen's and none is blurred across two. The move
-//! a click makes is eased over [`GLIDE`] seconds ([`glided`]).
+//! a click, a key or a button of the toolbar makes is eased over
+//! [`GLIDE`] seconds ([`glided`]).
 
 use std::cmp::Ordering;
 
@@ -37,15 +47,35 @@ use egui::emath::easing;
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 use previews::Size;
 
-/// The largest scale a photo is zoomed to: 800 %.
+/// The largest scale a photo is zoomed to: 800 %, the last of [`STEPS`].
 pub const MAX_SCALE: f32 = 8.0;
 
 /// How much larger than the room, in points, a photo must be on a side to
 /// count as larger: a photo fitted, or zoomed in by a hair, is not.
 const LARGER_BY: f32 = 1.0;
 
-/// How long the move a click makes takes, in seconds.
+/// How long the move a click, a key or a button of the toolbar makes
+/// takes, in seconds.
 pub const GLIDE: f64 = 0.25;
+
+/// The scales zooming in and out by a step goes to, relative to 100 %:
+/// 25 %, 50 %, 100 %, 200 %, 400 % and 800 %.
+pub const STEPS: [f32; 6] = [0.25, 0.5, 1.0, 2.0, 4.0, MAX_SCALE];
+
+/// A change of the zoom that a key or a button of the toolbar asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Zooming {
+    /// Between fitted and 100 %, as a click goes.
+    Toggle,
+    /// In, to the next step.
+    In,
+    /// Out, to the step before, or to fitted.
+    Out,
+    /// To fitted.
+    Fit,
+    /// To 100 %.
+    Full,
+}
 
 /// How large a photo is shown.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -112,6 +142,13 @@ impl Stage {
             Zoom::Fit => self.fit(),
             Zoom::Scale(scale) => scale,
         }
+    }
+
+    /// The scale `zoom` shows the photo at, in whole percent of 100 %, as
+    /// the toolbar reads it and the steps go from: fitted, the fit's.
+    pub fn percent(&self, zoom: Zoom) -> u32 {
+        // A negative or not-a-number scale, which none is, is cast to 0.
+        (self.scale(zoom) * 100.0).round() as u32
     }
 
     /// The photo's width and height at `scale`, in points.
@@ -214,6 +251,59 @@ impl Stage {
         Framing {
             zoom: Zoom::Scale(1.0),
             pan: self.bound(1.0, point),
+        }
+    }
+
+    /// The point of the photo framed by `framing` at the room's middle, in
+    /// fractions of its width and height: the photo's own middle when it
+    /// is fitted.
+    fn centre(&self, framing: Framing) -> Vec2 {
+        match framing.zoom {
+            Zoom::Fit => vec2(0.5, 0.5),
+            Zoom::Scale(scale) => self.bound(scale, framing.pan),
+        }
+    }
+
+    /// The framing that `zooming`, from a key or a button of the toolbar,
+    /// makes of the photo framed by `framing`: the point of the photo at
+    /// the room's middle stays there, as far as the bounds allow, and a
+    /// fitted photo's middle comes there.
+    ///
+    /// Between fitted and 100 % it goes as a click does
+    /// ([`click_fits`](Self::click_fits)). In goes to the first of
+    /// [`STEPS`] above the scale shown, read in whole percent as the
+    /// toolbar reads it, so a scale shown as 100 % goes on to 200 %; from
+    /// fitted, above the fit; and at 800 % it does nothing. Out goes to
+    /// the last step below the scale shown, or to fitted where that step
+    /// is no larger than the fit, or there is none; a photo shown no
+    /// larger than fitted, as a small one at 100 %, it leaves as it is, as
+    /// the wheel does.
+    pub fn zoomed(&self, framing: Framing, zooming: Zooming) -> Framing {
+        let fitted = Framing {
+            zoom: Zoom::Fit,
+            ..framing
+        };
+        let centre = self.centre(framing);
+        let at = |scale: f32| Framing {
+            zoom: Zoom::Scale(scale),
+            pan: self.bound(scale, centre),
+        };
+        let scale = self.scale(framing.zoom);
+        let shown = self.percent(framing.zoom) as f32 / 100.0;
+        let fit = self.fit();
+        match zooming {
+            Zooming::Toggle if self.click_fits(framing) => fitted,
+            Zooming::Toggle | Zooming::Full => at(1.0),
+            Zooming::Fit => fitted,
+            Zooming::In => match STEPS.into_iter().find(|&step| step > shown) {
+                Some(step) => at(step),
+                None => framing,
+            },
+            Zooming::Out if scale <= fit => framing,
+            Zooming::Out => match STEPS.into_iter().rev().find(|&step| step < shown) {
+                Some(step) if step > fit => at(step),
+                _ => fitted,
+            },
         }
     }
 
@@ -537,6 +627,165 @@ mod tests {
         };
         assert!(large.larger(zoomed) && large.click_fits(zoomed));
         assert!(!large.click_enlarges(zoomed), "to fitted");
+    }
+
+    /// A framing at `scale`, its pan `pan`.
+    fn at(scale: f32, pan: Vec2) -> Framing {
+        Framing {
+            zoom: Zoom::Scale(scale),
+            pan,
+        }
+    }
+
+    /// The zoom that `zooming` makes of the photo on `stage` framed by
+    /// `framing`.
+    fn zoom_of(stage: &Stage, framing: Framing, zooming: Zooming) -> Zoom {
+        stage.zoomed(framing, zooming).zoom
+    }
+
+    /// Zooming in goes to the first step above the scale shown, from
+    /// fitted, from between two steps and from a step, and at 800 % does
+    /// nothing; zooming out goes to the last step below it, to fitted
+    /// from 25 %, and fitted does nothing.
+    #[test]
+    fn zooming_in_and_out_goes_to_the_next_step() {
+        // Fitted at 20 %.
+        let stage = photo(3000, 2000, 1.0);
+        let middle = vec2(0.5, 0.5);
+        let fitted = Framing::default();
+        assert_eq!(zoom_of(&stage, fitted, Zooming::In), Zoom::Scale(0.25));
+        assert_eq!(stage.zoomed(fitted, Zooming::Out), fitted);
+        let cases = [
+            (0.3, 0.5, Zoom::Scale(0.25)),
+            (1.5, 2.0, Zoom::Scale(1.0)),
+            (0.25, 0.5, Zoom::Fit),
+            (0.5, 1.0, Zoom::Scale(0.25)),
+            (1.0, 2.0, Zoom::Scale(0.5)),
+            (4.0, 8.0, Zoom::Scale(2.0)),
+        ];
+        for (scale, zoomed_in, zoomed_out) in cases {
+            let framing = at(scale, middle);
+            let zoomed = zoom_of(&stage, framing, Zooming::In);
+            assert_eq!(zoomed, Zoom::Scale(zoomed_in), "{scale}");
+            assert_eq!(
+                zoom_of(&stage, framing, Zooming::Out),
+                zoomed_out,
+                "{scale}"
+            );
+        }
+        let most = at(MAX_SCALE, middle);
+        assert_eq!(stage.zoomed(most, Zooming::In), most);
+        assert_eq!(zoom_of(&stage, most, Zooming::Out), Zoom::Scale(4.0));
+    }
+
+    /// The scale a step goes from is the one shown, in whole percent, a
+    /// fitted photo's being the fit's: a photo shown at 100 % by a hair
+    /// less, zoomed or fitted, goes in to 200 %, and one shown at it by a
+    /// hair more goes out to 50 %.
+    #[test]
+    fn a_step_goes_from_the_scale_shown_in_whole_percent() {
+        let stage = photo(3000, 2000, 1.0);
+        let middle = vec2(0.5, 0.5);
+        assert_eq!(stage.percent(Zoom::Scale(0.996)), 100);
+        let under = at(0.996, middle);
+        assert_eq!(zoom_of(&stage, under, Zooming::In), Zoom::Scale(2.0));
+        let over = at(1.004, middle);
+        assert_eq!(zoom_of(&stage, over, Zooming::Out), Zoom::Scale(0.5));
+        assert_eq!(stage.percent(Zoom::Scale(0.25)), 25);
+        assert_eq!(stage.percent(Zoom::Scale(MAX_SCALE)), 800);
+        // Fitted, the fit's: 20 %, and 200 % for a small photo.
+        assert_eq!(stage.percent(Zoom::Fit), 20);
+        assert_eq!(photo(300, 200, 1.0).percent(Zoom::Fit), 200);
+        // A fit read as 100 % zooms in to 200 %, as the toolbar reads it.
+        let near_full = photo(602, 401, 1.0);
+        assert_eq!(near_full.percent(Zoom::Fit), 100);
+        let fitted = Framing::default();
+        assert_eq!(near_full.zoomed(fitted, Zooming::In).zoom, Zoom::Scale(2.0));
+    }
+
+    /// Where the fit is above a step, zooming out to that step fits the
+    /// photo instead, and zooming in from fitted goes past the fit; a
+    /// small photo shown at 100 %, no larger than fitted, is not zoomed
+    /// out.
+    #[test]
+    fn zooming_out_to_a_step_no_larger_than_the_fit_fits_the_photo() {
+        // Fitted at 60 %.
+        let stage = photo(1000, 500, 1.0);
+        let middle = vec2(0.5, 0.5);
+        assert_eq!(stage.fit(), 0.6);
+        assert_eq!(zoom_of(&stage, at(1.0, middle), Zooming::Out), Zoom::Fit);
+        assert_eq!(
+            zoom_of(&stage, at(2.0, middle), Zooming::Out),
+            Zoom::Scale(1.0)
+        );
+        let fitted = Framing::default();
+        assert_eq!(zoom_of(&stage, fitted, Zooming::In), Zoom::Scale(1.0));
+        // Fitted at 200 %.
+        let small = photo(300, 200, 1.0);
+        let full = at(1.0, middle);
+        assert_eq!(small.zoomed(full, Zooming::Out), full);
+        assert_eq!(zoom_of(&small, full, Zooming::In), Zoom::Scale(2.0));
+        assert_eq!(zoom_of(&small, fitted, Zooming::In), Zoom::Scale(4.0));
+        assert_eq!(small.zoomed(fitted, Zooming::Out), fitted);
+    }
+
+    /// Zooming by a key keeps the point of the photo at the room's middle
+    /// there, as far as the bounds allow, and brings a fitted photo's
+    /// middle there.
+    #[test]
+    fn a_step_keeps_the_point_at_the_room_s_middle() {
+        let stage = photo(3000, 2000, 1.0);
+        let centre = room().center();
+        let under = |framing| {
+            let drawn = stage.place(framing);
+            (centre - drawn.min) / drawn.size()
+        };
+        let framing = at(1.0, vec2(0.3, 0.6));
+        for zooming in [Zooming::In, Zooming::Out] {
+            let zoomed = stage.zoomed(framing, zooming);
+            assert!(near(under(zoomed), vec2(0.3, 0.6)), "{zooming:?}");
+        }
+        // At 50 %, 1500 by 1000 points: the room shows two fifths of it.
+        let edge = at(1.0, vec2(0.12, 0.85));
+        let zoomed = stage.zoomed(edge, Zooming::Out);
+        assert_eq!(zoomed.zoom, Zoom::Scale(0.5));
+        assert!(near(under(zoomed), vec2(0.2, 0.8)), "{zoomed:?}");
+        assert!(stage.place(zoomed).contains_rect(room()), "{zoomed:?}");
+        let zoomed = stage.zoomed(Framing::default(), Zooming::In);
+        assert!(near(under(zoomed), vec2(0.5, 0.5)), "{zoomed:?}");
+    }
+
+    /// Between fitted and 100 % a key goes as a click at the room's
+    /// middle does; to fitted and to 100 % it goes whatever the zoom.
+    #[test]
+    fn a_key_goes_between_fitted_and_100_percent_as_a_click_at_the_middle() {
+        let stage = photo(3000, 2000, 1.0);
+        let middle = room().center();
+        let framings = [
+            Framing::default(),
+            at(1.0, vec2(0.3, 0.6)),
+            at(0.2 * 1.001, vec2(0.5, 0.5)),
+            at(2.0, vec2(0.9, 0.1)),
+        ];
+        for framing in framings {
+            let toggled = stage.zoomed(framing, Zooming::Toggle);
+            let clicked = stage.click(framing, stage.place(framing), middle);
+            assert_eq!(toggled.zoom, clicked.zoom, "{framing:?}");
+            if toggled.zoom != Zoom::Fit {
+                assert!(near(toggled.pan, clicked.pan), "{framing:?}");
+            }
+            assert_eq!(zoom_of(&stage, framing, Zooming::Fit), Zoom::Fit);
+            assert_eq!(zoom_of(&stage, framing, Zooming::Full), Zoom::Scale(1.0));
+        }
+        let full = stage.zoomed(Framing::default(), Zooming::Full);
+        assert_eq!(full, at(1.0, vec2(0.5, 0.5)));
+        let small = photo(300, 200, 1.0);
+        let full = small.zoomed(Framing::default(), Zooming::Toggle);
+        assert_eq!(full.zoom, Zoom::Scale(1.0));
+        assert_eq!(small.zoomed(full, Zooming::Toggle).zoom, Zoom::Fit);
+        // Zoomed past 100 % but no larger than the room, as a click.
+        let past = at(1.5, vec2(0.5, 0.5));
+        assert_eq!(small.zoomed(past, Zooming::Toggle).zoom, Zoom::Fit);
     }
 
     /// A pan moves the photo with the pointer, as far as the bounds

@@ -165,6 +165,7 @@ fn is_punctuation(key: Key) -> bool {
             | Key::Quote
             | Key::Backtick
             | Key::Minus
+            | Key::Plus
             | Key::Equals
             | Key::OpenBracket
             | Key::CloseBracket
@@ -398,6 +399,30 @@ mod tests {
         assert!(!typed(
             ctrl_shift_comma,
             (Key::Comma, Key::M),
+            Modifiers::COMMAND
+        ));
+        // US: `+` is Shift+=, typed on the `=` key; German: it has a key
+        // of its own, which egui names by where it is on a US one.
+        let ctrl_plus = Chord::new(Modifiers::COMMAND, Key::Plus);
+        assert!(
+            typed(ctrl_plus, (Key::Plus, Key::Equals), ctrl_shift),
+            "Ctrl+Shift+="
+        );
+        assert!(typed(
+            ctrl_plus,
+            (Key::Plus, Key::CloseBracket),
+            Modifiers::COMMAND
+        ));
+        // The `=` key alone types `=`, which is another chord.
+        let ctrl_equals = Chord::new(Modifiers::COMMAND, Key::Equals);
+        assert!(!typed(
+            ctrl_plus,
+            (Key::Equals, Key::Equals),
+            Modifiers::COMMAND
+        ));
+        assert!(typed(
+            ctrl_equals,
+            (Key::Equals, Key::Equals),
             Modifiers::COMMAND
         ));
         // A letter typed on another key, as on a Dvorak keyboard.
