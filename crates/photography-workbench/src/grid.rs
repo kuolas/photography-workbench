@@ -14,7 +14,7 @@
 //!
 //! The grid draws a list of photos and the index of the current one,
 //! whatever they were read from, and the thumbnails the app holds
-//! ([`crate::thumbnails`]). Only the rows in view are laid out, so a
+//! ([`crate::textures`]). Only the rows in view are laid out, so a
 //! folder of thousands of photos scrolls as smoothly as one of ten. Their
 //! thumbnails are decoded in the order a photographer reads them, the
 //! current photo's first, and after them those of a screen of rows above
@@ -42,7 +42,7 @@ use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{FontId, Margin, Rect, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, WidgetType, vec2};
 
 use crate::follow;
-use crate::thumbnails::{self, AHEAD, CURRENT, ON_SCREEN, Thumbnail, Thumbnails};
+use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN, Textures, Thumbnail};
 
 /// The side of a tile.
 const TILE: f32 = 220.0;
@@ -68,7 +68,7 @@ const NAME_SIZE: f32 = 10.5;
 
 /// The width of the outline around the current photo: around its
 /// thumbnail, or around the room the thumbnail goes in while there is
-/// none to draw, [`thumbnails::MARK_GAP`] clear of either.
+/// none to draw, [`textures::MARK_GAP`] clear of either.
 const OUTLINE: f32 = 2.0;
 
 /// The room between a tile's edges and its thumbnail, which is fitted
@@ -104,7 +104,7 @@ pub struct Shown {
 }
 
 /// The grid of `photos`, the photos of `folder`, filling `ui`, with the
-/// photo at `current` outlined and the thumbnails in `thumbnails`; it
+/// photo at `current` outlined and the thumbnails in `textures`; it
 /// scrolls when the rows do not fit. As many tiles fit in a row as the
 /// width allows, and at least one; the room left over stays at the
 /// right. `folder` tells one list from another, so the grid brings the
@@ -112,7 +112,7 @@ pub struct Shown {
 pub fn show(
     ui: &mut egui::Ui,
     palette: &Palette,
-    thumbnails: &mut Thumbnails,
+    textures: &mut Textures,
     photos: &[Photo],
     current: Option<usize>,
     folder: &Path,
@@ -148,10 +148,10 @@ pub fn show(
         area.show_rows(ui, TILE, rows, |ui, range| {
             // Every tile's thumbnail fits in the same room.
             let room = Vec2::splat(TILE) - IMAGE_INSET.sum();
-            let longest = thumbnails::longest(room.max_elem(), ui.pixels_per_point());
+            let longest = textures::longest(room.max_elem(), ui.pixels_per_point());
             for (index, priority) in want_order(range.clone(), rows, columns, photos.len(), current)
             {
-                thumbnails.want(photos[index].path(), longest, priority);
+                textures.want(photos[index].path(), longest, priority);
             }
             let mut outline = None;
             for row in range {
@@ -162,14 +162,14 @@ pub fn show(
                     let tile = Rect::from_min_size(left_top, egui::Vec2::splat(TILE));
                     let index = first + column;
                     let is_current = current == Some(index);
-                    let thumbnail = thumbnails.thumbnail(photo.path(), longest);
+                    let thumbnail = textures.thumbnail(photo.path(), longest);
                     if let Some(open) = photo_tile(ui, palette, photo, thumbnail, tile, is_current)
                     {
                         click = Some(Click { index, open });
                     }
                     if is_current {
-                        let place = thumbnails::placed(thumbnail, tile - IMAGE_INSET);
-                        outline = Some(place.expand(thumbnails::MARK_GAP));
+                        let place = textures::placed(thumbnail, tile - IMAGE_INSET);
+                        outline = Some(place.expand(textures::MARK_GAP));
                     }
                 }
             }
@@ -232,7 +232,7 @@ pub fn below(index: usize, len: usize, columns: usize) -> usize {
 /// The photos whose thumbnails a grid of `len` photos, `columns` to a
 /// row in `rows` rows, wants while it shows the rows in `range`, the best
 /// first, each with a priority of its own from the highest down
-/// ([`thumbnails::ranked`]): the current photo ([`CURRENT`]); then the
+/// ([`textures::ranked`]): the current photo ([`CURRENT`]); then the
 /// photos in view, as a photographer reads them; then those of the rows
 /// ahead ([`rows_ahead`]), each row from its first photo to its last.
 fn want_order(
@@ -253,7 +253,7 @@ fn want_order(
         let (index, _) = order.remove(at);
         order.insert(0, (index, CURRENT));
     }
-    thumbnails::ranked(order)
+    textures::ranked(order)
 }
 
 /// The rows wanted ahead of being scrolled to, of a grid of `rows` rows
@@ -303,7 +303,7 @@ fn photo_tile(
         .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, is_current, &name));
 
     let painter = ui.painter();
-    let failure = thumbnails::paint(ui, thumbnail, rect - IMAGE_INSET, FAILED_ICON_SIZE);
+    let failure = textures::paint(ui, thumbnail, rect - IMAGE_INSET, FAILED_ICON_SIZE);
     // The name, cut short with "…" where it would run past its room.
     let mut job = LayoutJob::single_section(
         name.clone(),
@@ -317,7 +317,7 @@ fn photo_tile(
         galley,
         palette.text,
     );
-    let response = match thumbnails::tooltip(name, elided, failure) {
+    let response = match textures::tooltip(name, elided, failure) {
         Some(tooltip) => response.on_hover_text(tooltip),
         None => response,
     };
@@ -338,7 +338,7 @@ fn photo_tile(
 #[cfg(test)]
 mod tests {
     use super::{above, below, columns, rows_ahead, scrolled_to_show, want_order};
-    use crate::thumbnails::{self, AHEAD, CURRENT, ON_SCREEN};
+    use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN};
 
     /// A row holds as many 220-point tiles, 1 point apart, as fit between
     /// 4 points of room at each side, and at least one.
@@ -411,7 +411,7 @@ mod tests {
             CURRENT, ON_SCREEN, ON_SCREEN, ON_SCREEN, ON_SCREEN, ON_SCREEN,
         ];
         let tiers = tiers.into_iter().chain([AHEAD; 4]);
-        assert_eq!(order, thumbnails::ranked(indices.into_iter().zip(tiers)));
+        assert_eq!(order, textures::ranked(indices.into_iter().zip(tiers)));
         assert!(
             order.windows(2).all(|pair| pair[0].1 > pair[1].1),
             "{order:?}"

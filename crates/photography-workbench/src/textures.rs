@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The photos' thumbnails, decoded off the window's thread and kept as
-//! textures: [`Thumbnails`], which the views of a folder's photos draw
+//! textures: [`Textures`], which the views of a folder's photos draw
 //! from.
 //!
 //! Each frame a view wants the photos it shows, and those it soon may
-//! ([`Thumbnails::want`]), the best first, each at a priority of its own
+//! ([`Textures::want`]), the best first, each at a priority of its own
 //! ([`ranked`]), so they are decoded in that order however the decoder's
-//! workers wake; then it draws them ([`Thumbnails::thumbnail`]), getting
+//! workers wake; then it draws them ([`Textures::thumbnail`]), getting
 //! the texture held for each, if any, or why the photo cannot be shown.
 //! Wanting a photo decodes it unless a texture of that size is held, so
 //! a view wants every photo it shows on every frame and the store does
 //! the rest: each frame, before anything is drawn,
-//! [`Thumbnails::begin_frame`] turns the photos decoded since the last
+//! [`Textures::begin_frame`] turns the photos decoded since the last
 //! frame into textures, and after everything is drawn
-//! [`Thumbnails::end_frame`] drops the requests of the photos no longer
+//! [`Textures::end_frame`] drops the requests of the photos no longer
 //! wanted, so scrolling fast through thousands of photos leaves no queue
 //! behind, and lets go of the textures least recently wanted past a
 //! budget of memory. The decoder wakes the window when a photo is
@@ -122,7 +122,7 @@ struct Held {
 
 /// The photos' thumbnails, decoded on worker threads and kept as
 /// textures, one a photo and size, within a budget of memory.
-pub struct Thumbnails {
+pub struct Textures {
     /// What decodes the photos, one request a photo and size. Made on the
     /// first frame, as it wakes the window.
     decoder: Option<Decoder<Slot>>,
@@ -150,7 +150,7 @@ pub struct Thumbnails {
     reads: u64,
 }
 
-impl Default for Thumbnails {
+impl Default for Textures {
     /// No thumbnails yet, and no decoder until the first frame.
     fn default() -> Self {
         Self {
@@ -168,7 +168,7 @@ impl Default for Thumbnails {
     }
 }
 
-impl Thumbnails {
+impl Textures {
     /// A store whose decoder decodes on the window's thread, when the
     /// frame begins, so a test sees each thumbnail on the frame after it
     /// was first wanted.
@@ -521,13 +521,13 @@ mod tests {
     }
 
     /// How many requests the store's decoder holds.
-    fn pending(store: &Thumbnails) -> usize {
+    fn pending(store: &Textures) -> usize {
         store.decoder.as_ref().map_or(0, Decoder::pending)
     }
 
     /// A frame of the store's, in which the photos at `drawn` are wanted
     /// on the screen and drawn, at 256 pixels.
-    fn frame(store: &mut Thumbnails, ctx: &egui::Context, drawn: &[&Path]) -> Vec<Thumbnail> {
+    fn frame(store: &mut Textures, ctx: &egui::Context, drawn: &[&Path]) -> Vec<Thumbnail> {
         store.begin_frame(ctx);
         for path in drawn {
             store.want(path, 256, ON_SCREEN);
@@ -549,7 +549,7 @@ mod tests {
     }
 
     /// How many textures are held, of every photo and size.
-    fn textures(store: &Thumbnails) -> usize {
+    fn textures(store: &Textures) -> usize {
         store.held.values().map(Vec::len).sum()
     }
 
@@ -632,7 +632,7 @@ mod tests {
         let dir = folder();
         let a = dir.path().join("a.jpg");
         let ctx = egui::Context::default();
-        let mut store = Thumbnails::inline();
+        let mut store = Textures::inline();
         assert_eq!(frame(&mut store, &ctx, &[&a]), [Thumbnail::Pending]);
         let shown = frame(&mut store, &ctx, &[&a]);
         assert!(
@@ -674,14 +674,14 @@ mod tests {
         let a = dir.path().join("a.jpg");
         let ctx = egui::Context::default();
         // The texture of `a` at `longest` pixels, decoded for `store`.
-        let decoded = |store: &mut Thumbnails, longest| {
+        let decoded = |store: &mut Textures, longest| {
             store.begin_frame(&ctx);
             store.want(&a, longest, ON_SCREEN);
             store.end_frame(&ctx);
             store.begin_frame(&ctx);
             store.texture(&a, longest).unwrap()
         };
-        let mut store = Thumbnails::inline();
+        let mut store = Textures::inline();
         let small = decoded(&mut store, 256);
         assert_eq!(texture_of(store.thumbnail(&a, 384)), Some(small));
         let large = decoded(&mut store, 512);
@@ -698,7 +698,7 @@ mod tests {
         let broken = dir.path().join("broken.jpg");
         let failed = Thumbnail::Failed(previews::decode(&broken, 256).unwrap_err());
         let ctx = egui::Context::default();
-        let mut store = Thumbnails::inline();
+        let mut store = Textures::inline();
         store.shown(1);
         frame(&mut store, &ctx, &[&broken]);
         for _ in 0..2 {
@@ -761,7 +761,7 @@ mod tests {
         let dir = folder();
         let [a, b, c] = ["a.jpg", "b.jpg", "c.jpg"].map(|name| dir.path().join(name));
         let ctx = egui::Context::default();
-        let mut store = Thumbnails::inline();
+        let mut store = Textures::inline();
         store.begin_frame(&ctx);
         store.want(&a, 256, ON_SCREEN);
         store.want(&b, 256, AHEAD);
@@ -786,7 +786,7 @@ mod tests {
         let dir = folder();
         let a = dir.path().join("a.jpg");
         let ctx = egui::Context::default();
-        let mut store = Thumbnails::inline();
+        let mut store = Textures::inline();
         store.begin_frame(&ctx);
         store.shown(1);
         store.want(&a, 256, ON_SCREEN);
@@ -804,7 +804,7 @@ mod tests {
         let dir = folder();
         let a = dir.path().join("a.jpg");
         let ctx = egui::Context::default();
-        let mut store = Thumbnails::inline();
+        let mut store = Textures::inline();
         store.shown(1);
         frame(&mut store, &ctx, &[&a]);
         let [before] = frame(&mut store, &ctx, &[&a])[..] else {
@@ -829,7 +829,7 @@ mod tests {
         let dir = folder();
         let a = dir.path().join("a.jpg");
         let ctx = egui::Context::default();
-        let mut store = Thumbnails::inline();
+        let mut store = Textures::inline();
         frame(&mut store, &ctx, &[&a]);
         frame(&mut store, &ctx, &[&a]);
         assert_eq!(store.held[&a][0].bytes, 4 * 256 * 192);
@@ -844,7 +844,7 @@ mod tests {
         let dir = folder();
         let [a, b, c] = ["a.jpg", "b.jpg", "c.jpg"].map(|name| dir.path().join(name));
         let ctx = egui::Context::default();
-        let mut store = Thumbnails::inline();
+        let mut store = Textures::inline();
         frame(&mut store, &ctx, &[&a, &b, &c]);
         frame(&mut store, &ctx, &[&a, &b, &c]);
         let texture = 4 * 256 * 192;

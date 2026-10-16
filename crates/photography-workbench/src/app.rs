@@ -19,7 +19,7 @@ use crate::keymap::{self, Action, Step, Surface};
 use crate::layout::{self, Docks};
 use crate::menu::{self, MacMenu};
 use crate::mode::{Layout, Mode};
-use crate::thumbnails::Thumbnails;
+use crate::textures::Textures;
 use crate::view::View;
 
 /// The Lucide icons of the title bar's settings gear and of its button
@@ -60,7 +60,7 @@ pub struct PhotographyWorkbenchApp {
     browser: Browser,
     /// The photos' thumbnails, decoded off the window's thread, which
     /// the grid and the filmstrip draw.
-    thumbnails: Thumbnails,
+    textures: Textures,
     /// How many tiles the grid laid out in a row the last time it was
     /// drawn, which the keys that move a row up or down go by. `None`
     /// until it is drawn, and from a change of mode, view or docks shown
@@ -428,7 +428,7 @@ impl PhotographyWorkbenchApp {
                 let shown = grid::show(
                     ui,
                     palette,
-                    &mut self.thumbnails,
+                    &mut self.textures,
                     list.photos(),
                     list.current(),
                     list.folder(),
@@ -609,9 +609,9 @@ impl eframe::App for PhotographyWorkbenchApp {
         self.browser.update(ui.ctx());
         // The thumbnails decoded since the last frame, before any is
         // drawn, and the read of photos they are wanted for.
-        self.thumbnails.begin_frame(ui.ctx());
+        self.textures.begin_frame(ui.ctx());
         if let Some(read) = self.browser.photos_read() {
-            self.thumbnails.shown(read);
+            self.textures.shown(read);
         }
 
         let palette = theme::resolve(self.theme, ui.ctx()).palette();
@@ -649,9 +649,9 @@ impl eframe::App for PhotographyWorkbenchApp {
         let film = |ui: &mut egui::Ui| {
             if let Photos::Read(list) = self.browser.photos() {
                 let (photos, current) = (list.photos(), list.current());
-                let thumbnails = &mut self.thumbnails;
+                let textures = &mut self.textures;
                 let clicked =
-                    filmstrip::show(ui, &palette, thumbnails, photos, current, list.folder());
+                    filmstrip::show(ui, &palette, textures, photos, current, list.folder());
                 if let Some(index) = clicked {
                     self.browser.select_photo(index);
                 }
@@ -674,7 +674,7 @@ impl eframe::App for PhotographyWorkbenchApp {
         // Once every view of the photos is drawn, the filmstrip in the
         // bottom dock and the grid in the centre: the thumbnails none of
         // them wanted in this frame are not decoded.
-        self.thumbnails.end_frame(ui.ctx());
+        self.textures.end_frame(ui.ctx());
 
         // Above everything but the dialogs.
         chrome::window_resize_handles(ui.ctx());
@@ -733,7 +733,7 @@ mod tests {
 
     use super::{
         Action, Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, Side, THEME_KEY, TITLE_BAR_ICONS,
-        Theme, Thumbnails, VIEW_KEY, View,
+        Textures, Theme, VIEW_KEY, View,
     };
 
     /// Settings kept in memory, in place of eframe's file.
@@ -801,7 +801,7 @@ mod tests {
                 }
                 let mut app = PhotographyWorkbenchApp::new(cc);
                 app.browser.use_disk(disk);
-                app.thumbnails = Thumbnails::inline();
+                app.textures = Textures::inline();
                 app
             });
         (harness, roots)
@@ -2219,7 +2219,7 @@ mod tests {
         let dir = photos_folder();
         std::fs::write(
             dir.path().join("DSC_0001.jpg"),
-            crate::thumbnails::jpeg(300, 200),
+            crate::textures::jpeg(300, 200),
         )
         .unwrap();
         std::fs::write(dir.path().join("DSC_0002.NEF"), b"not a photo").unwrap();
@@ -2247,7 +2247,7 @@ mod tests {
     fn a_tile_s_name_ends_above_the_outline_of_a_portrait_thumbnail() {
         let dir = photos_folder();
         let name = "DSC_0001_gyp.jpg";
-        let jpeg = crate::thumbnails::jpeg(200, 300);
+        let jpeg = crate::textures::jpeg(200, 300);
         std::fs::write(dir.path().join(name), jpeg).unwrap();
         let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
         click(&mut harness, "Home");
@@ -2278,7 +2278,7 @@ mod tests {
     fn a_tile_shows_its_photo_s_thumbnail_or_why_it_cannot_be_shown() {
         let dir = photos_folder();
         let photo = dir.path().join("DSC_0001.jpg");
-        std::fs::write(&photo, crate::thumbnails::jpeg(300, 200)).unwrap();
+        std::fs::write(&photo, crate::textures::jpeg(300, 200)).unwrap();
         std::fs::write(dir.path().join("DSC_0002.NEF"), b"not a photo").unwrap();
         let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
         click(&mut harness, "Home");
@@ -2288,10 +2288,7 @@ mod tests {
             tile_room(&harness, "DSC_0002.NEF"),
         );
         let (texture, drawn) = texture_in(&harness, photo_room);
-        assert_eq!(
-            harness.state().thumbnails.texture(&photo, 256),
-            Some(texture)
-        );
+        assert_eq!(harness.state().textures.texture(&photo, 256), Some(texture));
         assert_fitted_3_2(drawn, photo_room);
         assert!(textures_in(&harness, broken_room).is_empty());
         assert!(failure_icon_in(&harness, broken_room, 32.0), "no icon");
@@ -2310,7 +2307,7 @@ mod tests {
         let dir = photos_folder();
         std::fs::write(
             dir.path().join("DSC_0001.jpg"),
-            crate::thumbnails::jpeg(300, 200),
+            crate::textures::jpeg(300, 200),
         )
         .unwrap();
         let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
@@ -2328,14 +2325,14 @@ mod tests {
     fn a_photo_changed_while_away_shows_its_new_thumbnail() {
         let dir = photos_folder();
         let photo = dir.path().join("DSC_0001.jpg");
-        std::fs::write(&photo, crate::thumbnails::jpeg(300, 200)).unwrap();
+        std::fs::write(&photo, crate::textures::jpeg(300, 200)).unwrap();
         let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
         click(&mut harness, "Home");
         let room = tile_room(&harness, "DSC_0001.jpg");
         let (before, drawn) = texture_in(&harness, room);
         assert!(drawn.width() > drawn.height(), "{drawn:?}");
 
-        std::fs::write(&photo, crate::thumbnails::jpeg(200, 300)).unwrap();
+        std::fs::write(&photo, crate::textures::jpeg(200, 300)).unwrap();
         leave_and_come_back(&mut harness);
         let (after, drawn) = texture_in(&harness, room);
         assert_ne!(after, before);
@@ -2359,7 +2356,7 @@ mod tests {
         let dir = photos_folder();
         for n in 1..=8 {
             let name = format!("DSC_000{n}.jpg");
-            std::fs::write(dir.path().join(name), crate::thumbnails::jpeg(60, 40)).unwrap();
+            std::fs::write(dir.path().join(name), crate::textures::jpeg(60, 40)).unwrap();
         }
         let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
         click(&mut harness, "Home");
@@ -2629,11 +2626,11 @@ mod tests {
             dir.path().join("DSC_0001.jpg"),
             dir.path().join("DSC_0002.NEF"),
         );
-        std::fs::write(&photo, crate::thumbnails::jpeg(300, 200)).unwrap();
+        std::fs::write(&photo, crate::textures::jpeg(300, 200)).unwrap();
         std::fs::write(&broken, b"not a photo").unwrap();
         let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
         click(&mut harness, "Home");
-        let texture = harness.state().thumbnails.texture(&photo, 256);
+        let texture = harness.state().textures.texture(&photo, 256);
         let texture = texture.expect("no texture for the photo");
         click(&mut harness, "Image viewer");
 
@@ -2666,7 +2663,7 @@ mod tests {
         let dir = photos_folder();
         std::fs::write(
             dir.path().join("DSC_0001.jpg"),
-            crate::thumbnails::jpeg(300, 200),
+            crate::textures::jpeg(300, 200),
         )
         .unwrap();
         std::fs::write(dir.path().join("DSC_0002.NEF"), b"not a photo").unwrap();
@@ -2714,7 +2711,7 @@ mod tests {
     #[test]
     fn each_view_draws_a_texture_made_for_its_size() {
         let dir = photos_folder();
-        let jpeg = crate::thumbnails::jpeg(800, 600);
+        let jpeg = crate::textures::jpeg(800, 600);
         std::fs::write(dir.path().join("DSC_0001.jpg"), jpeg).unwrap();
         let (mut harness, _) = harness_at(None, vec![home(dir.path())], 2.0);
         click(&mut harness, "Home");
@@ -2732,7 +2729,7 @@ mod tests {
         let dir = photos_folder();
         for n in 1..=5 {
             let name = format!("DSC_000{n}.jpg");
-            std::fs::write(dir.path().join(name), crate::thumbnails::jpeg(60, 40)).unwrap();
+            std::fs::write(dir.path().join(name), crate::textures::jpeg(60, 40)).unwrap();
         }
         let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
         click(&mut harness, "Home");
@@ -2764,7 +2761,7 @@ mod tests {
         let long = "Z_holiday_photo_from_a_phone_camera.jpg";
         std::fs::write(dir.path().join("DSC_0001.NEF"), b"").unwrap();
         // A photo that can be shown, so its tooltip holds its name alone.
-        let jpeg = crate::thumbnails::jpeg(300, 200);
+        let jpeg = crate::textures::jpeg(300, 200);
         std::fs::write(dir.path().join(long), jpeg).unwrap();
         let mut harness = filmstrip_harness(dir.path());
         let (cell, _) = film_cell(&harness, long).unwrap();

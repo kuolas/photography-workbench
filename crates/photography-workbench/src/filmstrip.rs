@@ -12,7 +12,7 @@
 //!
 //! The strip draws a list of photos and the index of the current one,
 //! whatever they were read from, and the thumbnails the app holds
-//! ([`crate::thumbnails`]). Only the cells near the view are laid out,
+//! ([`crate::textures`]). Only the cells near the view are laid out,
 //! so a folder of thousands of photos scrolls as smoothly as one of ten;
 //! their thumbnails are decoded the current photo's first, then those in
 //! view, then those past its ends, each the nearest the current photo
@@ -41,7 +41,7 @@ use egui::{
 };
 
 use crate::follow;
-use crate::thumbnails::{self, AHEAD, CURRENT, ON_SCREEN, Thumbnail, Thumbnails};
+use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN, Textures, Thumbnail};
 
 /// The width of a cell. Cells run the strip's height and touch.
 const CELL: f32 = 120.0;
@@ -76,7 +76,7 @@ const LABEL_GAP: f32 = 4.0;
 
 /// The width of the outline around the current photo: around its
 /// thumbnail, or around its tile while there is none to draw,
-/// [`thumbnails::MARK_GAP`] clear of either.
+/// [`textures::MARK_GAP`] clear of either.
 const OUTLINE: f32 = 1.5;
 
 /// How many cells are laid out past each end of the view, so the strip
@@ -87,7 +87,7 @@ const NEAR: usize = 4;
 const FAILED_ICON_SIZE: f32 = 24.0;
 
 /// The filmstrip of `photos`, the photos of `folder`, filling `ui`, with
-/// the photo at `current` outlined and the thumbnails in `thumbnails`;
+/// the photo at `current` outlined and the thumbnails in `textures`;
 /// it scrolls sideways when the cells do not fit. `folder` tells one
 /// list from another, so the strip brings the current photo into view
 /// when the list changes. Nothing is drawn when there are no photos. The
@@ -95,7 +95,7 @@ const FAILED_ICON_SIZE: f32 = 24.0;
 pub fn show(
     ui: &mut egui::Ui,
     palette: &Palette,
-    thumbnails: &mut Thumbnails,
+    textures: &mut Textures,
     photos: &[Photo],
     current: Option<usize>,
     folder: &Path,
@@ -138,21 +138,21 @@ pub fn show(
                 let end = (in_view.end + NEAR).min(photos.len());
                 // Every cell's thumbnail fits in the same tile.
                 let tile = (cell(0) - TILE_INSET).size();
-                let longest = thumbnails::longest(tile.max_elem(), ui.pixels_per_point());
+                let longest = textures::longest(tile.max_elem(), ui.pixels_per_point());
                 for (index, priority) in want_order(first..end, in_view, current) {
-                    thumbnails.want(photos[index].path(), longest, priority);
+                    textures.want(photos[index].path(), longest, priority);
                 }
                 let mut outline = None;
                 for (index, photo) in photos.iter().enumerate().take(end).skip(first) {
                     let rect = cell(index);
                     let is_current = current == Some(index);
-                    let thumbnail = thumbnails.thumbnail(photo.path(), longest);
+                    let thumbnail = textures.thumbnail(photo.path(), longest);
                     if photo_cell(ui, photo, thumbnail, rect, is_current) {
                         click = Some(index);
                     }
                     if is_current {
-                        let place = thumbnails::placed(thumbnail, rect - TILE_INSET);
-                        outline = Some(place.expand(thumbnails::MARK_GAP));
+                        let place = textures::placed(thumbnail, rect - TILE_INSET);
+                        outline = Some(place.expand(textures::MARK_GAP));
                     }
                 }
                 // Last, so the cells next to it do not cover it.
@@ -183,7 +183,7 @@ fn in_view(viewport: Rect, len: usize) -> Range<usize> {
 /// The photos whose thumbnails the strip wants while it lays out the
 /// cells in `laid_out`, those in `in_view` in its view, the best first,
 /// each with a priority of its own from the highest down
-/// ([`thumbnails::ranked`]).
+/// ([`textures::ranked`]).
 ///
 /// A photographer in the viewer steps from the current photo to the
 /// next or the one before, so the cells nearest the current photo are
@@ -209,7 +209,7 @@ fn want_order(
     };
     let mut order: Vec<usize> = laid_out.collect();
     order.sort_by_key(|&index| (Reverse(tier(index)), index.abs_diff(from), index < from));
-    thumbnails::ranked(order.into_iter().map(|index| (index, tier(index))))
+    textures::ranked(order.into_iter().map(|index| (index, tier(index))))
 }
 
 /// The cell of `photo` at `rect`, its tile showing `thumbnail` on the
@@ -232,7 +232,7 @@ fn photo_cell(
         .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, is_current, &name));
 
     let painter = ui.painter();
-    let failure = thumbnails::paint(ui, thumbnail, rect - TILE_INSET, FAILED_ICON_SIZE);
+    let failure = textures::paint(ui, thumbnail, rect - TILE_INSET, FAILED_ICON_SIZE);
     // Above the tile, dimmer than the photo they name: the photo's format
     // at the right, and its name without the extension at the left, cut
     // short with "…" where it would run into the format, so the end of a
@@ -256,7 +256,7 @@ fn photo_cell(
     let galley = painter.layout_job(job);
     let elided = galley.elided;
     painter.galley(pos2(left, middle - galley.size().y / 2.0), galley, colour);
-    let response = match thumbnails::tooltip(name, elided, failure) {
+    let response = match textures::tooltip(name, elided, failure) {
         Some(tooltip) => response.on_hover_text(tooltip),
         None => response,
     };
@@ -294,7 +294,7 @@ mod tests {
     use egui::{Rect, pos2};
 
     use super::{format_of, in_view, stem, want_order};
-    use crate::thumbnails::{self, AHEAD, CURRENT, ON_SCREEN};
+    use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN};
 
     /// A cell is in view however little of it is, and not when it only
     /// touches the view's edge, and as far as there are photos. Cells are
@@ -322,7 +322,7 @@ mod tests {
         let tiers = [
             CURRENT, ON_SCREEN, ON_SCREEN, ON_SCREEN, AHEAD, AHEAD, AHEAD, AHEAD,
         ];
-        assert_eq!(order, thumbnails::ranked(indices.into_iter().zip(tiers)));
+        assert_eq!(order, textures::ranked(indices.into_iter().zip(tiers)));
         assert!(
             order.windows(2).all(|pair| pair[0].1 > pair[1].1),
             "{order:?}"
