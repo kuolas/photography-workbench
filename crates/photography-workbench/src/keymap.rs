@@ -33,6 +33,8 @@ pub enum Action {
     Mode(Mode),
     /// Show the folder's photos in a view.
     View(View),
+    /// Make another of the folder's photos the current one.
+    Photo(Step),
     /// Show or hide the side docks together.
     SideDocks,
     /// Show or hide every dock together.
@@ -49,11 +51,32 @@ pub enum Action {
     Quit,
 }
 
+/// Which photo becomes the current one, from the current one. None goes
+/// past either end of the folder, nor wraps around to the other (ADR011).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// The one before it.
+    Previous,
+    /// The one after it.
+    Next,
+    /// The one above it in the grid.
+    Above,
+    /// The one below it in the grid, or the last photo when the row
+    /// below is too short to have one there.
+    Below,
+    /// The folder's first photo.
+    First,
+    /// The folder's last photo.
+    Last,
+}
+
 /// The sections of the reference, each holding the shortcuts of one kind.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Group {
     /// How the centre shows the photos.
     Views,
+    /// Moving between the photos.
+    Photos,
     /// Which docks are shown.
     Docks,
     /// The modes, the dialogs, and quitting.
@@ -62,12 +85,13 @@ pub enum Group {
 
 impl Group {
     /// Every group, in the reference's order.
-    const ALL: [Self; 3] = [Self::Views, Self::Docks, Self::General];
+    const ALL: [Self; 4] = [Self::Views, Self::Photos, Self::Docks, Self::General];
 
     /// The group's section title in the reference.
     fn title(self) -> &'static str {
         match self {
             Self::Views => "Views",
+            Self::Photos => "Photos",
             Self::Docks => "Docks",
             Self::General => "General",
         }
@@ -86,6 +110,9 @@ struct Binding {
 
 /// Both views: everywhere in Library.
 const EVERYWHERE: &[Surface] = &[Surface::Grid, Surface::Viewer];
+
+/// The grid only.
+const GRID: &[Surface] = &[Surface::Grid];
 
 /// The viewer only.
 const VIEWER: &[Surface] = &[Surface::Viewer];
@@ -134,6 +161,48 @@ const BINDINGS: &[Binding] = &[
         Action::View(View::Grid),
         VIEWER,
         "Back to the thumbnail grid",
+    ),
+    bind(
+        Group::Photos,
+        (NONE, Key::ArrowLeft),
+        Action::Photo(Step::Previous),
+        EVERYWHERE,
+        "Previous photo",
+    ),
+    bind(
+        Group::Photos,
+        (NONE, Key::ArrowRight),
+        Action::Photo(Step::Next),
+        EVERYWHERE,
+        "Next photo",
+    ),
+    bind(
+        Group::Photos,
+        (NONE, Key::ArrowUp),
+        Action::Photo(Step::Above),
+        GRID,
+        "Photo above",
+    ),
+    bind(
+        Group::Photos,
+        (NONE, Key::ArrowDown),
+        Action::Photo(Step::Below),
+        GRID,
+        "Photo below",
+    ),
+    bind(
+        Group::Photos,
+        (NONE, Key::Home),
+        Action::Photo(Step::First),
+        GRID,
+        "First photo",
+    ),
+    bind(
+        Group::Photos,
+        (NONE, Key::End),
+        Action::Photo(Step::Last),
+        GRID,
+        "Last photo",
     ),
     bind(
         Group::Docks,
@@ -358,6 +427,47 @@ mod tests {
         assert_eq!(label(Surface::Viewer, filmstrip).as_deref(), Some("F6"));
         assert_eq!(label(Surface::Grid, filmstrip), None);
         assert_eq!(label(Surface::Grid, Action::Mode(Mode::Organizer)), None);
+        let below = Action::Photo(Step::Below);
+        let down = Chord::new(NONE, Key::ArrowDown);
+        assert_eq!(chord_for(Surface::Grid, below), Some(down));
+        assert_eq!(chord_for(Surface::Viewer, below), None);
+    }
+
+    /// The reference lists the keys that move between photos under
+    /// Photos, the section after Views: the previous and next photo, the
+    /// one above and below, and the first and last.
+    #[test]
+    fn the_reference_lists_the_photo_keys_after_the_views() {
+        let sections = sections();
+        let titles: Vec<_> = sections.iter().map(|section| section.title).collect();
+        assert_eq!(titles, ["Views", "Photos", "Docks", "General"]);
+        let label = |key: Key| Chord::new(NONE, key).label();
+        let rows = [
+            (label(Key::ArrowLeft), "Previous photo"),
+            (label(Key::ArrowRight), "Next photo"),
+            (label(Key::ArrowUp), "Photo above"),
+            (label(Key::ArrowDown), "Photo below"),
+            (label(Key::Home), "First photo"),
+            (label(Key::End), "Last photo"),
+        ];
+        assert_eq!(sections[1].rows, rows);
+    }
+
+    /// The window's typeface draws every chord the reference spells,
+    /// the arrow keys' symbols among them.
+    #[test]
+    fn the_typeface_draws_every_chord() {
+        let ctx = egui::Context::default();
+        desktop_ui::fonts::install(&ctx);
+        // egui takes the fonts up at the start of a pass.
+        let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
+        let font = egui::FontId::proportional(13.0);
+        for binding in BINDINGS {
+            let label = binding.chord.label();
+            let drawn = ctx.fonts_mut(|fonts| fonts.has_glyphs(&font, &label));
+            assert!(drawn, "{label} for {:?}", binding.action);
+        }
     }
 
     /// The reference lists every shortcut that does something, under its

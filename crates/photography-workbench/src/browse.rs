@@ -310,6 +310,31 @@ impl Browser {
         }
     }
 
+    /// Move the selected folder's current photo `by` photos, forwards
+    /// when it is positive, stopping at the first and the last photo and
+    /// never wrapping around. Does nothing while there are no photos.
+    pub fn step_photo(&mut self, by: isize) {
+        if let Photos::Read(list) = &mut self.photos {
+            list.step(by);
+        }
+    }
+
+    /// Make the selected folder's first photo the current one. Does
+    /// nothing while there are no photos.
+    pub fn first_photo(&mut self) {
+        if let Photos::Read(list) = &mut self.photos {
+            list.first();
+        }
+    }
+
+    /// Make the selected folder's last photo the current one. Does
+    /// nothing while there are no photos.
+    pub fn last_photo(&mut self) {
+        if let Photos::Read(list) = &mut self.photos {
+            list.last();
+        }
+    }
+
     /// Expand the folder at `path` if it is collapsed, and collapse it if
     /// it is expanded.
     pub fn toggle(&mut self, path: &Path) {

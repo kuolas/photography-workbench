@@ -67,6 +67,13 @@ Nothing has been released yet.
   reference that lists them all, and a button's tooltip names the
   shortcut that does what it does. The shortcuts stand down while a
   dialog is open.
+- In Library, Left and Right move to the previous and next photo, in
+  the grid and the viewer; in the grid, Up and Down move a row, and
+  Home and End go to the first and last photo. They stop at the first
+  and last photo rather than wrap around. The grid scrolls just far
+  enough to show the photo moved to, the filmstrip brings it into
+  view, and the reference of keyboard shortcuts lists the keys under
+  Photos.
 - On macOS, a menu bar at the top of the screen: About, Settings and
   Quit in the app menu, the views and the docks in View, the modes in
   Window, and the reference of keyboard shortcuts in Help. The view, the
