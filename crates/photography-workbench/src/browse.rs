@@ -87,6 +87,9 @@ pub struct Browser {
     /// which started before others when its folder was chosen again while
     /// it was under way; `None` while no photos are wanted.
     wanted: Option<u64>,
+    /// The number of the read whose answer [`photos`](Self::photos)
+    /// came from; `None` before the first.
+    taken: Option<u64>,
 }
 
 impl Default for Browser {
@@ -104,6 +107,7 @@ impl Default for Browser {
             reads: 0,
             reading: HashMap::new(),
             wanted: None,
+            taken: None,
         }
     }
 }
@@ -219,6 +223,7 @@ impl Browser {
                         Ok(list) => Photos::Read(keep_current(&self.photos, list)),
                         Err(error) => Photos::Failed(error.kind()),
                     };
+                    self.taken = Some(read);
                 }
             }
         }
@@ -299,6 +304,16 @@ impl Browser {
     /// The selected folder's photos, as far as they have been read.
     pub fn photos(&self) -> &Photos {
         &self.photos
+    }
+
+    /// The number of the read the photos shown came from, a new one each
+    /// time the folder's photos are read afresh, as when the window comes
+    /// back to the front; `None` while there are none.
+    pub fn photos_read(&self) -> Option<u64> {
+        match self.photos {
+            Photos::Read(_) => self.taken,
+            _ => None,
+        }
     }
 
     /// Make the photo at `index` of the selected folder the current one,
@@ -579,6 +594,30 @@ mod tests {
         let (names, current) = shown(&browser).unwrap();
         assert_eq!(names, ["DSC_1.NEF", "DSC_2.NEF", "DSC_3.NEF"]);
         assert_eq!(current, "DSC_3.NEF");
+    }
+
+    /// Each read of the photos shown has a number of its own, so photos
+    /// read afresh are told from those before them; there is none while
+    /// no photos are shown.
+    #[test]
+    fn each_read_of_the_photos_shown_has_a_number_of_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut browser, _) = browsing(dir.path());
+        let ctx = egui::Context::default();
+        let a = dir.path().join("a");
+        assert_eq!(browser.photos_read(), None);
+        browser.select(&ctx, &a);
+        assert_eq!(browser.photos_read(), None);
+        browser.update(&ctx);
+        let first = browser.photos_read().unwrap();
+        browser.select(&ctx, &a);
+        assert_eq!(browser.photos_read(), Some(first));
+        browser.update(&ctx);
+        let second = browser.photos_read().unwrap();
+        assert_ne!(first, second);
+        browser.select(&ctx, &dir.path().join("missing"));
+        browser.update(&ctx);
+        assert_eq!(browser.photos_read(), None);
     }
 
     /// When the current photo is gone from the folder read again, the

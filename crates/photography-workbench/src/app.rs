@@ -19,6 +19,7 @@ use crate::keymap::{self, Action, Step, Surface};
 use crate::layout::{self, Docks};
 use crate::menu::{self, MacMenu};
 use crate::mode::{Layout, Mode};
+use crate::thumbnails::Thumbnails;
 use crate::view::View;
 
 /// The Lucide icons of the title bar's settings gear and of its button
@@ -57,6 +58,9 @@ pub struct PhotographyWorkbenchApp {
     /// selected folder's photos; what is expanded and selected in the
     /// tree is saved between runs.
     browser: Browser,
+    /// The photos' thumbnails, decoded off the window's thread, which
+    /// the grid draws.
+    thumbnails: Thumbnails,
     /// How many tiles the grid laid out in a row the last time it was
     /// drawn, which the keys that move a row up or down go by. `None`
     /// until it is drawn, and from a change of mode, view or docks shown
@@ -421,7 +425,14 @@ impl PhotographyWorkbenchApp {
         };
         match self.view {
             View::Grid => {
-                let shown = grid::show(ui, palette, list.photos(), list.current(), list.folder());
+                let shown = grid::show(
+                    ui,
+                    palette,
+                    &mut self.thumbnails,
+                    list.photos(),
+                    list.current(),
+                    list.folder(),
+                );
                 self.grid_columns = Some(shown.columns);
                 if let Some(click) = shown.click {
                     self.browser.select_photo(click.index);
@@ -430,8 +441,8 @@ impl PhotographyWorkbenchApp {
                     }
                 }
             }
-            // The photo's name, in place of the photo until the app
-            // decodes previews.
+            // The photo's name, in place of the photo, which the viewer
+            // does not show yet.
             View::Viewer => {
                 if let Some(photo) = list.current_photo() {
                     let name = egui::RichText::new(photo.name())
@@ -596,6 +607,12 @@ impl eframe::App for PhotographyWorkbenchApp {
         self.shortcuts(ui.ctx());
         // What the disk has read, before the tree is drawn.
         self.browser.update(ui.ctx());
+        // The thumbnails decoded since the last frame, before any is
+        // drawn, and the read of photos they are wanted for.
+        self.thumbnails.begin_frame(ui.ctx());
+        if let Some(read) = self.browser.photos_read() {
+            self.thumbnails.shown(read);
+        }
 
         let palette = theme::resolve(self.theme, ui.ctx()).palette();
         egui::Panel::top("title_bar")
@@ -651,6 +668,9 @@ impl eframe::App for PhotographyWorkbenchApp {
         egui::CentralPanel::default()
             .frame(centre)
             .show(ui, |ui| self.centre(ui, &palette));
+        // Once every view of the photos is drawn: the thumbnails none of
+        // them wanted in this frame are not decoded.
+        self.thumbnails.end_frame(ui.ctx());
 
         // Above everything but the dialogs.
         chrome::window_resize_handles(ui.ctx());
@@ -709,7 +729,7 @@ mod tests {
 
     use super::{
         Action, Docks, MODE_KEY, Mode, PhotographyWorkbenchApp, Side, THEME_KEY, TITLE_BAR_ICONS,
-        Theme, VIEW_KEY, View,
+        Theme, Thumbnails, VIEW_KEY, View,
     };
 
     /// Settings kept in memory, in place of eframe's file.
@@ -748,7 +768,8 @@ mod tests {
     /// `roots` mounted. The disk is read at once, on the window's thread;
     /// the roots it reads are those the handle returned holds, which a
     /// test changes to mount and unmount volumes, the change showing on
-    /// the next frame.
+    /// the next frame. The thumbnails are decoded on the window's thread
+    /// too, as the frame after the one that wants them begins.
     fn harness_on(
         storage: Option<&MemoryStorage>,
         roots: Vec<Root>,
@@ -763,6 +784,7 @@ mod tests {
                 }
                 let mut app = PhotographyWorkbenchApp::new(cc);
                 app.browser.use_disk(disk);
+                app.thumbnails = Thumbnails::inline();
                 app
             });
         (harness, roots)
@@ -1996,8 +2018,10 @@ mod tests {
     /// The tiles are 220 points square, 1 point apart across and down,
     /// from 4 points in from the centre's left and top, as many to a row
     /// as fit, the room left over at the right. A photo's name starts 8
-    /// points in from its tile's left and 12 down from its top, and the
-    /// current photo's tile is outlined in the accent colour.
+    /// points in from its tile's left, its middle 12 down from its top. Nothing
+    /// is filled behind a tile, and the current photo, an empty file that
+    /// cannot be shown, has the room its thumbnail would take outlined in
+    /// the accent colour, 2 points clear of it.
     #[test]
     fn the_tiles_are_laid_out_in_rows() {
         let dir = photos_folder();
@@ -2023,23 +2047,318 @@ mod tests {
         let below = tile(columns + 1);
         assert_eq!(below.left_top(), first.left_bottom() + egui::vec2(0.0, 1.0));
 
-        let palette = theme::resolve(harness.state().theme, &harness.ctx).palette();
+        assert!(!chip_filled_in(&harness, first), "a fill in {first:?}");
+        let room = tile_room(&harness, "DSC_0001.NEF");
+        assert_eq!(current_outline(&harness, 2.0), Some(room.expand(2.0)));
         let shapes = &harness.output().shapes;
-        let outlined = shapes.iter().any(|clipped| match &clipped.shape {
-            egui::Shape::Rect(rect) => {
-                rect.rect == first
-                    && rect.stroke == egui::Stroke::new(2.0, palette.accent)
-                    && rect.stroke_kind == egui::StrokeKind::Outside
+        let name_at = first.left_top() + egui::vec2(8.0, 12.0);
+        let named = shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => {
+                let middle = text.pos.y + text.galley.size().y / 2.0;
+                text.galley.text() == "DSC_0001.NEF"
+                    && text.pos.x == name_at.x
+                    && middle == name_at.y
             }
             _ => false,
         });
-        assert!(outlined, "no outline around {first:?}");
-        let name_at = first.left_top() + egui::vec2(8.0, 12.0);
-        let named = shapes.iter().any(|clipped| match &clipped.shape {
-            egui::Shape::Text(text) => text.pos == name_at && text.galley.text() == "DSC_0001.NEF",
-            _ => false,
+        assert!(named, "no name with its middle at {name_at:?}");
+    }
+
+    /// The textures drawn in the last frame with their middle in `room`,
+    /// each with where it was drawn.
+    fn textures_in(
+        harness: &Harness<'_, PhotographyWorkbenchApp>,
+        room: egui::Rect,
+    ) -> Vec<(egui::TextureId, egui::Rect)> {
+        let textured = |shape: &egui::Shape| match shape {
+            egui::Shape::Rect(rect)
+                if rect.fill_texture_id() != egui::TextureId::default()
+                    && room.contains(rect.rect.center()) =>
+            {
+                Some((rect.fill_texture_id(), rect.rect))
+            }
+            _ => None,
+        };
+        let shapes = &harness.output().shapes;
+        shapes
+            .iter()
+            .filter_map(|clipped| textured(&clipped.shape))
+            .collect()
+    }
+
+    /// The one texture drawn in the last frame in `room`, and where;
+    /// fails unless exactly one was.
+    fn texture_in(
+        harness: &Harness<'_, PhotographyWorkbenchApp>,
+        room: egui::Rect,
+    ) -> (egui::TextureId, egui::Rect) {
+        let drawn = textures_in(harness, room);
+        let [drawn] = drawn[..] else {
+            panic!("{} textures drawn in {room:?}", drawn.len());
+        };
+        drawn
+    }
+
+    /// Whether the icon of a photo that cannot be shown, `size` points,
+    /// was drawn in the last frame in the middle of `room`.
+    fn failure_icon_in(
+        harness: &Harness<'_, PhotographyWorkbenchApp>,
+        room: egui::Rect,
+        size: f32,
+    ) -> bool {
+        let (glyph, _) = icons::glyph("image-off", size, '?');
+        harness
+            .output()
+            .shapes
+            .iter()
+            .any(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    let drawn = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    text.galley.text() == glyph.to_string()
+                        && (drawn.center() - room.center()).length() <= 1.0
+                }
+                _ => false,
+            })
+    }
+
+    /// Check that `drawn`, where a 3:2 thumbnail was drawn, is fitted in
+    /// `room`: as wide as it, in its middle, give or take a pixel.
+    fn assert_fitted_3_2(drawn: egui::Rect, room: egui::Rect) {
+        assert_eq!(drawn.width(), room.width(), "{drawn:?} in {room:?}");
+        assert!(
+            (drawn.height() - room.width() * 2.0 / 3.0).abs() <= 1.0,
+            "{drawn:?} in {room:?}"
+        );
+        assert!(
+            (drawn.center() - room.center()).length() <= 1.0,
+            "{drawn:?} in {room:?}"
+        );
+    }
+
+    /// Where the grid's tile for the photo named `label` keeps its
+    /// thumbnail: the tile less 10 points at each side, 24 at the top and
+    /// 10 at the bottom.
+    fn tile_room(harness: &Harness<'_, PhotographyWorkbenchApp>, label: &str) -> egui::Rect {
+        let tile = harness.get_by_label(label).rect();
+        egui::Rect::from_min_max(
+            tile.min + egui::vec2(10.0, 24.0),
+            tile.max - egui::vec2(10.0, 10.0),
+        )
+    }
+
+    /// Whether a rect filled with the theme's `chip` colour was painted
+    /// in the last frame with its middle in `area`.
+    fn chip_filled_in(harness: &Harness<'_, PhotographyWorkbenchApp>, area: egui::Rect) -> bool {
+        let palette = theme::resolve(harness.state().theme, &harness.ctx).palette();
+        harness
+            .output()
+            .shapes
+            .iter()
+            .any(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect) => {
+                    rect.fill == palette.chip && area.contains(rect.rect.center())
+                }
+                _ => false,
+            })
+    }
+
+    /// Around what the outline of the current photo, `width` points in
+    /// the accent colour, was drawn in the last frame, if it was.
+    fn current_outline(
+        harness: &Harness<'_, PhotographyWorkbenchApp>,
+        width: f32,
+    ) -> Option<egui::Rect> {
+        let palette = theme::resolve(harness.state().theme, &harness.ctx).palette();
+        let stroke = egui::Stroke::new(width, palette.accent);
+        harness
+            .output()
+            .shapes
+            .iter()
+            .find_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect)
+                    if rect.stroke == stroke && rect.stroke_kind == egui::StrokeKind::Outside =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            })
+    }
+
+    /// Check that `outline` goes around `drawn` 2 points clear of it, give
+    /// or take a pixel.
+    fn assert_clear_around(outline: egui::Rect, drawn: egui::Rect) {
+        let around = drawn.expand(2.0);
+        let apart = (outline.min - around.min).length() + (outline.max - around.max).length();
+        assert!(apart <= 1.0, "{outline:?} around {drawn:?}");
+    }
+
+    /// A tile has nothing behind its thumbnail, or behind the icon of a
+    /// photo that cannot be shown: the grid's backdrop shows around it.
+    /// The current photo's outline goes 2 points clear of its thumbnail
+    /// as drawn, or of the room the thumbnail goes in when there is none
+    /// to draw.
+    #[test]
+    fn a_tile_has_nothing_behind_its_thumbnail_and_its_outline_hugs_it() {
+        let dir = photos_folder();
+        std::fs::write(
+            dir.path().join("DSC_0001.jpg"),
+            crate::thumbnails::jpeg(300, 200),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("DSC_0002.NEF"), b"not a photo").unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        for label in ["DSC_0001.jpg", "DSC_0002.NEF"] {
+            let tile = harness.get_by_label(label).rect();
+            assert!(!chip_filled_in(&harness, tile), "a fill in {label}'s tile");
+        }
+
+        let (_, drawn) = texture_in(&harness, tile_room(&harness, "DSC_0001.jpg"));
+        let outline = current_outline(&harness, 2.0).expect("no outline");
+        assert_clear_around(outline, drawn);
+
+        make_current(&mut harness, 2);
+        let room = tile_room(&harness, "DSC_0002.NEF");
+        assert_eq!(current_outline(&harness, 2.0), Some(room.expand(2.0)));
+    }
+
+    /// A photo's name, its middle 12 points below its tile's top, ends
+    /// above the current photo's outline round a portrait thumbnail, as
+    /// tall as its room, so the outline never runs through the name, its
+    /// descenders and underscores included.
+    #[test]
+    fn a_tile_s_name_ends_above_the_outline_of_a_portrait_thumbnail() {
+        let dir = photos_folder();
+        let name = "DSC_0001_gyp.jpg";
+        let jpeg = crate::thumbnails::jpeg(200, 300);
+        std::fs::write(dir.path().join(name), jpeg).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let room = tile_room(&harness, name);
+        let (_, drawn) = texture_in(&harness, room);
+        assert_eq!(drawn.height(), room.height(), "{drawn:?} in {room:?}");
+        let outline = current_outline(&harness, 2.0).expect("no outline");
+        // The outline's 2-point line runs outside the rect it goes round.
+        let line_top = outline.top() - 2.0;
+        let shapes = &harness.output().shapes;
+        let name_box = shapes.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == name => {
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+            }
+            _ => None,
         });
-        assert!(named, "no name at {name_at:?}");
+        let name_box = name_box.expect("no name");
+        assert!(
+            name_box.bottom() < line_top,
+            "{name_box:?} runs into the outline at {line_top}"
+        );
+    }
+
+    /// A tile shows its photo's thumbnail once it is decoded, fitted in
+    /// the room under the name, its aspect kept; a photo that cannot be
+    /// shown shows an icon there instead, and says why under the pointer.
+    #[test]
+    fn a_tile_shows_its_photo_s_thumbnail_or_why_it_cannot_be_shown() {
+        let dir = photos_folder();
+        let photo = dir.path().join("DSC_0001.jpg");
+        std::fs::write(&photo, crate::thumbnails::jpeg(300, 200)).unwrap();
+        std::fs::write(dir.path().join("DSC_0002.NEF"), b"not a photo").unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+
+        let (photo_room, broken_room) = (
+            tile_room(&harness, "DSC_0001.jpg"),
+            tile_room(&harness, "DSC_0002.NEF"),
+        );
+        let (texture, drawn) = texture_in(&harness, photo_room);
+        assert_eq!(
+            harness.state().thumbnails.texture(&photo, 256),
+            Some(texture)
+        );
+        assert_fitted_3_2(drawn, photo_room);
+        assert!(textures_in(&harness, broken_room).is_empty());
+        assert!(failure_icon_in(&harness, broken_room, 32.0), "no icon");
+        assert!(!failure_icon_in(&harness, photo_room, 32.0), "an icon");
+        let why = "This is not a kind of photo the app can show";
+        assert!(
+            tooltip_shows(&mut harness, "DSC_0002.NEF", why),
+            "no tooltip"
+        );
+    }
+
+    /// A thumbnail's texture has no mipmaps, which the renderer does not
+    /// make.
+    #[test]
+    fn a_thumbnail_s_texture_has_no_mipmaps() {
+        let dir = photos_folder();
+        std::fs::write(
+            dir.path().join("DSC_0001.jpg"),
+            crate::thumbnails::jpeg(300, 200),
+        )
+        .unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let (texture, _) = texture_in(&harness, tile_room(&harness, "DSC_0001.jpg"));
+        let manager = harness.ctx.tex_manager();
+        let options = manager.read().meta(texture).unwrap().options;
+        assert_eq!(options.mipmap_mode, None);
+    }
+
+    /// A photo changed while the window was in the background, as one
+    /// copied in again or still being copied then, shows its thumbnail
+    /// as it is now once the window is back in front.
+    #[test]
+    fn a_photo_changed_while_away_shows_its_new_thumbnail() {
+        let dir = photos_folder();
+        let photo = dir.path().join("DSC_0001.jpg");
+        std::fs::write(&photo, crate::thumbnails::jpeg(300, 200)).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let room = tile_room(&harness, "DSC_0001.jpg");
+        let (before, drawn) = texture_in(&harness, room);
+        assert!(drawn.width() > drawn.height(), "{drawn:?}");
+
+        std::fs::write(&photo, crate::thumbnails::jpeg(200, 300)).unwrap();
+        leave_and_come_back(&mut harness);
+        let (after, drawn) = texture_in(&harness, room);
+        assert_ne!(after, before);
+        assert!(drawn.height() > drawn.width(), "{drawn:?}");
+    }
+
+    /// The number egui gave the texture `id` when it was made: a texture
+    /// made later has a greater one.
+    fn made(id: egui::TextureId) -> u64 {
+        match id {
+            egui::TextureId::Managed(number) => number,
+            egui::TextureId::User(_) => panic!("{id:?} is not egui's"),
+        }
+    }
+
+    /// The grid's thumbnails are decoded the current photo's first, then
+    /// in reading order: the inline decoder decodes them in the order a
+    /// worker would take them, and each is made a texture as it comes.
+    #[test]
+    fn the_grid_s_thumbnails_are_decoded_the_current_first_then_in_reading_order() {
+        let dir = photos_folder();
+        for n in 1..=8 {
+            let name = format!("DSC_000{n}.jpg");
+            std::fs::write(dir.path().join(name), crate::thumbnails::jpeg(60, 40)).unwrap();
+        }
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        make_current(&mut harness, 5);
+        // Read again, so every thumbnail is decoded again, in the order
+        // wanted with the fifth photo current.
+        leave_and_come_back(&mut harness);
+        let mut by_age: Vec<(u64, usize)> = (1..=8)
+            .map(|n| {
+                let room = tile_room(&harness, &format!("DSC_000{n}.jpg"));
+                (made(texture_in(&harness, room).0), n)
+            })
+            .collect();
+        by_age.sort_unstable();
+        let order: Vec<usize> = by_age.into_iter().map(|(_, n)| n).collect();
+        assert_eq!(order, [5, 1, 2, 3, 4, 6, 7, 8]);
     }
 
     /// [`photos_folder`], holding beside its folders the 30 photos

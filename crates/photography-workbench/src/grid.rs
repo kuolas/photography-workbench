@@ -3,13 +3,23 @@
 //! The thumbnail grid in Library's centre: a square tile for each of a
 //! folder's photos, row after row, the current one outlined.
 //!
-//! A tile shows its photo's file name, where the photo's thumbnail goes
-//! once the app decodes previews. A click on a tile makes its photo the
-//! current one, and a double-click opens it in the viewer too.
+//! A tile shows its photo's file name over its thumbnail, which sits
+//! straight on the grid's backdrop with nothing behind it, or, for a
+//! photo that cannot be shown, an icon there, and why in its tooltip. The
+//! current photo's thumbnail is outlined, a little clear of its edge, or,
+//! until there is one, the room it goes in. A click on a tile makes its
+//! photo the current one, and a double-click opens it in the viewer too.
+//! The tile, though nothing marks it, is still what the grid lays out
+//! and brings into view.
 //!
 //! The grid draws a list of photos and the index of the current one,
-//! whatever they were read from. Only the rows in view are laid out, so
-//! a folder of thousands of photos scrolls as smoothly as one of ten.
+//! whatever they were read from, and the thumbnails the app holds
+//! ([`crate::thumbnails`]). Only the rows in view are laid out, so a
+//! folder of thousands of photos scrolls as smoothly as one of ten. Their
+//! thumbnails are decoded in the order a photographer reads them, the
+//! current photo's first, and after them those of a screen of rows above
+//! and one below, the nearest first, so they are ready when scrolled to
+//! ([`want_order`]).
 //!
 //! The grid brings the current photo's row into view, scrolled just far
 //! enough, when the current photo changes, when the list does, or when
@@ -23,14 +33,16 @@
 //! above or below another ([`above`], [`below`]), for the number of
 //! tiles in a row it last laid out.
 
+use std::ops::Range;
 use std::path::Path;
 
 use catalog::photos::Photo;
 use desktop_ui::theme::Palette;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
-use egui::{FontId, Margin, Rect, Sense, Stroke, StrokeKind, WidgetInfo, WidgetType, vec2};
+use egui::{FontId, Margin, Rect, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, WidgetType, vec2};
 
 use crate::follow;
+use crate::thumbnails::{self, AHEAD, CURRENT, ON_SCREEN, Thumbnail, Thumbnails};
 
 /// The side of a tile.
 const TILE: f32 = 220.0;
@@ -45,14 +57,32 @@ const MARGIN: i8 = 4;
 /// from the right edge.
 const NAME_LEFT: f32 = 8.0;
 
-/// Where the top of a photo's name is, from its tile's top edge.
-const NAME_TOP: f32 = 12.0;
+/// Where the middle of a photo's name is, from its tile's top edge. The
+/// name's text box, about 13 points high, ends some 18.5 points down,
+/// above where the current photo's outline runs round a thumbnail as tall
+/// as its room ([`IMAGE_INSET`]), from 20 to 22 points down.
+const NAME_MIDDLE: f32 = 12.0;
 
 /// The size of a photo's name.
 const NAME_SIZE: f32 = 10.5;
 
-/// The width of the outline around the current photo's tile.
+/// The width of the outline around the current photo: around its
+/// thumbnail, or around the room the thumbnail goes in while there is
+/// none to draw, [`thumbnails::MARK_GAP`] clear of either.
 const OUTLINE: f32 = 2.0;
+
+/// The room between a tile's edges and its thumbnail, which is fitted
+/// in what is left; the photo's name is in the room above it. Nothing is
+/// drawn behind the thumbnail: the grid's backdrop shows around it.
+const IMAGE_INSET: Margin = Margin {
+    left: 10,
+    right: 10,
+    top: 24,
+    bottom: 10,
+};
+
+/// The size of the icon a tile shows when its photo cannot be shown.
+const FAILED_ICON_SIZE: f32 = 32.0;
 
 /// A click on a tile: which photo it was on, and whether it was a
 /// double-click, which opens the photo.
@@ -74,14 +104,15 @@ pub struct Shown {
 }
 
 /// The grid of `photos`, the photos of `folder`, filling `ui`, with the
-/// photo at `current` outlined; it scrolls when the rows do not fit. As
-/// many tiles fit in a row as the width allows, and at least one; the
-/// room left over stays at the right. `folder` tells one list from
-/// another, so the grid brings the current photo into view when the
-/// list changes.
+/// photo at `current` outlined and the thumbnails in `thumbnails`; it
+/// scrolls when the rows do not fit. As many tiles fit in a row as the
+/// width allows, and at least one; the room left over stays at the
+/// right. `folder` tells one list from another, so the grid brings the
+/// current photo into view when the list changes.
 pub fn show(
     ui: &mut egui::Ui,
     palette: &Palette,
+    thumbnails: &mut Thumbnails,
     photos: &[Photo],
     current: Option<usize>,
     folder: &Path,
@@ -115,6 +146,13 @@ pub fn show(
             }
         }
         area.show_rows(ui, TILE, rows, |ui, range| {
+            // Every tile's thumbnail fits in the same room.
+            let room = Vec2::splat(TILE) - IMAGE_INSET.sum();
+            let longest = thumbnails::longest(room.max_elem(), ui.pixels_per_point());
+            for (index, priority) in want_order(range.clone(), rows, columns, photos.len(), current)
+            {
+                thumbnails.want(photos[index].path(), longest, priority);
+            }
             let mut outline = None;
             for row in range {
                 let (_, rect) = ui.allocate_space(vec2(ui.available_width(), TILE));
@@ -124,19 +162,22 @@ pub fn show(
                     let tile = Rect::from_min_size(left_top, egui::Vec2::splat(TILE));
                     let index = first + column;
                     let is_current = current == Some(index);
-                    if let Some(open) = photo_tile(ui, palette, photo, tile, is_current) {
+                    let thumbnail = thumbnails.thumbnail(photo.path(), longest);
+                    if let Some(open) = photo_tile(ui, palette, photo, thumbnail, tile, is_current)
+                    {
                         click = Some(Click { index, open });
                     }
                     if is_current {
-                        outline = Some(tile);
+                        let place = thumbnails::placed(thumbnail, tile - IMAGE_INSET);
+                        outline = Some(place.expand(thumbnails::MARK_GAP));
                     }
                 }
             }
             // Last, so the tiles next to it do not cover it.
-            if let Some(tile) = outline {
+            if let Some(around) = outline {
                 let stroke = Stroke::new(OUTLINE, palette.accent);
                 ui.painter()
-                    .rect_stroke(tile, 0.0, stroke, StrokeKind::Outside);
+                    .rect_stroke(around, 0.0, stroke, StrokeKind::Outside);
             }
         });
     });
@@ -188,6 +229,51 @@ pub fn below(index: usize, len: usize, columns: usize) -> usize {
     }
 }
 
+/// The photos whose thumbnails a grid of `len` photos, `columns` to a
+/// row in `rows` rows, wants while it shows the rows in `range`, the best
+/// first, each with a priority of its own from the highest down
+/// ([`thumbnails::ranked`]): the current photo ([`CURRENT`]); then the
+/// photos in view, as a photographer reads them; then those of the rows
+/// ahead ([`rows_ahead`]), each row from its first photo to its last.
+fn want_order(
+    range: Range<usize>,
+    rows: usize,
+    columns: usize,
+    len: usize,
+    current: Option<usize>,
+) -> Vec<(usize, u32)> {
+    let photos_of = |row: usize| row * columns..((row + 1) * columns).min(len);
+    let in_view = range
+        .clone()
+        .flat_map(photos_of)
+        .map(|index| (index, ON_SCREEN));
+    let ahead = rows_ahead(range, rows).into_iter().flat_map(photos_of);
+    let mut order: Vec<(usize, u32)> = in_view.chain(ahead.map(|index| (index, AHEAD))).collect();
+    if let Some(at) = order.iter().position(|&(index, _)| Some(index) == current) {
+        let (index, _) = order.remove(at);
+        order.insert(0, (index, CURRENT));
+    }
+    thumbnails::ranked(order)
+}
+
+/// The rows wanted ahead of being scrolled to, of a grid of `rows` rows
+/// showing those in `range`: as many as it shows above them, and as many
+/// below, as far as there are rows; the nearest first, and of two as
+/// near, the one below first, as a grid is mostly scrolled down.
+fn rows_ahead(range: Range<usize>, rows: usize) -> Vec<usize> {
+    let mut ahead = Vec::new();
+    for distance in 1..=range.len() {
+        let below = range.end - 1 + distance;
+        if below < rows {
+            ahead.push(below);
+        }
+        if let Some(above) = range.start.checked_sub(distance) {
+            ahead.push(above);
+        }
+    }
+    ahead
+}
+
 /// How many tiles fit in a row of a grid `width` points wide: at least
 /// one, however narrow it is.
 fn columns(width: f32) -> usize {
@@ -196,8 +282,9 @@ fn columns(width: f32) -> usize {
     ((room / (TILE + GAP)).floor() as usize).max(1)
 }
 
-/// The tile of `photo` at `rect`, outlined elsewhere when `is_current`.
-/// Whether it was clicked, `Some(true)` for a double-click.
+/// The tile of `photo` at `rect`, showing `thumbnail` on the grid's
+/// backdrop, outlined elsewhere when `is_current`. Whether it was
+/// clicked, `Some(true)` for a double-click.
 ///
 /// Its id comes from its photo's path, not from where it is, so a tile
 /// keeps its state when photos before it come or go.
@@ -205,6 +292,7 @@ fn photo_tile(
     ui: &mut egui::Ui,
     palette: &Palette,
     photo: &Photo,
+    thumbnail: Thumbnail,
     rect: Rect,
     is_current: bool,
 ) -> Option<bool> {
@@ -215,7 +303,7 @@ fn photo_tile(
         .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, is_current, &name));
 
     let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, palette.chip);
+    let failure = thumbnails::paint(ui, thumbnail, rect - IMAGE_INSET, FAILED_ICON_SIZE);
     // The name, cut short with "…" where it would run past its room.
     let mut job = LayoutJob::single_section(
         name.clone(),
@@ -225,14 +313,13 @@ fn photo_tile(
     let galley = painter.layout_job(job);
     let elided = galley.elided;
     painter.galley(
-        rect.left_top() + vec2(NAME_LEFT, NAME_TOP),
+        rect.left_top() + vec2(NAME_LEFT, NAME_MIDDLE - galley.size().y / 2.0),
         galley,
         palette.text,
     );
-    let response = if elided {
-        response.on_hover_text(name)
-    } else {
-        response
+    let response = match thumbnails::tooltip(name, elided, failure) {
+        Some(tooltip) => response.on_hover_text(tooltip),
+        None => response,
     };
 
     // egui counts a click within twice the double-click time of the click
@@ -250,7 +337,8 @@ fn photo_tile(
 
 #[cfg(test)]
 mod tests {
-    use super::{above, below, columns, scrolled_to_show};
+    use super::{above, below, columns, rows_ahead, scrolled_to_show, want_order};
+    use crate::thumbnails::{self, AHEAD, CURRENT, ON_SCREEN};
 
     /// A row holds as many 220-point tiles, 1 point apart, as fit between
     /// 4 points of room at each side, and at least one.
@@ -294,6 +382,44 @@ mod tests {
         assert_eq!(below(0, 0, 3), 0, "no photos");
         assert_eq!(below(2, 4, 1), 3);
         assert_eq!(below(2, 4, 0), 3, "a grid has a column at least");
+    }
+
+    /// A screen of rows above those in view is wanted ahead, and one
+    /// below, as far as the grid has rows, the nearest first and, of two
+    /// as near, the one below first.
+    #[test]
+    fn a_screen_of_rows_is_wanted_above_and_below_the_view() {
+        assert_eq!(rows_ahead(5..8, 20), [8, 4, 9, 3, 10, 2]);
+        assert_eq!(rows_ahead(0..3, 20), [3, 4, 5]);
+        assert_eq!(rows_ahead(1..4, 5), [4, 0]);
+        assert_eq!(rows_ahead(0..2, 2), Vec::<usize>::new());
+        assert_eq!(rows_ahead(0..0, 0), Vec::<usize>::new());
+    }
+
+    /// The photos are wanted the best first, each at a priority of its
+    /// own from the highest down, so a worker that takes one while the
+    /// rest are still being wanted takes the best: the current photo,
+    /// then those in view in reading order, then those of the rows
+    /// ahead, the nearest first. Here 10 photos, 3 to a row, the second
+    /// and third rows in view and the fifth photo current.
+    #[test]
+    fn the_photos_are_wanted_the_best_first_at_falling_priorities() {
+        let order = want_order(1..3, 4, 3, 10, Some(4));
+        let indices: Vec<usize> = order.iter().map(|&(index, _)| index).collect();
+        assert_eq!(indices, [4, 3, 5, 6, 7, 8, 9, 0, 1, 2]);
+        let tiers = [
+            CURRENT, ON_SCREEN, ON_SCREEN, ON_SCREEN, ON_SCREEN, ON_SCREEN,
+        ];
+        let tiers = tiers.into_iter().chain([AHEAD; 4]);
+        assert_eq!(order, thumbnails::ranked(indices.into_iter().zip(tiers)));
+        assert!(
+            order.windows(2).all(|pair| pair[0].1 > pair[1].1),
+            "{order:?}"
+        );
+        // The last row may be short, and the current photo ahead.
+        let order = want_order(2..3, 4, 3, 10, Some(9));
+        let indices: Vec<usize> = order.iter().map(|&(index, _)| index).collect();
+        assert_eq!(indices, [9, 6, 7, 8, 3, 4, 5]);
     }
 
     /// A row is scrolled into view just far enough: down until its tiles

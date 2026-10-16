@@ -22,6 +22,8 @@ eframe = { workspace = true, features = ["persistence"] }
 egui.workspace = true
 env_logger.workspace = true
 log.workspace = true
+# The photos' thumbnails, decoded off the window's thread.
+previews.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The menu bar at the top of the screen. Its default features only add
@@ -36,6 +38,8 @@ winit.workspace = true
 
 [dev-dependencies]
 egui_kittest = { workspace = true, features = ["eframe"] }
+# JPEG files encoded in the thumbnails' tests.
+image.workspace = true
 # Temporary folders for the folder tree's tests to browse.
 tempfile.workspace = true
 # tests/package_metadata.rs reads this file.
