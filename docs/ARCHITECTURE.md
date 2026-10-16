@@ -9,7 +9,7 @@ photography-workbench is a Cargo workspace (Rust, edition 2024) of crates
 under `crates/`
 ([ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)).
 The root `Cargo.toml` holds what they share: the version, the package
-fields, the dependency versions, the lints and the release profile.
+fields, the dependency versions, the lints and the build profiles.
 
 `scripts/check-crate-boundary.sh`, which CI runs, fails when a crate
 depends, directly or not, on one that its "May depend on" cell says
