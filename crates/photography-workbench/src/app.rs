@@ -4,15 +4,16 @@
 //! dialogs.
 
 use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
-use desktop_ui::dock::Side;
+use desktop_ui::dock::{self, Side};
 use desktop_ui::fonts;
 use desktop_ui::style;
 use desktop_ui::theme::{self, Theme};
 use desktop_ui::toolbar;
 
-use crate::browse::Browser;
+use crate::browse::{Browser, Photos};
 use crate::dialogs;
 use crate::folder_tree;
+use crate::grid;
 use crate::keymap::{self, Action, Surface};
 use crate::layout::{self, Docks};
 use crate::menu::{self, MacMenu};
@@ -51,8 +52,9 @@ pub struct PhotographyWorkbenchApp {
     docks: Docks,
     /// How Library shows a folder's photos, saved between runs.
     view: View,
-    /// The folder tree in Library's left dock, fed from disk; what is
-    /// expanded and selected in it is saved between runs.
+    /// The folder tree in Library's left dock, fed from disk, and the
+    /// selected folder's photos; what is expanded and selected in the
+    /// tree is saved between runs.
     browser: Browser,
     /// Whether the Settings dialog is open.
     show_settings: bool,
@@ -356,6 +358,42 @@ impl PhotographyWorkbenchApp {
         }
     }
 
+    /// The centre: in Library's grid the selected folder's photos as
+    /// tiles, in its viewer the current photo, or a message where there
+    /// is none to show. Nothing while a folder just chosen is being read.
+    fn centre(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
+        if let Some((title, body)) = empty_state(self.browser.photos()) {
+            dock::empty_message(ui, title, &body);
+            return;
+        }
+        let Photos::Read(list) = self.browser.photos() else {
+            return;
+        };
+        match self.view {
+            View::Grid => {
+                let click = grid::show(ui, palette, list.photos(), list.current());
+                if let Some(click) = click {
+                    self.browser.select_photo(click.index);
+                    if click.open {
+                        self.perform(ui.ctx(), Action::View(View::Viewer));
+                    }
+                }
+            }
+            // The photo's name, in place of the photo until the app
+            // decodes previews.
+            View::Viewer => {
+                if let Some(photo) = list.current_photo() {
+                    let name = egui::RichText::new(photo.name())
+                        .size(VIEWER_NAME_SIZE)
+                        .color(palette.text);
+                    ui.centered_and_justified(|ui| {
+                        ui.add(egui::Label::new(name).selectable(false));
+                    });
+                }
+            }
+        }
+    }
+
     /// The app's icon, 20 points square, which opens About.
     fn title_bar_icon(&mut self, ui: &mut egui::Ui) {
         let about = format!("About {}", Self::NAME);
@@ -390,6 +428,45 @@ impl PhotographyWorkbenchApp {
             }
         }
     }
+}
+
+/// The size of the current photo's name in the viewer.
+const VIEWER_NAME_SIZE: f32 = 13.5;
+
+/// The size of the toolbar's count of photos.
+const COUNT_SIZE: f32 = 12.5;
+
+/// What the centre says when it has no photos to show, as a title and
+/// the line under it: no folder is selected, it could not be read, or it
+/// holds no photos. `None` when there are photos to show, and while a
+/// folder just chosen is being read, when it shows nothing.
+fn empty_state(photos: &Photos) -> Option<(&'static str, String)> {
+    match photos {
+        Photos::None => Some((
+            "No folder selected",
+            "Choose a folder on the left to see its photos".to_owned(),
+        )),
+        Photos::Reading => None,
+        Photos::Failed(kind) => Some((
+            "This folder can't be read",
+            folder_tree::why_unreadable(*kind),
+        )),
+        Photos::Read(list) if list.is_empty() => Some((
+            "No photos in this folder",
+            "Photos are JPEG files and the RAW files of Nikon and Sony cameras".to_owned(),
+        )),
+        Photos::Read(_) => None,
+    }
+}
+
+/// Which of the photos is the current one, as the toolbar shows it:
+/// "12 of 348". `None` when there are none.
+fn position(photos: &Photos) -> Option<String> {
+    let Photos::Read(list) = photos else {
+        return None;
+    };
+    let current = list.current()?;
+    Some(format!("{} of {}", current + 1, list.len()))
 }
 
 /// The width of macOS's window buttons with their margins, as the system
@@ -457,22 +534,32 @@ impl eframe::App for PhotographyWorkbenchApp {
         let folders = |ui: &mut egui::Ui| folder_tree::show(ui, &palette, &mut self.browser);
         layout::side_docks(ui, parts, &mut self.docks, folders);
         if parts.toolbar {
+            let position = position(self.browser.photos());
             let start = |ui: &mut egui::Ui| self.mode_controls(ui, &palette);
-            toolbar::show(ui, "toolbar", &palette, start, |_| {});
+            let end = |ui: &mut egui::Ui| {
+                if let Some(position) = position {
+                    let text = egui::RichText::new(position)
+                        .size(COUNT_SIZE)
+                        .color(palette.text);
+                    ui.add(egui::Label::new(text).selectable(false));
+                }
+            };
+            toolbar::show(ui, "toolbar", &palette, start, end);
         }
         layout::bottom_dock(ui, &palette, parts, &mut self.docks);
 
-        // The viewer shows its photo on a backdrop of its own.
-        let (empty, fill) = match self.view {
-            View::Grid => ("No folder open", palette.panel),
-            View::Viewer => ("No photo open", palette.viewer_backdrop),
+        // The viewer shows its photo on a backdrop of its own. What the
+        // centre holds sets its own room.
+        let fill = match self.view {
+            View::Grid => palette.panel,
+            View::Viewer => palette.viewer_backdrop,
         };
-        let centre = egui::Frame::central_panel(ui.style()).fill(fill);
-        egui::CentralPanel::default().frame(centre).show(ui, |ui| {
-            ui.centered_and_justified(|ui| {
-                ui.label(empty);
-            });
-        });
+        let centre = egui::Frame::central_panel(ui.style())
+            .fill(fill)
+            .inner_margin(egui::Margin::ZERO);
+        egui::CentralPanel::default()
+            .frame(centre)
+            .show(ui, |ui| self.centre(ui, &palette));
 
         // Above everything but the dialogs.
         chrome::window_resize_handles(ui.ctx());
@@ -603,7 +690,8 @@ mod tests {
     fn first_frame_shows_the_title_bar_and_the_empty_state() {
         let harness = harness();
         harness.get_by_label("Library");
-        harness.get_by_label("No folder open");
+        harness.get_by_label("No folder selected");
+        harness.get_by_label("Choose a folder on the left to see its photos");
     }
 
     /// The window has no menus: the title bar holds the app's commands.
@@ -664,13 +752,13 @@ mod tests {
             harness.get_by_label(name).accesskit_node().toggled()
         };
         assert_eq!(toggled(&harness, "Thumbnail grid"), Some(Toggled::True));
-        harness.get_by_label("No folder open");
+        harness.get_by_label("No folder selected");
         harness.get_by_label("Image viewer").click();
         harness.run();
         assert_eq!(harness.state().view, View::Viewer);
         assert_eq!(toggled(&harness, "Image viewer"), Some(Toggled::True));
         assert_eq!(toggled(&harness, "Thumbnail grid"), Some(Toggled::False));
-        harness.get_by_label("No photo open");
+        harness.get_by_label("No folder selected");
     }
 
     /// The view is saved and restored on the next run; an unreadable one
@@ -1199,6 +1287,38 @@ mod tests {
             .outer_rect
     }
 
+    /// Where the centre was laid out in the last frame: the rectangle its
+    /// frame filled, the largest filled with the view's colour between
+    /// the side docks.
+    fn centre(harness: &Harness<'_, PhotographyWorkbenchApp>) -> egui::Rect {
+        let palette = theme::resolve(harness.state().theme, &harness.ctx).palette();
+        let fill = match harness.state().view {
+            View::Grid => palette.panel,
+            View::Viewer => palette.viewer_backdrop,
+        };
+        let between = egui::Rangef::new(
+            panel(harness, "left_dock").right(),
+            panel(harness, "right_dock").left(),
+        );
+        let filled = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect)
+                    if rect.fill == fill
+                        && between.contains(rect.rect.left())
+                        && between.contains(rect.rect.right()) =>
+                {
+                    Some(rect.rect)
+                }
+                _ => None,
+            });
+        filled
+            .max_by(|a, b| a.area().total_cmp(&b.area()))
+            .expect("no centre")
+    }
+
     /// At the window's smallest, Library has every part in its place: the
     /// tool rail and the side docks from the title bar down to the window's
     /// bottom, the toolbar along the bottom between the side docks, holding
@@ -1239,13 +1359,14 @@ mod tests {
         assert_eq!(bottom_dock.x_range(), under_the_centre, "{bottom_dock:?}");
         assert_eq!(bottom_dock.bottom(), toolbar.top(), "{bottom_dock:?}");
 
-        let centre = harness.get_by_label("No photo open").rect();
+        let centre = centre(&harness);
         assert!(
             centre.width() >= 300.0 && centre.height() >= 300.0,
             "{centre:?}"
         );
-        assert!(left_dock.right() <= centre.left() && centre.right() <= right_dock.left());
-        assert!(title_bar.bottom() <= centre.top() && centre.bottom() <= bottom_dock.top());
+        assert_eq!(centre.x_range(), under_the_centre, "{centre:?}");
+        assert_eq!(centre.top(), title_bar.bottom(), "{centre:?}");
+        assert_eq!(centre.bottom(), bottom_dock.top(), "{centre:?}");
     }
 
     /// The bottom dock, the filmstrip's, is 142 points high under the
@@ -1259,9 +1380,12 @@ mod tests {
         harness.get_by_label("Thumbnail grid").click();
         harness.run();
         assert!(harness.query_by_label(BOTTOM_TOGGLE).is_none());
-        let centre = harness.get_by_label("No folder open").rect();
-        let below = panel(&harness, "toolbar").top() - centre.bottom();
-        assert!((0.0..20.0).contains(&below), "{below}");
+        let centre = centre(&harness);
+        assert_eq!(
+            centre.bottom(),
+            panel(&harness, "toolbar").top(),
+            "{centre:?}"
+        );
     }
 
     /// The viewer and its filmstrip are filled with the viewer's backdrop;
@@ -1284,11 +1408,11 @@ mod tests {
         };
         let mut harness = viewer_harness();
         let filled = on_backdrop(&harness);
-        let centre = harness.get_by_label("No photo open").rect();
-        assert!(
-            filled.iter().any(|rect| rect.contains_rect(centre)),
-            "{filled:?}"
+        let centre = egui::Rect::from_x_y_ranges(
+            panel(&harness, "left_dock").right()..=panel(&harness, "right_dock").left(),
+            panel(&harness, "title_bar").bottom()..=panel(&harness, "bottom_dock").top(),
         );
+        assert!(filled.contains(&centre), "{filled:?}");
         let filmstrip = panel(&harness, "bottom_dock");
         // All of it but the line along its top.
         let fills_filmstrip =
@@ -1305,10 +1429,16 @@ mod tests {
     #[test]
     fn the_centre_keeps_its_ids_between_the_views() {
         let mut harness = harness();
-        let grid = harness.get_by_label("No folder open").accesskit_node().id();
+        let grid = harness
+            .get_by_label("No folder selected")
+            .accesskit_node()
+            .id();
         harness.get_by_label("Image viewer").click();
         harness.run();
-        let viewer = harness.get_by_label("No photo open").accesskit_node().id();
+        let viewer = harness
+            .get_by_label("No folder selected")
+            .accesskit_node()
+            .id();
         assert_eq!(grid, viewer);
     }
 
@@ -1578,7 +1708,13 @@ mod tests {
         std::fs::create_dir(dir.path().join("Trip")).unwrap();
         wait(&mut harness, 2.0);
         assert!(harness.query_by_label("Trip").is_none());
+        leave_and_come_back(&mut harness);
+        harness.get_by_label("Trip");
+    }
 
+    /// Send the window to the background and bring it back to the front,
+    /// then let the app settle.
+    fn leave_and_come_back(harness: &mut Harness<'_, PhotographyWorkbenchApp>) {
         for focused in [false, true] {
             harness.input_mut().focused = focused;
             let event = egui::Event::WindowFocused(focused);
@@ -1586,7 +1722,225 @@ mod tests {
             harness.step();
         }
         harness.run();
-        harness.get_by_label("Trip");
+    }
+
+    /// [`photos_folder`], holding beside its folders the photos
+    /// `DSC_0002.NEF` and `DSC_0010.jpg`, a note and a hidden photo, all
+    /// empty: the list of photos does not open them.
+    fn folder_of_photos() -> tempfile::TempDir {
+        let dir = photos_folder();
+        for name in ["DSC_0010.jpg", "notes.txt", "DSC_0002.NEF", ".hidden.jpg"] {
+            std::fs::write(dir.path().join(name), b"").unwrap();
+        }
+        dir
+    }
+
+    /// The text of the toolbar's count, if it shows one.
+    fn count(harness: &Harness<'_, PhotographyWorkbenchApp>) -> Option<String> {
+        let toolbar = panel(harness, "toolbar");
+        harness
+            .query_all_by_label_contains(" of ")
+            .filter(|node| toolbar.contains_rect(node.rect()))
+            .find_map(|node| node.accesskit_node().value())
+    }
+
+    /// Selecting a folder shows its photos in the grid, in natural order
+    /// of their names, the first one current, and nothing else in the
+    /// folder; the toolbar shows which photo of how many is current.
+    #[test]
+    fn selecting_a_folder_shows_its_photos_in_the_grid() {
+        let dir = folder_of_photos();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        assert_eq!(count(&harness), None);
+        click(&mut harness, "Home");
+        let first = harness.get_by_label("DSC_0002.NEF").rect();
+        let second = harness.get_by_label("DSC_0010.jpg").rect();
+        assert!(first.right() < second.left(), "{first:?} {second:?}");
+        assert!(is_selected(&harness, "DSC_0002.NEF"));
+        assert!(!is_selected(&harness, "DSC_0010.jpg"));
+        // Home is collapsed, so its folders are not in the tree either.
+        for name in ["notes.txt", ".hidden.jpg", "DCIM", "Exports"] {
+            assert!(harness.query_by_label(name).is_none(), "{name}");
+        }
+        assert_eq!(count(&harness).as_deref(), Some("1 of 2"));
+    }
+
+    /// A click on a tile makes its photo the current one.
+    #[test]
+    fn a_click_on_a_tile_makes_its_photo_current() {
+        let dir = folder_of_photos();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        click(&mut harness, "DSC_0010.jpg");
+        assert!(is_selected(&harness, "DSC_0010.jpg"));
+        assert!(!is_selected(&harness, "DSC_0002.NEF"));
+        assert_eq!(count(&harness).as_deref(), Some("2 of 2"));
+        assert_eq!(harness.state().view, View::Grid);
+    }
+
+    /// Double-click on what is named `label`, and let the app settle. The
+    /// harness runs a frame for each event it is given, a quarter of a
+    /// second apart, too slow for a double-click, so the clicks go in as
+    /// the input of one frame.
+    fn double_click(harness: &mut Harness<'_, PhotographyWorkbenchApp>, label: &str) {
+        let pos = harness.get_by_label(label).rect().center();
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(pos));
+        for pressed in [true, false, true, false] {
+            events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+        }
+        harness.step();
+        harness.run();
+    }
+
+    /// A double-click on a tile makes its photo the current one and opens
+    /// it in the viewer, which shows its name; so does one just after a
+    /// click on another tile.
+    #[test]
+    fn a_double_click_on_a_tile_opens_its_photo_in_the_viewer() {
+        let dir = folder_of_photos();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        wait(&mut harness, 1.0);
+        double_click(&mut harness, "DSC_0010.jpg");
+        assert_eq!(harness.state().view, View::Viewer);
+        let name = harness.get_by_label("DSC_0010.jpg");
+        assert_eq!(name.accesskit_node().toggled(), None);
+        assert!(harness.query_by_label("DSC_0002.NEF").is_none());
+        assert_eq!(count(&harness).as_deref(), Some("2 of 2"));
+
+        click(&mut harness, "Thumbnail grid");
+        wait(&mut harness, 1.0);
+        harness.get_by_label("DSC_0010.jpg").click();
+        harness.step();
+        assert_eq!(harness.state().view, View::Grid);
+        double_click(&mut harness, "DSC_0002.NEF");
+        assert_eq!(harness.state().view, View::Viewer);
+        harness.get_by_label("DSC_0002.NEF");
+        assert_eq!(count(&harness).as_deref(), Some("1 of 2"));
+    }
+
+    /// A folder with no photos says so, in the grid and in the viewer,
+    /// and the toolbar shows no count.
+    #[test]
+    fn a_folder_with_no_photos_says_so() {
+        let dir = folder_of_photos();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Expand Home");
+        click(&mut harness, "Exports");
+        let body = "Photos are JPEG files and the RAW files of Nikon and Sony cameras";
+        for view in View::ALL {
+            harness.state_mut().view = view;
+            harness.run();
+            harness.get_by_label("No photos in this folder");
+            harness.get_by_label(body);
+            assert_eq!(count(&harness), None);
+        }
+    }
+
+    /// A folder that can no longer be read, deleted since it was listed,
+    /// says so and why.
+    #[test]
+    fn a_folder_that_cannot_be_read_says_so() {
+        let dir = folder_of_photos();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Expand Home");
+        click(&mut harness, "DCIM");
+        harness.get_by_label("No photos in this folder");
+        std::fs::remove_dir_all(dir.path().join("DCIM")).unwrap();
+        click(&mut harness, "DCIM");
+        harness.get_by_label("This folder can't be read");
+        harness.get_by_label("It is no longer there");
+        assert_eq!(count(&harness), None);
+    }
+
+    /// The folder selected when the app last ran shows its photos as soon
+    /// as its root is read, with no click.
+    #[test]
+    fn a_restored_folder_shows_its_photos() {
+        let dir = folder_of_photos();
+        let mut storage = MemoryStorage::default();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        harness.state_mut().save(&mut storage);
+        drop(harness);
+
+        let (harness, _) = harness_on(Some(&storage), vec![home(dir.path())]);
+        harness.get_by_label("DSC_0002.NEF");
+        harness.get_by_label("DSC_0010.jpg");
+        assert_eq!(count(&harness).as_deref(), Some("1 of 2"));
+    }
+
+    /// A photo copied in while the window was in the background shows
+    /// once the window is back in front, and the current photo stays the
+    /// current one.
+    #[test]
+    fn coming_back_to_the_window_reads_the_photos_again() {
+        let dir = folder_of_photos();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        click(&mut harness, "DSC_0010.jpg");
+        std::fs::write(dir.path().join("DSC_0001.NEF"), b"").unwrap();
+        wait(&mut harness, 2.0);
+        assert!(harness.query_by_label("DSC_0001.NEF").is_none());
+        leave_and_come_back(&mut harness);
+        harness.get_by_label("DSC_0001.NEF");
+        assert!(is_selected(&harness, "DSC_0010.jpg"));
+        assert_eq!(count(&harness).as_deref(), Some("3 of 3"));
+    }
+
+    /// The tiles are 220 points square, 1 point apart across and down,
+    /// from 4 points in from the centre's left and top, as many to a row
+    /// as fit, the room left over at the right. A photo's name starts 8
+    /// points in from its tile's left and 12 down from its top, and the
+    /// current photo's tile is outlined in the accent colour.
+    #[test]
+    fn the_tiles_are_laid_out_in_rows() {
+        let dir = photos_folder();
+        for i in 1..=8 {
+            std::fs::write(dir.path().join(format!("DSC_000{i}.NEF")), b"").unwrap();
+        }
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let centre = centre(&harness);
+        let columns = ((centre.width() - 8.0 + 1.0) / 221.0).floor() as usize;
+        assert!((2..8).contains(&columns), "{centre:?}");
+        let tile = |i: usize| harness.get_by_label(&format!("DSC_000{i}.NEF")).rect();
+        let first = tile(1);
+        assert_eq!(first.size(), egui::Vec2::splat(220.0), "{first:?}");
+        assert_eq!(first.left_top(), centre.left_top() + egui::vec2(4.0, 4.0));
+        assert_eq!(tile(2).left_top(), first.right_top() + egui::vec2(1.0, 0.0));
+        let last_across = tile(columns);
+        assert!(
+            last_across.right() <= centre.right() - 4.0,
+            "{last_across:?}"
+        );
+        assert!(centre.right() - 4.0 - last_across.right() < 221.0);
+        let below = tile(columns + 1);
+        assert_eq!(below.left_top(), first.left_bottom() + egui::vec2(0.0, 1.0));
+
+        let palette = theme::resolve(harness.state().theme, &harness.ctx).palette();
+        let shapes = &harness.output().shapes;
+        let outlined = shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => {
+                rect.rect == first
+                    && rect.stroke == egui::Stroke::new(2.0, palette.accent)
+                    && rect.stroke_kind == egui::StrokeKind::Outside
+            }
+            _ => false,
+        });
+        assert!(outlined, "no outline around {first:?}");
+        let name_at = first.left_top() + egui::vec2(8.0, 12.0);
+        let named = shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => text.pos == name_at && text.galley.text() == "DSC_0001.NEF",
+            _ => false,
+        });
+        assert!(named, "no name at {name_at:?}");
     }
 
     #[test]

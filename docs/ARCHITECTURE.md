@@ -38,11 +38,12 @@ relative to `crates/photography-workbench`:
 | `src/view.rs` | `View`, the ways Library shows a folder's photos (a grid of thumbnails, or one photo in the viewer): each one's name and icon | `desktop_ui` (tests only) |
 | `src/keymap.rs` | the keyboard shortcuts: one table of what each chord does (switch mode, switch view, show or hide docks, open Settings or the reference, quit), on which surfaces (the grid, the viewer), and the group and description the reference lists it under; the actions they do, which buttons and menu items do too; `pressed` and `pressed_actions`, which the handlers ask, `chord_for`, the chord a control names in its tooltip, `chord_everywhere`, the one a menu item carries, and the reference's `sections`, built from the same table. A shortcut to a mode not built yet does nothing and is not listed ([ADR015](architecture-decisions/adr015-the-keys.md)) | `egui`, `desktop_ui` |
 | `src/menu.rs` | the menu bar at the top of the screen on macOS: the app menu (About, Settings, Quit), View (the views and the docks), Window (the modes) and Help (the reference of keyboard shortcuts), whose items ask for the app's actions; `State`, what the items show of the app, which can be chosen and which are checked, worked out on every system; and `MacMenu`, which hands the menus to the system and passes their clicks on, a stand-in never made elsewhere. Only the chords that hold Cmd are the items' key equivalents, so the keys without Cmd stay the window's, and not those of a toggle, which the system would repeat while the keys are held | `eframe`, `desktop_ui`; on macOS `log`, `muda`, `raw-window-handle` |
-| `src/disk.rs` | `Disk`, which reads the disk off the window's thread: a folder's subfolders, as `catalog` reads them, each read on a short-lived thread of its own, so a listing that hangs on a network share that has gone holds up no other, and the roots of the folder tree, watched on a thread of their own that reads them every 2 seconds and wakes the window only when they change, so an idle window draws nothing. The window takes the answers at the start of a frame; a thread asks for a frame when it has one. With no thread to be had, a listing is done on the window's thread rather than never, and the roots are read there once, which the log warns of | `catalog`, `egui`, `log` |
-| `src/browse.rs` | `Browser`, which keeps the folder tree fed from disk, once per frame before anything is drawn: it hands the tree what the disk has read, has the disk watch the roots from the first frame on, as memory cards and drives come and go and no system tells a portable app at once, refreshes the tree when the window comes back to the front, so a folder changed meanwhile in the system's file manager is read again, and lists the folders the tree asks for, one read per folder at a time; and what is expanded and selected in the tree, saved and restored | `catalog`, `eframe`, `egui` |
-| `src/folder_tree.rs` | the folder tree in Library's left dock: a row per folder shown, indented by its depth, with the arrow that expands or collapses it, an icon for the home folder, a volume or any other folder, and its name, cut short with "…" where it does not fit and dimmed where the folder cannot be read; a click elsewhere on the row selects it. Only the rows in view are laid out | `catalog`, `egui`, `desktop_ui` |
-| `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the folder tree the app gives the left dock, the right dock's message when no photo is selected, and the filmstrip's backdrop), the title bar's toggles for them, and `Docks`, which of them are shown, shown or hidden together by a key, saved and restored | `eframe`, `egui`, `desktop_ui` |
-| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher, settings gear and button for the reference of keyboard shortcuts, the toolbar under the centre with the mode's own controls (Library's view buttons), the order the window's panels are laid out in, the keyboard shortcuts it handles and the menu bar it gives macOS, `perform`, which does each action whatever asked for it, the folder tree it keeps fed from disk and shows in Library's left dock, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode, docks, view and folder tree it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
+| `src/disk.rs` | `Disk`, which reads the disk off the window's thread: a folder's subfolders and a folder's photos, as `catalog` reads them, each read on a short-lived thread of its own, so a listing that hangs on a network share that has gone holds up no other, and the roots of the folder tree, watched on a thread of their own that reads them every 2 seconds and wakes the window only when they change, so an idle window draws nothing. The window takes the answers at the start of a frame; a thread asks for a frame when it has one. A read of photos carries the number its caller gave it back with its answer. Its caller keeps at most one listing of a folder, and one read of its photos, under way at a time, so a share that hangs holds no more threads however often its folders are opened or chosen; the one exception is a read of photos left hanging on a card taken out, as the card put back is read afresh beside it. With no thread to be had, a read is done on the window's thread rather than never, and the roots are read there once, which the log warns of | `catalog`, `egui`, `log` |
+| `src/browse.rs` | `Browser`, which keeps the folder tree fed from disk, once per frame before anything is drawn: it hands the tree what the disk has read, has the disk watch the roots from the first frame on, as memory cards and drives come and go and no system tells a portable app at once, refreshes the tree when the window comes back to the front, so a folder changed meanwhile in the system's file manager is read again, and lists the folders the tree asks for, one read per folder at a time; what is expanded and selected in the tree, saved and restored; and `Photos`, the selected folder's photos and the current one, as far as they have been read. The photos are read each time a folder is selected, again when the window comes back to the front, and once the selected folder's root is among the tree's roots, as at start-up, but never by two reads at once: wanted while a read of them is under way, they are that read's answer; they are dropped when the root goes, and a read of them under way then is forgotten, so they are read afresh when the root comes back, beside that read if it hangs, and its answer is dropped. Each read is numbered and only the answer of the one wanted last is taken, so a slow read of a folder left behind never replaces the one chosen since; a folder just chosen shows nothing until its photos come, and the folder shown read again keeps its photos on screen, then keeps the current photo by its path if it is still there | `catalog`, `eframe`, `egui` |
+| `src/folder_tree.rs` | the folder tree in Library's left dock: a row per folder shown, indented by its depth, with the arrow that expands or collapses it, an icon for the home folder, a volume or any other folder, and its name, cut short with "…" where it does not fit and dimmed where the folder cannot be read; a click elsewhere on the row selects it, which reads its photos. Only the rows in view are laid out | `catalog`, `egui`, `desktop_ui` |
+| `src/grid.rs` | the thumbnail grid in Library's centre: a 220-point square tile per photo, 1 point apart, as many to a row as fit, showing the photo's name, cut short with "…" where it does not fit, until the app decodes previews, the current one outlined; a click makes a photo the current one, a double-click opens it too. It draws a list of photos and the current one's index, whatever they were read from. Only the rows in view are laid out | `catalog`, `egui`, `desktop_ui` |
+| `src/layout.rs` | the parts of the window around a mode's centre: the tool rail, with the one button Library has so far (Info), which shows the right dock, the docks with their sizes and what they hold (so far, the folder tree the app gives the left dock, the right dock's message, which says no photo is selected, as the photo's information is not shown yet, and the filmstrip's backdrop), the title bar's toggles for them, and `Docks`, which of them are shown, shown or hidden together by a key, saved and restored | `eframe`, `egui`, `desktop_ui` |
+| `src/app.rs` | `PhotographyWorkbenchApp`, the `eframe::App`: the window's title bar with its icon (off macOS), mode switcher, settings gear and button for the reference of keyboard shortcuts, the toolbar under the centre with the mode's own controls (Library's view buttons) at its start and, at its end, which photo of how many is the current one, the centre, which shows the selected folder's photos in the grid or the current photo's name in the viewer, or says no folder is selected, it cannot be read or it holds no photos, the order the window's panels are laid out in, the keyboard shortcuts it handles and the menu bar it gives macOS, `perform`, which does each action whatever asked for it, the folder tree it keeps fed from disk and shows in Library's left dock, the window's icon, the dialogs it opens, the theme choice it saves and applies, and the mode, docks, view and folder tree it saves | `eframe`, `egui`, `desktop_ui`; on macOS `raw-window-handle`, to measure the system's window buttons |
 | `build.rs` | embeds the icon and version information in the Windows executable | `winresource` (build only) |
 | `assets/` | the app icon: `icon.svg` is the source, and `scripts/render-icons.sh` renders the PNG and ICO files from it, which are committed | — |
 | `tests/package_metadata.rs` | checks that the app's name, tagline and copyright agree across Cargo.toml's packaging sections and `PhotographyWorkbenchApp`'s constants, and that every crate's version is the workspace's | the library, `toml` |
@@ -99,11 +100,12 @@ display.
 `PhotographyWorkbenchApp::ui` every frame; egui is immediate-mode, so the UI
 is rebuilt from the app's state each time rather than kept as a widget tree.
 The only state so far is the theme choice, the mode, Library's view,
-which docks are shown, the folder tree and which dialogs are open; the
-window shows its own title bar, which holds the app's icon (which opens
-About; not on macOS), the mode switcher, the button for the reference
-of keyboard shortcuts, the settings gear, a toggle for each of the
-mode's docks and the window controls. Only Library is
+which docks are shown, the folder tree, the selected folder's photos
+and which dialogs are open; the window shows its own title bar, which
+holds the app's icon (which opens About; not on macOS), the mode
+switcher, the button for the reference of keyboard shortcuts, the
+settings gear, a toggle for each of the mode's docks and the window
+controls. Only Library is
 built: the switcher shows Organizer and Develop disabled. Below the
 title bar the panels
 ([ADR014](architecture-decisions/adr014-the-parts-of-the-window.md))
@@ -113,9 +115,12 @@ bar; then the side docks, the left one holding the folder tree, the
 right one inside the tool rail, so they run down to the window's
 bottom; then the toolbar along the bottom
 between them, holding the mode's own controls (in Library, a button per
-view); then, in Library's viewer, the bottom dock above the toolbar,
-for the filmstrip, which the grid has no need of; and last the centre,
-empty so far, which takes what is left. Before each frame, in eframe's
+view) and, in Library, which photo of how many is the current one;
+then, in Library's viewer, the bottom dock above the toolbar, for the
+filmstrip, which the grid has no need of; and last the centre, which
+takes what is left: the selected folder's photos as the grid's tiles,
+or the current photo's name in the viewer, or a message saying why
+there are none. Before each frame, in eframe's
 `logic` step, the app does what the items clicked on the menu bar ask,
 on macOS; eframe runs that step while the window is minimized or
 hidden too, when it draws no frame, so the menu bar still acts then.
@@ -142,7 +147,18 @@ front, and the folders the tree asks for, one read per folder at a
 time, so the tree drawn in the frame is as up to date as the disk has
 answered. The roots are watched on a thread of their own, started on
 the first frame, which reads them every 2 seconds and wakes the window
-only when they change, so an idle window draws nothing.
+only when they change, so an idle window draws nothing. The selected
+folder's photos are read like the folders: when a folder is selected,
+by a click on its row, again
+when the window comes back to the front, and once a folder restored at
+start-up has its root among the tree's, which is read on a later frame.
+A folder's photos are never read by two reads at once, but for a read
+left hanging on a card taken out, and only the answer of the read
+wanted last is taken, so the photos drawn are always
+those of the folder selected last. The grid draws whatever list of
+photos it is handed, and a click on a tile makes its photo the current
+one; a double-click opens the viewer the way its key and its button
+do, through `perform`.
 The Settings dialog only records
 the choice; the next frame installs it, so no frame is painted in two
 themes. The same step keeps

@@ -96,7 +96,7 @@ pub fn show(ui: &mut egui::Ui, palette: &Palette, browser: &mut Browser) {
     drop(rows);
     match click {
         Some(Click::Toggle(path)) => browser.toggle(&path),
-        Some(Click::Select(path)) => browser.select(&path),
+        Some(Click::Select(path)) => browser.select(ui.ctx(), &path),
         None => {}
     }
 }

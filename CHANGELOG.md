@@ -39,6 +39,14 @@ Nothing has been released yet.
   disappear as they are mounted and unmounted, and a folder changed
   meanwhile is read again when the window comes back to the front. What
   is expanded and selected is remembered between runs.
+- In Library, selecting a folder shows its photos, the RAW files of
+  Nikon and Sony cameras and JPEG files, in the grid: a tile for each,
+  showing its name until thumbnails come, the current one outlined. A
+  click makes a photo the current one, and a double-click opens it in
+  the viewer, which shows its name for now. The toolbar shows which
+  photo of how many is the current one. The photos are read again when
+  the window comes back to the front, so photos copied in meanwhile
+  show, and the current photo stays the current one.
 - In Library, two buttons on a toolbar under the centre choose how the
   centre shows a folder's photos: as a grid of thumbnails, or one at a
   time in a viewer. The choice is remembered between runs.
