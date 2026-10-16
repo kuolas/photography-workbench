@@ -59,9 +59,13 @@ pub struct PhotographyWorkbenchApp {
     /// selected folder's photos; what is expanded and selected in the
     /// tree is saved between runs.
     browser: Browser,
-    /// The photos' thumbnails, decoded off the window's thread, which
-    /// the grid, the filmstrip and the viewer draw.
+    /// The photos' thumbnails, which the grid, the filmstrip and the
+    /// viewer draw, and the viewer's pictures, decoded off the window's
+    /// thread.
     textures: Textures,
+    /// How long the viewer has waited for its picture, for it to say when
+    /// the picture takes a while. Not saved.
+    viewer: viewer::Waiting,
     /// How many tiles the grid laid out in a row the last time it was
     /// drawn, which the keys that move a row up or down go by. `None`
     /// until it is drawn, and from a change of mode, view or docks shown
@@ -453,8 +457,9 @@ impl PhotographyWorkbenchApp {
                 }
             }
             View::Viewer => {
-                if let Some(photo) = list.current_photo() {
-                    viewer::show(ui, &mut self.textures, photo);
+                if let Some(current) = list.current() {
+                    let (textures, waiting) = (&mut self.textures, &mut self.viewer);
+                    viewer::show(ui, palette, textures, waiting, list.photos(), current);
                 }
             }
         }
@@ -608,8 +613,8 @@ impl eframe::App for PhotographyWorkbenchApp {
         self.shortcuts(ui.ctx());
         // What the disk has read, before the tree is drawn.
         self.browser.update(ui.ctx());
-        // The thumbnails decoded since the last frame, before any is
-        // drawn, and the read of photos they are wanted for.
+        // The thumbnails and pictures decoded since the last frame,
+        // before any is drawn, and the read of photos they are wanted for.
         self.textures.begin_frame(ui.ctx());
         if let Some(read) = self.browser.photos_read() {
             self.textures.shown(read);
@@ -674,7 +679,7 @@ impl eframe::App for PhotographyWorkbenchApp {
             .show(ui, |ui| self.centre(ui, &palette));
         // Once every view of the photos is drawn, the filmstrip in the
         // bottom dock and the grid or the viewer in the centre: the
-        // thumbnails none of them wanted in this frame are not decoded.
+        // textures none of them wanted in this frame are not decoded.
         self.textures.end_frame(ui.ctx());
 
         // Above everything but the dialogs.
@@ -3197,11 +3202,11 @@ mod tests {
         );
     }
 
-    /// The viewer draws the current photo's thumbnail, made at the
-    /// largest size, as large as the centre allows less 24 points on
-    /// every side, enlarged from its pixels, its aspect kept, in the
-    /// middle: a wide photo across the room, a tall one from its top to
-    /// its bottom. Right steps to the next photo, which it then draws.
+    /// The viewer draws the current photo's picture as large as the
+    /// centre allows less 24 points on every side, enlarged from its
+    /// pixels, its aspect kept, in the middle: a wide photo across the
+    /// room, a tall one from its top to its bottom. Right steps to the
+    /// next photo, which it then draws.
     #[test]
     fn the_viewer_shows_the_current_photo_as_large_as_the_centre_allows() {
         let dir = photos_folder();
@@ -3218,7 +3223,8 @@ mod tests {
         let place = viewer_photo(&harness, "DSC_0001.jpg").expect("no photo");
         assert_fitted(place, room, 1.5);
         let (texture, drawn) = texture_in(&harness, room);
-        assert_eq!(harness.state().textures.texture(&wide, 512), Some(texture));
+        let side = picture_side(&harness);
+        assert_eq!(harness.state().textures.texture(&wide, side), Some(texture));
         assert_fitted(drawn, room, 1.5);
         assert!(drawn.width() > 300.0, "not enlarged: {drawn:?}");
 
@@ -3227,7 +3233,7 @@ mod tests {
         let place = viewer_photo(&harness, "DSC_0002.jpg").expect("no photo");
         assert_fitted(place, room, 2.0 / 3.0);
         let (texture, drawn) = texture_in(&harness, room);
-        assert_eq!(harness.state().textures.texture(&tall, 512), Some(texture));
+        assert_eq!(harness.state().textures.texture(&tall, side), Some(texture));
         assert_fitted(drawn, room, 2.0 / 3.0);
     }
 
@@ -3253,6 +3259,237 @@ mod tests {
             harness.query_by_label(why).is_some()
         });
         assert!(shown, "no tooltip");
+    }
+
+    /// The longest side of the picture the viewer wants: its room's long
+    /// side in pixels, rounded up to a step of 256 and no longer than the
+    /// largest texture egui takes, which in the harness is egui's own
+    /// default of 2048.
+    fn picture_side(harness: &Harness<'_, PhotographyWorkbenchApp>) -> u32 {
+        let points = viewer_room(harness).size().max_elem();
+        let max_side = harness.ctx.input(|i| i.max_texture_side);
+        crate::viewer::picture_side(points, harness.ctx.pixels_per_point(), max_side)
+    }
+
+    /// [`photos_folder`], holding beside its folders the photos
+    /// `DSC_0001.jpg` to `DSC_0003.jpg`, JPEGs `width` by `height` pixels,
+    /// and their paths.
+    fn folder_of_jpegs(width: u32, height: u32) -> (tempfile::TempDir, [std::path::PathBuf; 3]) {
+        let dir = photos_folder();
+        let paths = [1, 2, 3].map(|n| dir.path().join(format!("DSC_000{n}.jpg")));
+        for path in &paths {
+            std::fs::write(path, crate::textures::jpeg(width, height)).unwrap();
+        }
+        (dir, paths)
+    }
+
+    /// The viewer draws the current photo's picture, decoded as long as
+    /// its room in pixels, rounded up to a step, not a thumbnail; until
+    /// the picture comes, a thumbnail of the photo held stands in for it.
+    /// Once it has come, the next photo's picture is decoded too, so Right
+    /// shows that photo sharp at once, with nothing more decoded.
+    #[test]
+    fn the_viewer_draws_the_photo_s_picture_and_a_thumbnail_until_it_comes() {
+        let (dir, photos) = folder_of_jpegs(2400, 1600);
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        harness.state_mut().textures.stall(true);
+        click(&mut harness, "Image viewer");
+        let room = viewer_room(&harness);
+        let (texture, _) = texture_in(&harness, room);
+        let grid_s = harness.state().textures.texture(&photos[0], 256);
+        assert_eq!(grid_s, Some(texture), "not the grid's thumbnail");
+
+        harness.state_mut().textures.stall(false);
+        harness.run();
+        let side = picture_side(&harness);
+        let (texture, drawn) = texture_in(&harness, room);
+        let textures = &harness.state().textures;
+        assert_eq!(textures.texture(&photos[0], side), Some(texture));
+        assert_eq!(texture_size(&harness, texture)[0], side as usize);
+        assert_fitted(drawn, room, 1.5);
+        let next = textures.texture(&photos[1], side).expect("no next picture");
+
+        harness.state_mut().textures.stall(true);
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+        assert_eq!(texture_in(&harness, room).0, next);
+    }
+
+    /// The grid draws thumbnails, never a picture the viewer held: back
+    /// from the viewer on a screen of two pixels a point, a photo whose
+    /// thumbnail of the grid's size is on its way shows the smaller one
+    /// the filmstrip held, not its picture, nearer that size, which the
+    /// viewer held as the next photo's.
+    #[test]
+    fn the_grid_draws_a_thumbnail_never_a_picture() {
+        let (dir, photos) = folder_of_jpegs(2400, 1600);
+        let (mut harness, _) = harness_at(None, vec![home(dir.path())], 2.0);
+        harness.state_mut().view = View::Viewer;
+        click(&mut harness, "Home");
+        let side = picture_side(&harness);
+        let textures = &harness.state().textures;
+        assert!(textures.texture(&photos[1], side).is_some(), "no picture");
+        assert_eq!(textures.texture(&photos[1], 512), None);
+        let small = textures.texture(&photos[1], 256).expect("no thumbnail");
+
+        harness.state_mut().textures.stall(true);
+        press(&mut harness, Modifiers::NONE, Key::Escape);
+        let room = tile_room(&harness, "DSC_0002.jpg");
+        assert_eq!(texture_in(&harness, room).0, small);
+    }
+
+    /// A current photo whose picture cannot be decoded still has the next
+    /// photo's picture, and the one before's, made ready, as soon as that
+    /// is known.
+    #[test]
+    fn the_neighbours_are_made_ready_when_the_picture_cannot_be_decoded() {
+        let (dir, photos) = folder_of_jpegs(600, 400);
+        let fourth = dir.path().join("DSC_0004.jpg");
+        std::fs::write(&fourth, crate::textures::jpeg(600, 400)).unwrap();
+        let mut harness = filmstrip_harness(dir.path());
+        let side = picture_side(&harness);
+        assert_eq!(harness.state().textures.texture(&fourth, side), None);
+        let ctx = harness.ctx.clone();
+        let damaged = previews::Failure::Damaged;
+        harness
+            .state_mut()
+            .textures
+            .fail(&ctx, &photos[2], side, damaged);
+        make_current(&mut harness, 3);
+        let textures = &harness.state().textures;
+        assert_eq!(textures.texture(&photos[2], side), None, "decoded");
+        assert!(textures.texture(&fourth, side).is_some(), "no next picture");
+        assert!(textures.texture(&photos[1], side).is_some(), "no previous");
+    }
+
+    /// A photo whose thumbnails and whose picture at one size cannot be
+    /// decoded keeps saying why, and says nothing of loading however long
+    /// it waits, while its picture is decoded at another size, as once the
+    /// window is resized; and the pictures of its neighbours at that size
+    /// are made ready meanwhile.
+    #[test]
+    fn a_photo_that_cannot_be_shown_says_why_while_another_size_is_tried() {
+        let (dir, photos) = folder_of_jpegs(600, 400);
+        std::fs::write(&photos[1], [0xFF, 0xD8, 0xFF, 0xE0]).unwrap();
+        let mut harness = filmstrip_harness(dir.path());
+        make_current(&mut harness, 2);
+        assert!(failure_icon_in(&harness, viewer_room(&harness), 48.0));
+        let before = picture_side(&harness);
+
+        harness.state_mut().textures.stall(true);
+        harness.set_size(PhotographyWorkbenchApp::MIN_WINDOW + egui::vec2(600.0, 400.0));
+        let start = harness.ctx.input(|i| i.time) + 1.0;
+        for later in [0.0, 0.5, 2.0] {
+            frame_at(&mut harness, start + later);
+            let room = viewer_room(&harness);
+            assert!(failure_icon_in(&harness, room, 48.0), "{later}: no icon");
+            assert!(!says_loading(&harness), "{later}");
+        }
+        let side = picture_side(&harness);
+        assert_ne!(side, before);
+        harness.state_mut().textures.stall(false);
+        harness.step();
+        let textures = &harness.state().textures;
+        assert!(textures.texture(&photos[0], side).is_some(), "no previous");
+        assert!(textures.texture(&photos[2], side).is_some(), "no next");
+    }
+
+    /// Whether the viewer says its picture is loading.
+    fn says_loading(harness: &Harness<'_, PhotographyWorkbenchApp>) -> bool {
+        harness.query_by_label("Loading…").is_some()
+    }
+
+    /// Run a frame at `time` seconds of egui's time, which stands still
+    /// from then on between the frames a test runs.
+    fn frame_at(harness: &mut Harness<'_, PhotographyWorkbenchApp>, time: f64) {
+        harness.input_mut().time = Some(time);
+        harness.step();
+    }
+
+    /// How long after the last frame the window asks for the next one.
+    fn repaint_delay(harness: &Harness<'_, PhotographyWorkbenchApp>) -> std::time::Duration {
+        harness.output().viewport_output[&ViewportId::ROOT].repaint_delay
+    }
+
+    /// The viewer on the third of [`folder_of_jpegs`], made current with
+    /// the decoder stalled, so its picture stays on its way, the time
+    /// standing still at the time returned, when it was made current.
+    fn viewer_on_the_third_stalled(dir: &Path) -> (Harness<'static, PhotographyWorkbenchApp>, f64) {
+        let mut harness = filmstrip_harness(dir);
+        harness.state_mut().textures.stall(true);
+        harness.state_mut().browser.select_photo(2);
+        let now = harness.ctx.input(|i| i.time) + 1.0;
+        frame_at(&mut harness, now);
+        (harness, now)
+    }
+
+    /// When the picture of the photo stepped to takes half a second, the
+    /// viewer says it is loading, under the photo, and not before; it asks
+    /// for a frame for when it will, so an idle window says it on time.
+    /// Once the picture comes, it says so no longer, and asks for no
+    /// frame.
+    #[test]
+    fn the_viewer_says_it_is_loading_when_the_picture_takes_a_while() {
+        let (dir, photos) = folder_of_jpegs(600, 400);
+        let (mut harness, start) = viewer_on_the_third_stalled(dir.path());
+        let room = viewer_room(&harness);
+        let stand_in = harness.state().textures.texture(&photos[2], 256);
+        assert_eq!(Some(texture_in(&harness, room).0), stand_in);
+        assert!(!says_loading(&harness));
+        // egui asks for the frame a frame's time early, which is a
+        // quarter of a second in the harness.
+        frame_at(&mut harness, start);
+        assert_eq!(repaint_delay(&harness).as_secs_f64(), 0.5 - 0.25);
+        frame_at(&mut harness, start + 0.375);
+        assert!(!says_loading(&harness));
+        frame_at(&mut harness, start + 0.5);
+        assert!(says_loading(&harness));
+        let label = harness.get_by_label("Loading…").rect();
+        assert!(label.top() >= room.bottom(), "{label:?} over {room:?}");
+        assert!(
+            (label.center().x - room.center().x).abs() <= 1.0,
+            "{label:?}"
+        );
+
+        harness.state_mut().textures.stall(false);
+        frame_at(&mut harness, start + 0.75);
+        harness.run();
+        assert!(!says_loading(&harness));
+        let picture = harness
+            .state()
+            .textures
+            .texture(&photos[2], picture_side(&harness));
+        assert_eq!(Some(texture_in(&harness, room).0), picture);
+        assert_eq!(repaint_delay(&harness), std::time::Duration::MAX);
+    }
+
+    /// When the picture of the photo cannot be decoded while a thumbnail
+    /// of it is held, the viewer shows the thumbnail, however long it
+    /// waits says nothing of loading and asks for no frame for it, and
+    /// shows no icon of a photo that cannot be shown.
+    #[test]
+    fn the_viewer_says_nothing_of_loading_when_the_picture_cannot_be_decoded() {
+        let (dir, photos) = folder_of_jpegs(600, 400);
+        let mut harness = filmstrip_harness(dir.path());
+        harness.state_mut().textures.stall(true);
+        let ctx = harness.ctx.clone();
+        let side = picture_side(&harness);
+        let damaged = previews::Failure::Damaged;
+        harness
+            .state_mut()
+            .textures
+            .fail(&ctx, &photos[2], side, damaged);
+        harness.state_mut().browser.select_photo(2);
+        let start = harness.ctx.input(|i| i.time) + 1.0;
+        for later in [0.0, 0.5, 2.0] {
+            frame_at(&mut harness, start + later);
+            assert!(!says_loading(&harness), "{later}");
+        }
+        assert_eq!(repaint_delay(&harness), std::time::Duration::MAX);
+        let room = viewer_room(&harness);
+        let stand_in = harness.state().textures.texture(&photos[2], 256);
+        assert_eq!(Some(texture_in(&harness, room).0), stand_in);
+        assert!(!failure_icon_in(&harness, room, 48.0), "an icon");
     }
 
     /// The reference lists the keys that move between photos, under

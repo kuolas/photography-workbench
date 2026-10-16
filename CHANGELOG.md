@@ -45,7 +45,10 @@ Nothing has been released yet.
   that cannot be shown says why when the pointer rests on it. A
   click makes a photo the current one, and a double-click, or Enter,
   opens it in the viewer, which shows it alone, as large as the centre
-  allows, or why it cannot be shown when the pointer rests on it. The
+  allows and sharp at the screen's resolution, or why it cannot be shown
+  when the pointer rests on it. While it shows a photo, the next and the
+  previous are made ready, so stepping to either shows it sharp at once,
+  and "Loading…" shows under the photo when it takes a while. The
   toolbar shows which photo of how many is the current one. The photos
   are read again when the window comes back to the front, so photos
   copied in meanwhile show, photos changed meanwhile show as they are
