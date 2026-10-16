@@ -29,6 +29,10 @@ cargo run
 cargo test
 ```
 
+The app needs a graphics card of the Vulkan, DirectX 12 or Metal class, as
+it shows photos in textures of up to 16384 pixels a side, which every such
+card supports.
+
 ### Changing the app icon
 
 The icon's source is
