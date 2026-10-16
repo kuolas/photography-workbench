@@ -19,7 +19,8 @@
 //! ([`ranked`]): a tier, which says what the texture is for, and a rank
 //! within the tier. The tiers, from the highest: the current photo's
 //! thumbnail ([`CURRENT`]), which in the viewer stands in for its picture,
-//! as it is far quicker to decode; the current photo's picture
+//! as it is far quicker to decode; the current photo's picture, then,
+//! while the viewer is zoomed past it, the photo at its largest
 //! ([`CURRENT_PICTURE`]); the thumbnails on screen ([`ON_SCREEN`]); the
 //! pictures of the photos next to the current one in the viewer
 //! ([`NEIGHBOURS`]); and the thumbnails wanted ahead of being scrolled to
@@ -48,6 +49,12 @@
 //! smaller, which is mostly its thumbnail, or else the smallest larger, as
 //! a smaller one is only soft where a larger one is jagged. Going back to
 //! a folder shows its thumbnails at once, if they are still held.
+//!
+//! Every decode of a photo also tells the size of the photo's largest
+//! image, a JPEG's own or a RAW file's largest preview, whatever size was
+//! decoded, and the store keeps it with the texture: it is what the
+//! viewer shows at 100 % ([`Textures::largest`]), known once any texture
+//! of the photo is held, a thumbnail or a picture.
 //!
 //! Why a photo cannot be shown is remembered for each size apart, as its
 //! textures are, since a RAW file's sizes may be decoded from different
@@ -80,7 +87,7 @@ use std::path::{Path, PathBuf};
 use desktop_ui::icons;
 use egui::load::SizedTexture;
 use egui::{Align2, ColorImage, Rect, TextureHandle, TextureId, TextureOptions, Vec2, vec2};
-use previews::{Answer, Decoder, Failure};
+use previews::{Answer, Decoder, Failure, Size};
 
 /// The sizes thumbnails are decoded at, as the longest side in pixels,
 /// smallest first. Few sizes mean few textures of a photo, each serving
@@ -97,7 +104,9 @@ const THUMBNAILS_BUDGET: usize = 256 * 1024 * 1024;
 
 /// The most memory the pictures may take, in bytes, unless those wanted
 /// in one frame need more: the viewer's three, the current photo's and its
-/// neighbours', many times over on the largest screens.
+/// neighbours', many times over on the largest screens, and the current
+/// photo at its largest when the viewer is zoomed past its picture, about
+/// 241 MB for the largest previews, 9504 by 6336 pixels.
 const PICTURES_BUDGET: usize = 512 * 1024 * 1024;
 
 /// The tier of the current photo's thumbnail, the one a photographer
@@ -106,8 +115,9 @@ const PICTURES_BUDGET: usize = 512 * 1024 * 1024;
 /// before it.
 pub const CURRENT: u32 = 4;
 
-/// The tier of the current photo's picture, in the viewer: right after
-/// its thumbnail, and above everything else.
+/// The tier of the current photo's picture, in the viewer, and after it,
+/// while the viewer is zoomed past the picture, of the photo at its
+/// largest: right after its thumbnail, and above everything else.
 pub const CURRENT_PICTURE: u32 = 3;
 
 /// The tier of a photo whose thumbnail is drawn: it is on screen.
@@ -234,6 +244,9 @@ struct Held {
     longest: u32,
     /// The memory it takes, in bytes.
     bytes: usize,
+    /// The size of the photo's largest image, upright, as the decode told
+    /// it: what 100 % shows, whichever size was decoded.
+    largest: Size,
     /// The number of the frame it was last wanted or drawn in.
     used: u64,
     /// How many reads of photos the store had seen when it was decoded:
@@ -398,6 +411,7 @@ impl Textures {
         };
         let image = decoded.image();
         let size = [image.width() as usize, image.height() as usize];
+        let largest = decoded.largest();
         let texture = ctx.load_texture(
             path.display().to_string(),
             ColorImage::from_rgb(size, image.pixels()),
@@ -408,6 +422,7 @@ impl Textures {
             longest,
             // Four bytes a pixel on the graphics card.
             bytes: 4 * size[0] * size[1],
+            largest,
             used: self.frame,
             reads: self.reads,
         };
@@ -584,6 +599,19 @@ impl Textures {
                 coming: failure.is_none(),
             },
         }
+    }
+
+    /// The size of the largest image of the photo at `path`, upright: a
+    /// JPEG's own size, or a RAW file's largest preview's, which 100 %
+    /// shows. Every decode of a photo tells it, whatever size it was
+    /// decoded at, a thumbnail's or a picture's, so it is known once any
+    /// texture of the photo is held: the newest decode's, from before the
+    /// photos were last read until the photo is decoded again, as the
+    /// texture is. `None` while no texture of the photo is held.
+    pub fn largest(&self, path: &Path) -> Option<Size> {
+        let sizes = self.held.get(path)?;
+        let newest = sizes.iter().max_by_key(|held| held.reads)?;
+        Some(newest.largest)
     }
 
     /// End a frame, after everything is drawn: drop the requests of the
@@ -777,9 +805,9 @@ pub fn placed(thumbnail: Thumbnail, room: Rect) -> Rect {
     }
 }
 
-/// Where to draw a thumbnail of `size` in `room`: as large as fits, its
+/// Where to draw a texture of `size` in `room`: as large as fits, its
 /// aspect kept, in the middle.
-fn fitted(size: Vec2, room: Rect) -> Rect {
+pub fn fitted(size: Vec2, room: Rect) -> Rect {
     let scale = (room.width() / size.x).min(room.height() / size.y);
     Rect::from_center_size(room.center(), size * scale)
 }
@@ -1245,6 +1273,36 @@ mod tests {
         let shown = store.picture(&a, 1024);
         assert_eq!(texture_of(shown.shown), Some(exact));
         assert!(!shown.decoded && !shown.coming, "{shown:?}");
+    }
+
+    /// The size of a photo's largest image is known from its first decode,
+    /// a thumbnail's or a picture's, whatever size was decoded; it is the
+    /// one known from before the photos were read again until the photo
+    /// is decoded again, and goes with the photo's last texture.
+    #[test]
+    fn a_photo_s_largest_size_is_known_from_any_of_its_decodes() {
+        let dir = folder();
+        let [a, b] = ["a.jpg", "b.jpg"].map(|name| dir.path().join(name));
+        let ctx = egui::Context::default();
+        let mut store = Textures::inline();
+        let size = |width, height| Some(Size { width, height });
+        assert_eq!(store.largest(&a), None);
+        decoded(&mut store, &ctx, &a, 256);
+        assert_eq!(store.largest(&a), size(400, 300), "from a thumbnail");
+        decoded(&mut store, &ctx, &b, 1024);
+        assert_eq!(store.largest(&b), size(400, 300), "from a picture");
+
+        fs::write(&a, jpeg(600, 200)).unwrap();
+        store.shown(1);
+        assert_eq!(store.largest(&a), size(400, 300), "until decoded again");
+        decoded(&mut store, &ctx, &a, 1024);
+        assert_eq!(store.largest(&a), size(600, 200), "the newest decode's");
+
+        store.budget.pictures = 1;
+        store.budget.thumbnails = 1;
+        store.begin_frame(&ctx);
+        store.end_frame(&ctx);
+        assert_eq!(store.largest(&a), None);
     }
 
     /// Thumbnails and pictures are let go past budgets of their own:
