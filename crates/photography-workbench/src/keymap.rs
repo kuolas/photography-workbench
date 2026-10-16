@@ -106,6 +106,10 @@ struct Binding {
     surfaces: &'static [Surface],
     group: Group,
     description: &'static str,
+    /// Whether the action is done again while the key is held, as the
+    /// system repeats it: for a step through the photos, but not for a
+    /// toggle, which a held key would turn on and off.
+    repeats: bool,
 }
 
 /// Both views: everywhere in Library.
@@ -136,6 +140,15 @@ const fn bind(
         surfaces,
         group,
         description,
+        repeats: false,
+    }
+}
+
+/// `binding`, done again while its key is held ([`Binding::repeats`]).
+const fn repeating(binding: Binding) -> Binding {
+    Binding {
+        repeats: true,
+        ..binding
     }
 }
 
@@ -162,48 +175,48 @@ const BINDINGS: &[Binding] = &[
         VIEWER,
         "Back to the thumbnail grid",
     ),
-    bind(
+    repeating(bind(
         Group::Photos,
         (NONE, Key::ArrowLeft),
         Action::Photo(Step::Previous),
         EVERYWHERE,
         "Previous photo",
-    ),
-    bind(
+    )),
+    repeating(bind(
         Group::Photos,
         (NONE, Key::ArrowRight),
         Action::Photo(Step::Next),
         EVERYWHERE,
         "Next photo",
-    ),
-    bind(
+    )),
+    repeating(bind(
         Group::Photos,
         (NONE, Key::ArrowUp),
         Action::Photo(Step::Above),
         GRID,
         "Photo above",
-    ),
-    bind(
+    )),
+    repeating(bind(
         Group::Photos,
         (NONE, Key::ArrowDown),
         Action::Photo(Step::Below),
         GRID,
         "Photo below",
-    ),
-    bind(
+    )),
+    repeating(bind(
         Group::Photos,
         (NONE, Key::Home),
         Action::Photo(Step::First),
         GRID,
         "First photo",
-    ),
-    bind(
+    )),
+    repeating(bind(
         Group::Photos,
         (NONE, Key::End),
         Action::Photo(Step::Last),
         GRID,
         "Last photo",
-    ),
+    )),
     bind(
         Group::Docks,
         (NONE, Key::Tab),
@@ -284,6 +297,16 @@ const BINDINGS: &[Binding] = &[
 ];
 
 impl Binding {
+    /// Whether the binding's chord was pressed in this frame, or, for one
+    /// that repeats, its key held down repeated.
+    fn went_down(&self, ctx: &egui::Context) -> bool {
+        if self.repeats {
+            self.chord.pressed_or_repeated(ctx)
+        } else {
+            self.chord.pressed(ctx)
+        }
+    }
+
     /// Whether the shortcut does anything yet: one that switches to a
     /// mode not built yet does not, and the reference leaves it out.
     fn is_live(&self) -> bool {
@@ -298,9 +321,7 @@ impl Binding {
 /// frame.
 pub fn pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bool {
     BINDINGS.iter().any(|binding| {
-        binding.action == action
-            && binding.surfaces.contains(&surface)
-            && binding.chord.pressed(ctx)
+        binding.action == action && binding.surfaces.contains(&surface) && binding.went_down(ctx)
     })
 }
 
@@ -311,7 +332,7 @@ pub fn pressed_actions(ctx: &egui::Context, surface: Surface) -> Vec<Action> {
     for binding in BINDINGS {
         if binding.surfaces.contains(&surface)
             && !actions.contains(&binding.action)
-            && binding.chord.pressed(ctx)
+            && binding.went_down(ctx)
         {
             actions.push(binding.action);
         }
@@ -413,6 +434,51 @@ mod tests {
         });
         output.textures_delta.clear();
         assert_eq!(actions, [Action::View(View::Grid)]);
+    }
+
+    /// A key held down does again, as the system repeats it, an action
+    /// that steps through the photos, and not one that shows or hides
+    /// something, which would flicker on and off.
+    #[test]
+    fn a_held_key_steps_through_the_photos_but_toggles_once() {
+        let press = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: NONE,
+        };
+        let ctx = egui::Context::default();
+        let frames: Vec<Vec<Action>> = (0..3)
+            .map(|_| {
+                // egui counts a key that goes down again while it is
+                // down as repeating.
+                let input = egui::RawInput {
+                    events: vec![press(Key::ArrowRight), press(Key::Tab)],
+                    ..egui::RawInput::default()
+                };
+                let mut actions = Vec::new();
+                let mut output = ctx.run_ui(input, |ui| {
+                    actions = pressed_actions(ui.ctx(), Surface::Grid);
+                });
+                output.textures_delta.clear();
+                actions
+            })
+            .collect();
+        let next = Action::Photo(Step::Next);
+        assert_eq!(
+            frames,
+            [vec![next, Action::SideDocks], vec![next], vec![next]]
+        );
+    }
+
+    /// Only the keys that move between photos repeat.
+    #[test]
+    fn only_the_photo_keys_repeat() {
+        for binding in BINDINGS {
+            let photo = matches!(binding.action, Action::Photo(_));
+            assert_eq!(binding.repeats, photo, "{:?}", binding.action);
+        }
     }
 
     /// A control is named the chord that does what it does where it is,

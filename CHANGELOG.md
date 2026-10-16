@@ -70,10 +70,11 @@ Nothing has been released yet.
 - In Library, Left and Right move to the previous and next photo, in
   the grid and the viewer; in the grid, Up and Down move a row, and
   Home and End go to the first and last photo. They stop at the first
-  and last photo rather than wrap around. The grid scrolls just far
-  enough to show the photo moved to, the filmstrip brings it into
-  view, and the reference of keyboard shortcuts lists the keys under
-  Photos.
+  and last photo rather than wrap around. Holding one of these keys
+  goes on moving, once the system's key-repeat delay has passed, at the
+  system's pace. The grid scrolls just far enough to show the photo
+  moved to, the filmstrip brings it into view, and the reference of
+  keyboard shortcuts lists the keys under Photos.
 - On macOS, a menu bar at the top of the screen: About, Settings and
   Quit in the app menu, the views and the docks in View, the modes in
   Window, and the reference of keyboard shortcuts in Help. The view, the
