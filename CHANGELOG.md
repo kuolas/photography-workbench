@@ -31,8 +31,8 @@ Nothing has been released yet.
   resized by dragging its edge, and, with the viewer, one along the
   bottom for the filmstrip. Each is shown or hidden from the title bar;
   which are shown is remembered between runs. A bar of buttons along the
-  right edge picks what the right dock shows. The right dock and the
-  filmstrip are empty so far: the right dock says no photo is selected.
+  right edge picks what the right dock shows. The right dock is empty
+  so far: it says no photo is selected.
 - In Library, the left dock shows a tree of the home folder and the
   mounted memory cards and drives. A folder expands from the arrow
   beside it, and a click selects it. Cards and drives appear and
@@ -47,6 +47,13 @@ Nothing has been released yet.
   photo of how many is the current one. The photos are read again when
   the window comes back to the front, so photos copied in meanwhile
   show, and the current photo stays the current one.
+- In Library, with the viewer, the filmstrip under it shows the
+  folder's photos in a row, each with its name and its format (NEF, ARW
+  or JPEG) above the place its thumbnail will fill, the current one
+  outlined; a long name is cut short, and the format stays in sight. A
+  click makes a photo the current one. A mouse wheel scrolls it
+  sideways, and it brings the current photo into view when the current
+  photo changes, never while it is being scrolled.
 - In Library, two buttons on a toolbar under the centre choose how the
   centre shows a folder's photos: as a grid of thumbnails, or one at a
   time in a viewer. The choice is remembered between runs.

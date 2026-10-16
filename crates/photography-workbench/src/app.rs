@@ -12,6 +12,7 @@ use desktop_ui::toolbar;
 
 use crate::browse::{Browser, Photos};
 use crate::dialogs;
+use crate::filmstrip;
 use crate::folder_tree;
 use crate::grid;
 use crate::keymap::{self, Action, Surface};
@@ -546,7 +547,17 @@ impl eframe::App for PhotographyWorkbenchApp {
             };
             toolbar::show(ui, "toolbar", &palette, start, end);
         }
-        layout::bottom_dock(ui, &palette, parts, &mut self.docks);
+        // The same photos as the grid's, sharing the current one.
+        let film = |ui: &mut egui::Ui| {
+            if let Photos::Read(list) = self.browser.photos() {
+                let photos = list.photos();
+                let clicked = filmstrip::show(ui, &palette, photos, list.current(), list.folder());
+                if let Some(index) = clicked {
+                    self.browser.select_photo(index);
+                }
+            }
+        };
+        layout::bottom_dock(ui, &palette, parts, &mut self.docks, film);
 
         // The viewer shows its photo on a backdrop of its own. What the
         // centre holds sets its own room.
@@ -1798,6 +1809,15 @@ mod tests {
         harness.run();
     }
 
+    /// Whether the viewer shows the name of the photo named `label` in the
+    /// centre, where the photo goes: as a name, not as a tile of the grid.
+    fn viewer_shows(harness: &Harness<'_, PhotographyWorkbenchApp>, label: &str) -> bool {
+        let centre = centre(harness);
+        harness.query_all_by_label(label).any(|node| {
+            centre.contains_rect(node.rect()) && node.accesskit_node().toggled().is_none()
+        })
+    }
+
     /// A double-click on a tile makes its photo the current one and opens
     /// it in the viewer, which shows its name; so does one just after a
     /// click on another tile.
@@ -1809,9 +1829,8 @@ mod tests {
         wait(&mut harness, 1.0);
         double_click(&mut harness, "DSC_0010.jpg");
         assert_eq!(harness.state().view, View::Viewer);
-        let name = harness.get_by_label("DSC_0010.jpg");
-        assert_eq!(name.accesskit_node().toggled(), None);
-        assert!(harness.query_by_label("DSC_0002.NEF").is_none());
+        assert!(viewer_shows(&harness, "DSC_0010.jpg"));
+        assert!(!viewer_shows(&harness, "DSC_0002.NEF"));
         assert_eq!(count(&harness).as_deref(), Some("2 of 2"));
 
         click(&mut harness, "Thumbnail grid");
@@ -1821,7 +1840,7 @@ mod tests {
         assert_eq!(harness.state().view, View::Grid);
         double_click(&mut harness, "DSC_0002.NEF");
         assert_eq!(harness.state().view, View::Viewer);
-        harness.get_by_label("DSC_0002.NEF");
+        assert!(viewer_shows(&harness, "DSC_0002.NEF"));
         assert_eq!(count(&harness).as_deref(), Some("1 of 2"));
     }
 
@@ -1941,6 +1960,308 @@ mod tests {
             _ => false,
         });
         assert!(named, "no name at {name_at:?}");
+    }
+
+    /// [`photos_folder`], holding beside its folders the 30 photos
+    /// `DSC_0001.NEF` to `DSC_0030.NEF`, all empty, more than the
+    /// filmstrip shows at once.
+    fn folder_of_30_photos() -> tempfile::TempDir {
+        let dir = photos_folder();
+        for n in 1..=30 {
+            std::fs::write(dir.path().join(photo(n)), b"").unwrap();
+        }
+        dir
+    }
+
+    /// The name of the photo numbered `n` in [`folder_of_30_photos`].
+    fn photo(n: usize) -> String {
+        format!("DSC_{n:04}.NEF")
+    }
+
+    /// Library's viewer on the photos of `dir`, the home folder, selected,
+    /// the first photo current.
+    fn filmstrip_harness(dir: &Path) -> Harness<'static, PhotographyWorkbenchApp> {
+        let (mut harness, _) = harness_on(None, vec![home(dir)]);
+        click(&mut harness, "Home");
+        click(&mut harness, "Image viewer");
+        harness
+    }
+
+    /// Where the filmstrip's cell for the photo named `label` was laid
+    /// out in the last frame, and whether it was shown current; `None`
+    /// when it was not laid out.
+    fn film_cell(
+        harness: &Harness<'_, PhotographyWorkbenchApp>,
+        label: &str,
+    ) -> Option<(egui::Rect, bool)> {
+        let dock = panel(harness, "bottom_dock");
+        harness
+            .query_all_by_label(label)
+            .find(|node| dock.y_range().contains(node.rect().center().y))
+            .map(|node| {
+                let current = node.accesskit_node().toggled() == Some(Toggled::True);
+                (node.rect(), current)
+            })
+    }
+
+    /// Whether the filmstrip's cell for the photo named `label` was laid
+    /// out in the last frame and is wholly in view.
+    fn in_filmstrip_view(harness: &Harness<'_, PhotographyWorkbenchApp>, label: &str) -> bool {
+        let across = panel(harness, "bottom_dock").x_range();
+        film_cell(harness, label)
+            .is_some_and(|(cell, _)| across.contains(cell.left()) && across.contains(cell.right()))
+    }
+
+    /// Turn the mouse wheel by `delta` points with the pointer over the
+    /// filmstrip, then let the app settle.
+    fn wheel_over_filmstrip(harness: &mut Harness<'_, PhotographyWorkbenchApp>, delta: egui::Vec2) {
+        let pos = panel(harness, "bottom_dock").center();
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(pos));
+        events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        wait(harness, 1.0);
+    }
+
+    /// In the viewer, the filmstrip shows a cell for each photo, the
+    /// current one shown current. A click on another makes it the current
+    /// one: the viewer shows its name, and the toolbar's count follows.
+    #[test]
+    fn a_click_in_the_filmstrip_makes_its_photo_current() {
+        let dir = folder_of_30_photos();
+        let mut harness = filmstrip_harness(dir.path());
+        let first = film_cell(&harness, &photo(1)).expect("no cell for the first photo");
+        assert!(first.1, "the first photo is not shown current");
+        let third = film_cell(&harness, &photo(3)).expect("no cell for the third photo");
+        assert!(!third.1, "the third photo is shown current");
+
+        click(&mut harness, &photo(3));
+        assert_eq!(count(&harness).as_deref(), Some("3 of 30"));
+        assert_eq!(
+            film_cell(&harness, &photo(3)).map(|cell| cell.1),
+            Some(true)
+        );
+        assert_eq!(
+            film_cell(&harness, &photo(1)).map(|cell| cell.1),
+            Some(false)
+        );
+        assert!(viewer_shows(&harness, &photo(3)));
+        assert_eq!(harness.state().view, View::Viewer);
+    }
+
+    /// A click on a cell leaves the strip where it is, whether the cell is
+    /// wholly in view or only partly, at the strip's end.
+    #[test]
+    fn a_click_in_the_filmstrip_does_not_scroll_it() {
+        let dir = folder_of_30_photos();
+        let mut harness = filmstrip_harness(dir.path());
+        let (before, _) = film_cell(&harness, &photo(1)).unwrap();
+        assert!(in_filmstrip_view(&harness, &photo(5)));
+        click(&mut harness, &photo(5));
+        assert_eq!(count(&harness).as_deref(), Some("5 of 30"));
+        let first = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            film_cell(harness, &photo(1)).map(|cell| cell.0)
+        };
+        assert_eq!(first(&harness), Some(before));
+
+        let (partly, _) = film_cell(&harness, &photo(6)).unwrap();
+        let dock = panel(&harness, "bottom_dock");
+        assert!(dock.x_range().contains(partly.left()) && partly.right() > dock.right());
+        click(&mut harness, &photo(6));
+        assert_eq!(count(&harness).as_deref(), Some("6 of 30"));
+        assert_eq!(first(&harness), Some(before));
+    }
+
+    /// The filmstrip's cells are 120 points wide and run its height, all
+    /// of it but the line along its top, side by side from its left edge.
+    /// A cell's tile sits 10 points in from its sides, 22 from its top and
+    /// 8 from its bottom. In the band above, their middles 10 points below
+    /// the cell's top, are its photo's name without the extension, 8
+    /// points in from the cell's left, and its format, ending 8 points in
+    /// from its right. The current photo's tile is outlined in the accent
+    /// colour.
+    #[test]
+    fn the_filmstrip_s_cells_are_laid_out_in_a_row() {
+        let dir = folder_of_30_photos();
+        let harness = filmstrip_harness(dir.path());
+        let dock = panel(&harness, "bottom_dock");
+        let (first, _) = film_cell(&harness, &photo(1)).unwrap();
+        let (second, _) = film_cell(&harness, &photo(2)).unwrap();
+        assert_eq!(first.width(), 120.0, "{first:?}");
+        assert_eq!(first.left(), dock.left(), "{first:?} in {dock:?}");
+        let below_the_line = egui::Rangef::new(dock.top() + 1.0, dock.bottom());
+        assert_eq!(first.y_range(), below_the_line, "{first:?} in {dock:?}");
+        assert_eq!(second.left_top(), first.right_top(), "{second:?}");
+        assert_eq!(second.size(), first.size(), "{second:?}");
+
+        let tile = egui::Rect::from_min_max(
+            first.left_top() + egui::vec2(10.0, 22.0),
+            first.right_bottom() - egui::vec2(10.0, 8.0),
+        );
+        let palette = theme::resolve(harness.state().theme, &harness.ctx).palette();
+        let shapes = &harness.output().shapes;
+        let filled = shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => rect.rect == tile && rect.fill == palette.chip,
+            _ => false,
+        });
+        assert!(filled, "no tile at {tile:?}");
+        let outlined = shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Rect(rect) => {
+                rect.rect == tile
+                    && rect.stroke == egui::Stroke::new(1.5, palette.accent)
+                    && rect.stroke_kind == egui::StrokeKind::Outside
+            }
+            _ => false,
+        });
+        assert!(outlined, "no outline around {tile:?}");
+        // The text laid out where it says, as (its left, its right, its
+        // middle), if it is there.
+        let text_at = |said: &str| {
+            shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text() == said => {
+                    let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    Some((rect.left(), rect.right(), rect.center().y))
+                }
+                _ => None,
+            })
+        };
+        let stem = photo(1).trim_end_matches(".NEF").to_owned();
+        let (left, _, middle) = text_at(&stem).expect("no name without its extension");
+        assert_eq!((left, middle), (first.left() + 8.0, first.top() + 10.0));
+        let (_, right, middle) = text_at("NEF").expect("no format");
+        assert_eq!((right, middle), (first.right() - 8.0, first.top() + 10.0));
+    }
+
+    /// Only the cells in view and the few next to them are laid out: with
+    /// the strip at its start, the last photo's cell is not.
+    #[test]
+    fn the_filmstrip_lays_out_only_the_cells_near_the_view() {
+        let dir = folder_of_30_photos();
+        let harness = filmstrip_harness(dir.path());
+        assert!(in_filmstrip_view(&harness, &photo(1)));
+        assert!(film_cell(&harness, &photo(30)).is_none());
+    }
+
+    /// A photo made current far along the strip is brought into view, to
+    /// the strip's middle.
+    /// Scrolled away from it, the strip stays where it was scrolled, as
+    /// the current photo has not changed since.
+    #[test]
+    fn the_filmstrip_follows_the_current_photo_but_not_its_own_scrolling() {
+        let dir = folder_of_30_photos();
+        let mut harness = filmstrip_harness(dir.path());
+        assert!(!in_filmstrip_view(&harness, &photo(26)));
+        harness.state_mut().browser.select_photo(25);
+        harness.run();
+        assert!(in_filmstrip_view(&harness, &photo(26)));
+        let (cell, _) = film_cell(&harness, &photo(26)).unwrap();
+        let middle = panel(&harness, "bottom_dock").center().x;
+        assert!((cell.center().x - middle).abs() <= 0.5, "{cell:?} {middle}");
+
+        wheel_over_filmstrip(&mut harness, egui::vec2(10_000.0, 0.0));
+        assert!(in_filmstrip_view(&harness, &photo(1)));
+        assert!(!in_filmstrip_view(&harness, &photo(26)));
+        wait(&mut harness, 3.0);
+        assert!(in_filmstrip_view(&harness, &photo(1)));
+        assert!(!in_filmstrip_view(&harness, &photo(26)));
+    }
+
+    /// Opening the viewer with a photo far along the strip current shows
+    /// it in the strip at once, and so does opening it again after the
+    /// strip was scrolled away from it.
+    #[test]
+    fn the_filmstrip_shows_the_current_photo_when_the_viewer_opens() {
+        let dir = folder_of_30_photos();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        harness.state_mut().browser.select_photo(25);
+        harness.run();
+        click(&mut harness, "Image viewer");
+        assert!(in_filmstrip_view(&harness, &photo(26)));
+
+        wheel_over_filmstrip(&mut harness, egui::vec2(10_000.0, 0.0));
+        assert!(!in_filmstrip_view(&harness, &photo(26)));
+        click(&mut harness, "Thumbnail grid");
+        click(&mut harness, "Image viewer");
+        assert!(in_filmstrip_view(&harness, &photo(26)));
+    }
+
+    /// Another folder's photos bring its current photo into view, though
+    /// it is at the same place in its list as the one before.
+    #[test]
+    fn the_filmstrip_shows_the_current_photo_of_another_folder() {
+        let dir = folder_of_30_photos();
+        for n in 1..=30 {
+            std::fs::write(dir.path().join("Exports").join(photo(n)), b"").unwrap();
+        }
+        let mut harness = filmstrip_harness(dir.path());
+        wheel_over_filmstrip(&mut harness, egui::vec2(-10_000.0, 0.0));
+        assert!(!in_filmstrip_view(&harness, &photo(1)));
+        click(&mut harness, "Expand Home");
+        click(&mut harness, "Exports");
+        assert_eq!(count(&harness).as_deref(), Some("1 of 30"));
+        assert!(in_filmstrip_view(&harness, &photo(1)));
+    }
+
+    /// A photo's name too long for its cell is cut short before its
+    /// format, which stays whole, and the name shows whole in a tooltip.
+    #[test]
+    fn a_long_name_in_the_filmstrip_shows_whole_in_a_tooltip() {
+        let dir = photos_folder();
+        let long = "Z_holiday_photo_from_a_phone_camera.jpg";
+        for name in ["DSC_0001.NEF", long] {
+            std::fs::write(dir.path().join(name), b"").unwrap();
+        }
+        let mut harness = filmstrip_harness(dir.path());
+        let (cell, _) = film_cell(&harness, long).unwrap();
+        let laid_out = |shape: &egui::Shape| match shape {
+            egui::Shape::Text(text) if cell.contains(text.pos) => Some((
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+                text.galley.elided,
+                text.galley.text().to_owned(),
+            )),
+            _ => None,
+        };
+        let texts: Vec<_> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| laid_out(&clipped.shape))
+            .collect();
+        let name = texts.iter().find(|(_, _, text)| text.starts_with("Z_"));
+        let format = texts.iter().find(|(_, _, text)| text == "JPEG");
+        let (Some((name, cut, _)), Some((format, whole, _))) = (name, format) else {
+            panic!("no name or no format in {texts:?}");
+        };
+        assert!(cut, "the long name is not cut short");
+        assert!(!whole, "the format is cut short");
+        assert!(
+            name.right() <= format.left(),
+            "{name:?} runs into {format:?}"
+        );
+        assert_eq!(harness.query_all_by_label(long).count(), 1);
+        harness.get_by_label(long).hover();
+        let shown = (0..20).any(|_| {
+            harness.step();
+            harness.query_all_by_label(long).count() == 2
+        });
+        assert!(shown, "no tooltip");
+    }
+
+    /// A mouse's vertical wheel scrolls the filmstrip sideways.
+    #[test]
+    fn a_vertical_wheel_scrolls_the_filmstrip_sideways() {
+        let dir = folder_of_30_photos();
+        let mut harness = filmstrip_harness(dir.path());
+        let (before, _) = film_cell(&harness, &photo(1)).unwrap();
+        wheel_over_filmstrip(&mut harness, egui::vec2(0.0, -300.0));
+        let (after, _) = film_cell(&harness, &photo(1)).unwrap();
+        assert_eq!(after.top(), before.top(), "{before:?} {after:?}");
+        assert!(after.left() < before.left() - 120.0, "{before:?} {after:?}");
     }
 
     #[test]
