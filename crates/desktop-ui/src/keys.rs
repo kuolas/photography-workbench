@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Keyboard shortcuts: a key and the modifiers held with it ([`Chord`]),
-//! how a chord is spelled on each system, and whether it was pressed; and
-//! the reference that lists an app's shortcuts ([`reference()`]).
+//! how a chord is spelled on each system, whether it was pressed, and
+//! taking it out of the frame's input, so nothing else acts on its key;
+//! and the reference that lists an app's shortcuts ([`reference()`]).
 //!
 //! What a chord does is the app's business: an app keeps its own table of
 //! actions and their chords, asks a chord whether it was pressed, and
@@ -57,17 +58,42 @@ impl Chord {
         self.went_down(ctx, true)
     }
 
+    /// Take the chord out of this frame's input, so nothing that reads
+    /// the input after it, such as a widget drawn later in the frame, sees
+    /// its key go down too: each time the key went down with the chord's
+    /// modifiers held, as [`pressed`](Self::pressed) counts it, or, held
+    /// down, repeated. egui takes Enter and Space for a click on the
+    /// widget that has the keyboard focus, so a chord that does something
+    /// is taken before any widget is drawn, or one press would do two
+    /// things. Its repeats go too, even for a chord that does nothing
+    /// with them, as the held key is still the chord's. The key coming
+    /// back up is left, as no widget does anything with that. egui's own
+    /// `consume_key` would take a key held with more modifiers than the
+    /// chord's, Shift+G for G, which is another chord or none.
+    pub fn take(self, ctx: &egui::Context) {
+        ctx.input_mut(|input| {
+            input.events.retain(|event| !self.goes_down_in(event, true));
+        });
+    }
+
     /// Whether the chord's key went down in this frame with its
     /// modifiers held, counting a held key's repeats when `repeats`.
     fn went_down(self, ctx: &egui::Context, repeats: bool) -> bool {
         ctx.input(|input| {
-            input.events.iter().any(|event| {
-                matches!(event, Event::Key { key, physical_key, pressed: true, repeat, modifiers }
-                    if *key == self.key
-                        && (repeats || !*repeat)
-                        && self.held_with(*modifiers, *physical_key))
-            })
+            input
+                .events
+                .iter()
+                .any(|event| self.goes_down_in(event, repeats))
         })
+    }
+
+    /// Whether `event` is the chord's key going down with its modifiers
+    /// held, or, when `repeats`, repeating.
+    fn goes_down_in(self, event: &Event, repeats: bool) -> bool {
+        matches!(event, Event::Key { key, physical_key, pressed: true, repeat, modifiers }
+            if *key == self.key
+                && (repeats || !*repeat)
+                && self.held_with(*modifiers, *physical_key))
     }
 
     /// Whether `held` are the chord's modifiers, for its key typed on the
@@ -399,6 +425,93 @@ mod tests {
             [false, false, false]
         );
         assert_eq!(held(Key::ArrowLeft, Modifiers::NONE), [false, false, false]);
+    }
+
+    /// `key` typed on the keyboard's key `physical` with `modifiers`
+    /// held, going down when `pressed`, else coming back up.
+    fn key_event(key: Key, physical: Option<Key>, pressed: bool, modifiers: Modifiers) -> Event {
+        Event::Key {
+            key,
+            physical_key: physical,
+            pressed,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    /// What is left of a frame's input of `events` once `chord` is taken
+    /// out of it, each key event as its key, the keyboard's key, whether
+    /// it went down, and the modifiers held. egui counts a key that goes
+    /// down again while it is down as repeating.
+    fn left_by_taking(
+        chord: Chord,
+        events: Vec<Event>,
+    ) -> Vec<(Key, Option<Key>, bool, Modifiers)> {
+        let ctx = egui::Context::default();
+        let input = RawInput {
+            events,
+            ..RawInput::default()
+        };
+        let mut left = Vec::new();
+        let mut output = ctx.run_ui(input, |ui| {
+            chord.take(ui.ctx());
+            left = ui.input(|input| input.events.clone());
+        });
+        output.textures_delta.clear();
+        left.into_iter()
+            .filter_map(|event| match event {
+                Event::Key {
+                    key,
+                    physical_key,
+                    pressed,
+                    modifiers,
+                    ..
+                } => Some((key, physical_key, pressed, modifiers)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Taking a chord takes its key going down, and repeating, out of the
+    /// frame's input, and leaves every other key, the same key with other
+    /// modifiers held, and its key coming back up.
+    #[test]
+    fn taking_a_chord_takes_only_its_key_going_down() {
+        let enter = Chord::new(Modifiers::NONE, Key::Enter);
+        let event = |key, pressed, modifiers| key_event(key, None, pressed, modifiers);
+        let events = vec![
+            event(Key::Enter, true, Modifiers::NONE),
+            event(Key::Enter, true, Modifiers::NONE),
+            event(Key::Enter, true, Modifiers::SHIFT),
+            event(Key::Enter, true, Modifiers::COMMAND),
+            event(Key::Space, true, Modifiers::NONE),
+            event(Key::Enter, false, Modifiers::NONE),
+        ];
+        let left = [
+            (Key::Enter, None, true, Modifiers::SHIFT),
+            (Key::Enter, None, true, Modifiers::COMMAND),
+            (Key::Space, None, true, Modifiers::NONE),
+            (Key::Enter, None, false, Modifiers::NONE),
+        ];
+        assert_eq!(left_by_taking(enter, events), left);
+    }
+
+    /// Taking a chord takes a punctuation character typed with Shift on
+    /// another key, which presses the chord, as well as one typed on its
+    /// own key, and leaves one typed with modifiers that do not.
+    #[test]
+    fn taking_a_chord_takes_it_however_the_keyboard_types_it() {
+        let ctrl_slash = Chord::new(Modifiers::COMMAND, Key::Slash);
+        let slash = |physical, modifiers| key_event(Key::Slash, Some(physical), true, modifiers);
+        let ctrl_alt_shift = CTRL_ALT.plus(Modifiers::SHIFT);
+        let events = vec![
+            slash(Key::Slash, Modifiers::COMMAND),
+            // German: `/` is Shift+7.
+            slash(Key::Num7, Modifiers::COMMAND.plus(Modifiers::SHIFT)),
+            slash(Key::Num7, ctrl_alt_shift),
+        ];
+        let left = [(Key::Slash, Some(Key::Num7), true, ctrl_alt_shift)];
+        assert_eq!(left_by_taking(ctrl_slash, events), left);
     }
 
     #[test]

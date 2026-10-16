@@ -3,8 +3,10 @@
 //! The keyboard shortcuts: one table, [`BINDINGS`], of what each chord
 //! does, where it does it, and how the reference describes it. The
 //! handlers ask the table whether an action's chord was pressed
-//! ([`pressed`]), and the reference is built from it ([`sections`]), so
-//! neither can say something the table does not (ADR011).
+//! ([`take_pressed`]), and the reference is built from it ([`sections`]),
+//! so neither can say something the table does not (ADR011). Asking takes
+//! the chord's key out of the frame's input, so a key that does something
+//! here does nothing else too.
 //!
 //! The keys are the ones established photography tools use for the same
 //! thing, so a photographer's hands already know them, with Cmd for Ctrl
@@ -325,25 +327,38 @@ impl Binding {
 }
 
 /// Whether a chord that does `action` on `surface` was pressed in this
-/// frame.
-pub fn pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bool {
-    BINDINGS.iter().any(|binding| {
-        binding.action == action && binding.surfaces.contains(&surface) && binding.went_down(ctx)
-    })
+/// frame. The chords that do it there are taken out of the frame's input,
+/// pressed or held down, so no widget drawn after sees their keys too
+/// ([`Chord::take`]).
+pub fn take_pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bool {
+    let bindings = || {
+        BINDINGS
+            .iter()
+            .filter(|binding| binding.action == action && binding.surfaces.contains(&surface))
+    };
+    let pressed = bindings().any(|binding| binding.went_down(ctx));
+    bindings().for_each(|binding| binding.chord.take(ctx));
+    pressed
 }
 
 /// The actions whose chords were pressed in this frame on `surface`, in
 /// the table's order, each once, however many of its chords were pressed.
-pub fn pressed_actions(ctx: &egui::Context, surface: Surface) -> Vec<Action> {
+/// Every chord on `surface` is taken out of the frame's input, pressed or
+/// held down, so no widget drawn after sees its key too
+/// ([`Chord::take`]).
+pub fn take_pressed_actions(ctx: &egui::Context, surface: Surface) -> Vec<Action> {
+    let bindings = || {
+        BINDINGS
+            .iter()
+            .filter(|binding| binding.surfaces.contains(&surface))
+    };
     let mut actions = Vec::new();
-    for binding in BINDINGS {
-        if binding.surfaces.contains(&surface)
-            && !actions.contains(&binding.action)
-            && binding.went_down(ctx)
-        {
+    for binding in bindings() {
+        if !actions.contains(&binding.action) && binding.went_down(ctx) {
             actions.push(binding.action);
         }
     }
+    bindings().for_each(|binding| binding.chord.take(ctx));
     actions
 }
 
@@ -437,7 +452,7 @@ mod tests {
         let mut actions = Vec::new();
         let ctx = egui::Context::default();
         let mut output = ctx.run_ui(input, |ui| {
-            actions = pressed_actions(ui.ctx(), Surface::Viewer);
+            actions = take_pressed_actions(ui.ctx(), Surface::Viewer);
         });
         output.textures_delta.clear();
         assert_eq!(actions, [Action::View(View::Grid)]);
@@ -463,7 +478,7 @@ mod tests {
             };
             let mut actions = Vec::new();
             let mut output = ctx.run_ui(input, |ui| {
-                actions = pressed_actions(ui.ctx(), surface);
+                actions = take_pressed_actions(ui.ctx(), surface);
             });
             output.textures_delta.clear();
             actions
@@ -495,7 +510,7 @@ mod tests {
                 };
                 let mut actions = Vec::new();
                 let mut output = ctx.run_ui(input, |ui| {
-                    actions = pressed_actions(ui.ctx(), Surface::Grid);
+                    actions = take_pressed_actions(ui.ctx(), Surface::Grid);
                 });
                 output.textures_delta.clear();
                 actions
@@ -506,6 +521,83 @@ mod tests {
             frames,
             [vec![next, Action::SideDocks], vec![next], vec![next]]
         );
+    }
+
+    /// The keys still in the frame's input, in their order.
+    fn keys_left(ctx: &egui::Context) -> Vec<Key> {
+        ctx.input(|input| {
+            let keys = input.events.iter().filter_map(|event| match event {
+                egui::Event::Key { key, .. } => Some(*key),
+                _ => None,
+            });
+            keys.collect()
+        })
+    }
+
+    /// The keys of every shortcut on a surface are taken out of the
+    /// frame's input, pressed or held down, even where a held key does
+    /// nothing, as a toggle's does not; a key with no shortcut there is
+    /// left, as Enter is in the viewer.
+    #[test]
+    fn the_keys_of_the_shortcuts_here_are_taken_and_no_others() {
+        let press = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: NONE,
+        };
+        let ctx = egui::Context::default();
+        let frames: Vec<(Vec<Action>, Vec<Key>)> = (0..2)
+            .map(|_| {
+                // egui counts a key that goes down again while it is
+                // down as repeating.
+                let input = egui::RawInput {
+                    events: vec![press(Key::Tab), press(Key::Enter)],
+                    ..egui::RawInput::default()
+                };
+                let mut frame = Default::default();
+                let mut output = ctx.run_ui(input, |ui| {
+                    let actions = take_pressed_actions(ui.ctx(), Surface::Viewer);
+                    frame = (actions, keys_left(ui.ctx()));
+                });
+                output.textures_delta.clear();
+                frame
+            })
+            .collect();
+        assert_eq!(
+            frames,
+            [
+                (vec![Action::SideDocks], vec![Key::Enter]),
+                (vec![], vec![Key::Enter])
+            ]
+        );
+    }
+
+    /// Asking whether one action's chord was pressed takes that chord
+    /// alone out of the frame's input.
+    #[test]
+    fn asking_for_one_action_takes_its_chord_alone() {
+        let press = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let input = egui::RawInput {
+            events: vec![press(Key::Slash, CTRL), press(Key::Tab, NONE)],
+            ..egui::RawInput::default()
+        };
+        let ctx = egui::Context::default();
+        let (mut pressed, mut left) = (false, Vec::new());
+        let mut output = ctx.run_ui(input, |ui| {
+            pressed = take_pressed(ui.ctx(), Surface::Grid, Action::Shortcuts);
+            left = keys_left(ui.ctx());
+        });
+        output.textures_delta.clear();
+        assert!(pressed);
+        assert_eq!(left, [Key::Tab]);
     }
 
     /// Only the keys that move between photos repeat.
