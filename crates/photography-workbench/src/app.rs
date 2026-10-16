@@ -15,7 +15,7 @@ use crate::dialogs;
 use crate::filmstrip;
 use crate::folder_tree;
 use crate::grid;
-use crate::keymap::{self, Action, Surface};
+use crate::keymap::{self, Action, Step, Surface};
 use crate::layout::{self, Docks};
 use crate::menu::{self, MacMenu};
 use crate::mode::{Layout, Mode};
@@ -57,6 +57,11 @@ pub struct PhotographyWorkbenchApp {
     /// selected folder's photos; what is expanded and selected in the
     /// tree is saved between runs.
     browser: Browser,
+    /// How many tiles the grid laid out in a row the last time it was
+    /// drawn, which the keys that move a row up or down go by. `None`
+    /// until it is drawn, and from a change of mode, view or docks shown
+    /// until it is drawn again.
+    grid_columns: Option<usize>,
     /// Whether the Settings dialog is open.
     show_settings: bool,
     /// Whether the About dialog is open.
@@ -263,13 +268,24 @@ impl PhotographyWorkbenchApp {
         if ctx.memory(|m| m.top_modal_layer().is_some()) || ctx.text_edit_focused() {
             return;
         }
-        // egui moves the keyboard focus to the next widget on Tab, and to
-        // the one before on Shift+Tab; here those keys show and hide the
-        // docks instead.
-        if pressed(Action::SideDocks) || pressed(Action::AllDocks) {
+        // egui moves the keyboard focus to the next widget on Tab, to the
+        // one before on Shift+Tab, and, while a widget has it, to the one
+        // beside it on an arrow key, each time the key goes down or the
+        // system repeats it. Here those keys show and hide the docks and
+        // move between photos instead, and none of them moves the focus,
+        // even where it does nothing else, or held, as the docks' keys
+        // ignore the repeats.
+        if ctx.input(|i| i.events.iter().any(moves_focus)) {
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
-        for action in keymap::pressed_actions(ctx, surface) {
+        let actions = keymap::pressed_actions(ctx, surface);
+        // A row key pressed in the same frame as a key that changes the
+        // grid's rows does nothing too, whichever of them the table puts
+        // first.
+        if actions.iter().copied().any(changes_rows) {
+            self.grid_columns = None;
+        }
+        for action in actions {
             self.perform(ctx, action);
         }
     }
@@ -316,6 +332,7 @@ impl PhotographyWorkbenchApp {
                 }
             }
             Action::View(view) => self.view = view,
+            Action::Photo(step) => self.step_photo(step),
             Action::SideDocks => self.docks.toggle(parts, &[Side::Left, Side::Right]),
             Action::AllDocks => {
                 self.docks
@@ -326,6 +343,38 @@ impl PhotographyWorkbenchApp {
             Action::Shortcuts => self.show_shortcuts = !self.show_shortcuts,
             Action::About => self.show_about = true,
             Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+        }
+        // The grid is not laid out again until it is drawn, after the
+        // keys: until then the keys that move a row do nothing, rather
+        // than move by a row of the old length.
+        if changes_rows(action) {
+            self.grid_columns = None;
+        }
+    }
+
+    /// Make the photo `step` asks for the current one, stopping at the
+    /// folder's first and last photos. The photos above and below are
+    /// the grid's as it was last laid out, and there are none before it
+    /// is. Nothing while there are no photos.
+    fn step_photo(&mut self, step: Step) {
+        match step {
+            Step::Previous => self.browser.step_photo(-1),
+            Step::Next => self.browser.step_photo(1),
+            Step::First => self.browser.first_photo(),
+            Step::Last => self.browser.last_photo(),
+            Step::Above | Step::Below => {
+                let Photos::Read(list) = self.browser.photos() else {
+                    return;
+                };
+                let (Some(current), Some(columns)) = (list.current(), self.grid_columns) else {
+                    return;
+                };
+                let index = match step {
+                    Step::Above => grid::above(current, columns),
+                    _ => grid::below(current, list.len(), columns),
+                };
+                self.browser.select_photo(index);
+            }
         }
     }
 
@@ -372,8 +421,9 @@ impl PhotographyWorkbenchApp {
         };
         match self.view {
             View::Grid => {
-                let click = grid::show(ui, palette, list.photos(), list.current());
-                if let Some(click) = click {
+                let shown = grid::show(ui, palette, list.photos(), list.current(), list.folder());
+                self.grid_columns = Some(shown.columns);
+                if let Some(click) = shown.click {
                     self.browser.select_photo(click.index);
                     if click.open {
                         self.perform(ui.ctx(), Action::View(View::Viewer));
@@ -468,6 +518,36 @@ fn position(photos: &Photos) -> Option<String> {
     };
     let current = list.current()?;
     Some(format!("{} of {}", current + 1, list.len()))
+}
+
+/// Whether egui would move the keyboard focus on `event`: Tab, alone or
+/// with Shift, or an arrow key, going down or repeated by the system.
+fn moves_focus(event: &egui::Event) -> bool {
+    match event {
+        egui::Event::Key {
+            key: egui::Key::Tab,
+            pressed: true,
+            modifiers,
+            ..
+        } => !modifiers.any() || modifiers.shift_only(),
+        egui::Event::Key {
+            key:
+                egui::Key::ArrowUp | egui::Key::ArrowDown | egui::Key::ArrowLeft | egui::Key::ArrowRight,
+            pressed: true,
+            ..
+        } => true,
+        _ => false,
+    }
+}
+
+/// Whether `action` can change the length of the grid's rows, which are
+/// as long as fits between the parts of the window around the grid: a
+/// change of mode, view or docks shown can change those parts.
+fn changes_rows(action: Action) -> bool {
+    matches!(
+        action,
+        Action::Mode(_) | Action::View(_) | Action::SideDocks | Action::AllDocks | Action::Dock(_)
+    )
 }
 
 /// The width of macOS's window buttons with their margins, as the system
@@ -1966,14 +2046,21 @@ mod tests {
     /// `DSC_0001.NEF` to `DSC_0030.NEF`, all empty, more than the
     /// filmstrip shows at once.
     fn folder_of_30_photos() -> tempfile::TempDir {
+        folder_of_numbered_photos(30)
+    }
+
+    /// [`photos_folder`], holding beside its folders the photos
+    /// `DSC_0001.NEF` to the one numbered `count`, all empty.
+    fn folder_of_numbered_photos(count: usize) -> tempfile::TempDir {
         let dir = photos_folder();
-        for n in 1..=30 {
+        for n in 1..=count {
             std::fs::write(dir.path().join(photo(n)), b"").unwrap();
         }
         dir
     }
 
-    /// The name of the photo numbered `n` in [`folder_of_30_photos`].
+    /// The name of the photo numbered `n` in [`folder_of_30_photos`] and
+    /// [`folder_of_numbered_photos`].
     fn photo(n: usize) -> String {
         format!("DSC_{n:04}.NEF")
     }
@@ -2262,6 +2349,412 @@ mod tests {
         let (after, _) = film_cell(&harness, &photo(1)).unwrap();
         assert_eq!(after.top(), before.top(), "{before:?} {after:?}");
         assert!(after.left() < before.left() - 120.0, "{before:?} {after:?}");
+    }
+
+    /// Library's grid on the photos of `dir`, the home folder, selected,
+    /// the first photo current.
+    fn grid_harness(dir: &Path) -> Harness<'static, PhotographyWorkbenchApp> {
+        let (mut harness, _) = harness_on(None, vec![home(dir)]);
+        click(&mut harness, "Home");
+        harness
+    }
+
+    /// Where the grid's tile for the photo named `label` was laid out in
+    /// the last frame; `None` when it was not laid out.
+    fn grid_tile(
+        harness: &Harness<'_, PhotographyWorkbenchApp>,
+        label: &str,
+    ) -> Option<egui::Rect> {
+        harness.query_by_label(label).map(|node| node.rect())
+    }
+
+    /// Whether the grid's tile for the photo named `label` was laid out
+    /// in the last frame and is wholly in view.
+    fn in_grid_view(harness: &Harness<'_, PhotographyWorkbenchApp>, label: &str) -> bool {
+        let centre = centre(harness);
+        grid_tile(harness, label).is_some_and(|tile| centre.contains_rect(tile))
+    }
+
+    /// How many tiles the grid lays out in a row, of the `count` photos
+    /// numbered from 1: those level with the first.
+    fn tiles_in_a_row(harness: &Harness<'_, PhotographyWorkbenchApp>, count: usize) -> usize {
+        let top = grid_tile(harness, &photo(1)).expect("no tile").top();
+        (1..=count)
+            .filter(|&n| grid_tile(harness, &photo(n)).is_some_and(|tile| tile.top() == top))
+            .count()
+    }
+
+    /// The toolbar's count, when the photo numbered `n` of `of` is the
+    /// current one.
+    fn nth(n: usize, of: usize) -> Option<String> {
+        Some(format!("{n} of {of}"))
+    }
+
+    /// Make the photo numbered `n` the current one, from outside the
+    /// views, and let the app settle.
+    fn make_current(harness: &mut Harness<'_, PhotographyWorkbenchApp>, n: usize) {
+        harness.state_mut().browser.select_photo(n - 1);
+        harness.run();
+    }
+
+    /// Click at `pos`, and let the app settle.
+    fn click_at(harness: &mut Harness<'_, PhotographyWorkbenchApp>, pos: egui::Pos2) {
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            events.push(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+        }
+        harness.run();
+    }
+
+    /// In the grid, Right and Left make the next and the previous photo
+    /// the current one, which the grid outlines and the toolbar counts,
+    /// stopping at the first and the last photo.
+    #[test]
+    fn right_and_left_move_between_the_photos_in_the_grid() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+        assert_eq!(count(&harness), nth(2, 30));
+        assert!(is_selected(&harness, &photo(2)));
+        assert!(!is_selected(&harness, &photo(1)));
+        press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+        assert_eq!(count(&harness), nth(1, 30));
+        assert!(is_selected(&harness, &photo(1)));
+        press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+        assert_eq!(count(&harness), nth(1, 30), "past the first");
+
+        make_current(&mut harness, 30);
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+        assert_eq!(count(&harness), nth(30, 30), "past the last");
+        press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+        assert_eq!(count(&harness), nth(29, 30));
+    }
+
+    /// In the grid, Down and Up move a row, in the same column. Up stays
+    /// put in the first row and Down in the last, and Down into a last
+    /// row too short to reach the column goes to the last photo.
+    #[test]
+    fn down_and_up_move_a_row_in_the_grid() {
+        // 31 photos, a prime number of them, never fill the last row of
+        // a grid of 2 or more to a row.
+        let dir = folder_of_numbered_photos(31);
+        let mut harness = grid_harness(dir.path());
+        let columns = tiles_in_a_row(&harness, 31);
+        assert!((2..31).contains(&columns), "{columns}");
+        // The number of the last row's first photo.
+        let last_row = 30 / columns * columns + 1;
+        assert!(last_row + columns > 32, "{last_row}");
+
+        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+        assert_eq!(count(&harness), nth(1 + columns, 31));
+        assert!(is_selected(&harness, &photo(1 + columns)));
+        press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+        assert_eq!(count(&harness), nth(1, 31));
+        press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+        assert_eq!(count(&harness), nth(1, 31), "above the first row");
+
+        // The last of the row before the last, with no photo below it.
+        make_current(&mut harness, last_row - 1);
+        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+        assert_eq!(count(&harness), nth(31, 31), "into the short last row");
+        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+        assert_eq!(count(&harness), nth(31, 31), "below the last row");
+        press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+        assert_eq!(count(&harness), nth(31 - columns, 31));
+
+        // The first of the row before the last, with a photo below it.
+        make_current(&mut harness, last_row - columns);
+        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+        assert_eq!(count(&harness), nth(last_row, 31));
+        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+        assert_eq!(count(&harness), nth(last_row, 31), "below the last row");
+    }
+
+    /// In the grid, End makes the last photo the current one and Home the
+    /// first, and the grid scrolls just far enough to show its tile
+    /// whole: the last row 4 points above the grid's bottom, the first
+    /// 4 points below its top, as when the grid is scrolled to its ends.
+    /// A photo made current that is in view already, as the one above
+    /// the last is, leaves the grid where it is.
+    #[test]
+    fn home_and_end_go_to_the_first_and_the_last_photo() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        let columns = tiles_in_a_row(&harness, 30);
+        assert!(!in_grid_view(&harness, &photo(30)));
+        press(&mut harness, Modifiers::NONE, Key::End);
+        assert_eq!(count(&harness), nth(30, 30));
+        assert!(in_grid_view(&harness, &photo(30)));
+        assert!(!in_grid_view(&harness, &photo(1)));
+        let centre = centre(&harness);
+        let last = grid_tile(&harness, &photo(30)).unwrap();
+        let gap = centre.bottom() - last.bottom();
+        assert!((gap - 4.0).abs() <= 0.5, "{last:?} in {centre:?}");
+
+        let above = 30 - columns;
+        assert!(in_grid_view(&harness, &photo(above)));
+        press(&mut harness, Modifiers::NONE, Key::ArrowUp);
+        assert_eq!(count(&harness), nth(above, 30));
+        assert_eq!(grid_tile(&harness, &photo(30)), Some(last), "scrolled");
+
+        press(&mut harness, Modifiers::NONE, Key::Home);
+        assert_eq!(count(&harness), nth(1, 30));
+        assert!(in_grid_view(&harness, &photo(1)));
+        let first = grid_tile(&harness, &photo(1)).unwrap();
+        let gap = first.top() - centre.top();
+        assert!((gap - 4.0).abs() <= 0.5, "{first:?} in {centre:?}");
+    }
+
+    /// Turn the mouse wheel by `delta` points with the pointer over the
+    /// grid, then let the app settle.
+    fn wheel_over_grid(harness: &mut Harness<'_, PhotographyWorkbenchApp>, delta: egui::Vec2) {
+        let pos = centre(harness).center();
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(pos));
+        events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        wait(harness, 1.0);
+    }
+
+    /// Scrolled away from the current photo, the grid stays where it was
+    /// scrolled, as the current photo has not changed since; but it shows
+    /// the current photo when it comes back on screen from the viewer,
+    /// and when another photo is made current there.
+    #[test]
+    fn the_grid_follows_the_current_photo_but_not_its_own_scrolling() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        wheel_over_grid(&mut harness, egui::vec2(0.0, -10_000.0));
+        assert!(!in_grid_view(&harness, &photo(1)));
+        wait(&mut harness, 3.0);
+        assert!(!in_grid_view(&harness, &photo(1)));
+
+        click(&mut harness, "Image viewer");
+        click(&mut harness, "Thumbnail grid");
+        assert!(in_grid_view(&harness, &photo(1)));
+
+        click(&mut harness, "Image viewer");
+        make_current(&mut harness, 30);
+        click(&mut harness, "Thumbnail grid");
+        assert!(in_grid_view(&harness, &photo(30)));
+    }
+
+    /// A click on a tile the grid's edge cuts makes its photo the current
+    /// one and leaves the grid where it is, so the second click of a
+    /// double-click lands on the same photo.
+    #[test]
+    fn a_click_on_a_tile_does_not_scroll_the_grid() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        let centre = centre(&harness);
+        let cut = (1..=30)
+            .find(|&n| {
+                grid_tile(&harness, &photo(n))
+                    .is_some_and(|tile| tile.intersects(centre) && !centre.contains_rect(tile))
+            })
+            .expect("no tile cut by the grid's edge");
+        let tile = grid_tile(&harness, &photo(cut)).unwrap();
+        let first = grid_tile(&harness, &photo(1)).unwrap();
+        click_at(&mut harness, tile.intersect(centre).center());
+        assert_eq!(count(&harness), nth(cut, 30));
+        assert_eq!(grid_tile(&harness, &photo(1)), Some(first), "scrolled");
+    }
+
+    /// In the viewer, Right and Left make the next and the previous photo
+    /// the current one, which the viewer shows and the filmstrip brings
+    /// into view. Up, Down, Home and End are the grid's, and do nothing
+    /// there.
+    #[test]
+    fn right_and_left_move_between_the_photos_in_the_viewer() {
+        let dir = folder_of_30_photos();
+        let mut harness = filmstrip_harness(dir.path());
+        wheel_over_filmstrip(&mut harness, egui::vec2(-10_000.0, 0.0));
+        assert!(!in_filmstrip_view(&harness, &photo(2)));
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+        assert_eq!(count(&harness), nth(2, 30));
+        assert!(viewer_shows(&harness, &photo(2)));
+        assert!(in_filmstrip_view(&harness, &photo(2)));
+        press(&mut harness, Modifiers::NONE, Key::ArrowLeft);
+        assert_eq!(count(&harness), nth(1, 30));
+        assert!(viewer_shows(&harness, &photo(1)));
+
+        make_current(&mut harness, 16);
+        for key in [Key::ArrowUp, Key::ArrowDown, Key::Home, Key::End] {
+            press(&mut harness, Modifiers::NONE, key);
+            assert_eq!(count(&harness), nth(16, 30), "{key:?}");
+        }
+        assert_eq!(harness.state().view, View::Viewer);
+    }
+
+    /// The reference lists the keys that move between photos, under
+    /// Photos.
+    #[test]
+    fn the_reference_lists_the_keys_that_move_between_photos() {
+        let mut harness = harness();
+        press(&mut harness, Modifiers::COMMAND, Key::Slash);
+        harness.get_by_label("Photos");
+        let rows = [
+            "Previous photo",
+            "Next photo",
+            "Photo above",
+            "Photo below",
+            "First photo",
+            "Last photo",
+        ];
+        for row in rows {
+            harness.get_by_label(row);
+        }
+    }
+
+    /// While a dialog is open, the keys that move between photos are the
+    /// dialog's, and move none behind it.
+    #[test]
+    fn the_photo_keys_stand_down_while_a_dialog_is_open() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        make_current(&mut harness, 16);
+        press(&mut harness, Modifiers::COMMAND, Key::Comma);
+        assert!(harness.state().show_settings);
+        let keys = [
+            Key::ArrowRight,
+            Key::ArrowLeft,
+            Key::ArrowDown,
+            Key::ArrowUp,
+            Key::End,
+            Key::Home,
+        ];
+        for key in keys {
+            press(&mut harness, Modifiers::NONE, key);
+            assert_eq!(count(&harness), nth(16, 30), "{key:?}");
+        }
+        press(&mut harness, Modifiers::NONE, Key::Escape);
+        assert!(!harness.state().show_settings);
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+        assert_eq!(count(&harness), nth(17, 30));
+    }
+
+    /// Down pressed with Tab, which hides the side docks and so widens
+    /// the grid's rows, moves nothing, rather than by a row of the length
+    /// the grid had; Down pressed next moves by a row of the wider grid.
+    #[test]
+    fn down_with_the_docks_hidden_in_the_same_frame_moves_nothing() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        let before = tiles_in_a_row(&harness, 30);
+        let events = &mut harness.input_mut().events;
+        for pressed in [true, false] {
+            for key in [Key::Tab, Key::ArrowDown] {
+                events.push(egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                });
+            }
+        }
+        harness.run();
+        assert!(!harness.state().docks.left, "Tab not done");
+        assert_eq!(count(&harness), nth(1, 30));
+        let after = tiles_in_a_row(&harness, 30);
+        assert!(after > before, "{before} to {after} a row");
+        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+        assert_eq!(count(&harness), nth(1 + after, 30));
+    }
+
+    /// Down pressed in the frame after the menu bar hid the side docks,
+    /// before the grid was drawn again, moves nothing either.
+    #[test]
+    fn down_after_the_menu_bar_hid_the_docks_moves_nothing() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        let ctx = harness.ctx.clone();
+        let hide = vec![Action::SideDocks];
+        harness.state_mut().perform_from_menu(&ctx, hide);
+        // Into the next frame itself: a press from the harness comes a
+        // frame later, after one that draws the grid.
+        for pressed in [true, false] {
+            harness.input_mut().events.push(egui::Event::Key {
+                key: Key::ArrowDown,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            });
+        }
+        harness.run();
+        assert!(!harness.state().docks.left, "the menu item not done");
+        assert_eq!(count(&harness), nth(1, 30));
+        let columns = tiles_in_a_row(&harness, 30);
+        press(&mut harness, Modifiers::NONE, Key::ArrowDown);
+        assert_eq!(count(&harness), nth(1 + columns, 30));
+    }
+
+    /// Tab or Shift+Tab held down, the system repeating it, takes the
+    /// keyboard focus nowhere, and shows or hides its docks once.
+    #[test]
+    fn a_held_tab_takes_the_keyboard_focus_nowhere() {
+        for modifiers in [Modifiers::NONE, Modifiers::SHIFT] {
+            let mut harness = viewer_harness();
+            let docks = harness.state().docks;
+            for _ in 0..3 {
+                let events = &mut harness.input_mut().events;
+                events.push(egui::Event::ModifiersChanged(modifiers));
+                events.push(egui::Event::Key {
+                    key: Key::Tab,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                });
+                harness.step();
+                let focused = harness.ctx.memory(|m| m.focused());
+                assert_eq!(focused, None, "{modifiers:?}");
+            }
+            assert_eq!(harness.state().docks.left, !docks.left, "{modifiers:?}");
+        }
+    }
+
+    /// In the viewer, where Up and Down move to no photo, they leave the
+    /// keyboard focus on the control that has it too.
+    #[test]
+    fn up_and_down_leave_the_keyboard_focus_where_it_is_in_the_viewer() {
+        let mut harness = viewer_harness();
+        harness.get_by_label("Thumbnail grid").focus();
+        harness.run();
+        let focused = harness.ctx.memory(|m| m.focused());
+        assert!(focused.is_some(), "no control has the focus");
+        for key in [Key::ArrowUp, Key::ArrowDown] {
+            press(&mut harness, Modifiers::NONE, key);
+            assert_eq!(harness.ctx.memory(|m| m.focused()), focused, "{key:?}");
+        }
+    }
+
+    /// An arrow key moves between photos while a control has the keyboard
+    /// focus, and leaves the focus on that control, where egui's own
+    /// arrow keys would move it to the control beside it.
+    #[test]
+    fn an_arrow_key_leaves_the_keyboard_focus_where_it_is() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        harness.get_by_label("Thumbnail grid").focus();
+        harness.run();
+        let focused = harness.ctx.memory(|m| m.focused());
+        assert!(focused.is_some(), "no control has the focus");
+        assert!(harness.get_by_label("Thumbnail grid").is_focused());
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+        assert_eq!(count(&harness), nth(2, 30));
+        assert_eq!(harness.ctx.memory(|m| m.focused()), focused);
     }
 
     #[test]

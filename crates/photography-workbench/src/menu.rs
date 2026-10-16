@@ -324,6 +324,7 @@ impl MacMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keymap::Step;
 
     /// Library's grid, every dock shown, no dialog open.
     fn library() -> State {
@@ -345,6 +346,7 @@ mod tests {
         assert!(state.checked(Action::View(View::Grid)));
         assert!(!state.checked(Action::View(View::Viewer)));
         assert!(!state.checked(Action::Settings));
+        assert!(!state.checked(Action::Photo(Step::Next)));
     }
 
     /// A dock's item is checked while the dock is shown, and can be
@@ -381,6 +383,7 @@ mod tests {
             Action::Quit,
             Action::Mode(Mode::Library),
             Action::View(View::Viewer),
+            Action::Photo(Step::Next),
             Action::Dock(Side::Left),
         ];
         let settings = State {
@@ -412,6 +415,7 @@ mod tests {
         assert_eq!(spelled(Action::Mode(Mode::Organizer)), None, "not built");
         assert_eq!(spelled(Action::View(View::Grid)), None, "G");
         assert_eq!(spelled(Action::Dock(Side::Left)), None, "F7");
+        assert_eq!(spelled(Action::Photo(Step::Next)), None, "Right");
         assert_eq!(spelled(Action::About), None, "no chord");
     }
 
