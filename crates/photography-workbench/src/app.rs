@@ -63,9 +63,11 @@ pub struct PhotographyWorkbenchApp {
     /// viewer draw, and the viewer's pictures, decoded off the window's
     /// thread.
     textures: Textures,
-    /// How long the viewer has waited for its picture, for it to say when
-    /// the picture takes a while. Not saved.
-    viewer: viewer::Waiting,
+    /// What the viewer keeps between frames: how large it shows the photo
+    /// and which part of it, kept from one photo to the next, and how long
+    /// it has waited for its picture, for it to say when the picture takes
+    /// a while. Not saved.
+    viewer: viewer::State,
     /// How many tiles the grid laid out in a row the last time it was
     /// drawn, which the keys that move a row up or down go by. `None`
     /// until it is drawn, and from a change of mode, view or docks shown
@@ -458,8 +460,8 @@ impl PhotographyWorkbenchApp {
             }
             View::Viewer => {
                 if let Some(current) = list.current() {
-                    let (textures, waiting) = (&mut self.textures, &mut self.viewer);
-                    viewer::show(ui, palette, textures, waiting, list.photos(), current);
+                    let (textures, state) = (&mut self.textures, &mut self.viewer);
+                    viewer::show(ui, palette, textures, state, list.photos(), current);
                 }
             }
         }
@@ -3490,6 +3492,454 @@ mod tests {
         let stand_in = harness.state().textures.texture(&photos[2], 256);
         assert_eq!(Some(texture_in(&harness, room).0), stand_in);
         assert!(!failure_icon_in(&harness, room, 48.0), "an icon");
+    }
+
+    /// The viewer on the photos of [`folder_of_jpegs`], JPEGs 2400 by 1600
+    /// pixels, on a screen of `pixels_per_point`, the first photo current
+    /// and its picture and its neighbour's decoded, and their paths.
+    fn zoom_harness(
+        pixels_per_point: f32,
+    ) -> (
+        Harness<'static, PhotographyWorkbenchApp>,
+        tempfile::TempDir,
+        [std::path::PathBuf; 3],
+    ) {
+        let (dir, photos) = folder_of_jpegs(2400, 1600);
+        let (mut harness, _) = harness_at(None, vec![home(dir.path())], pixels_per_point);
+        harness.state_mut().view = View::Viewer;
+        click(&mut harness, "Home");
+        (harness, dir, photos)
+    }
+
+    /// The one texture the viewer drew in the last frame, and where,
+    /// wherever the zoom put it: the one drawn showing only the room.
+    fn viewer_texture(
+        harness: &Harness<'_, PhotographyWorkbenchApp>,
+    ) -> (egui::TextureId, egui::Rect) {
+        let room = viewer_room(harness).expand(0.5);
+        let drawn: Vec<_> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect)
+                    if rect.fill_texture_id() != egui::TextureId::default()
+                        && room.contains_rect(clipped.clip_rect) =>
+                {
+                    Some((rect.fill_texture_id(), rect.rect))
+                }
+                _ => None,
+            })
+            .collect();
+        let [drawn] = drawn[..] else {
+            panic!("{} textures drawn in the viewer", drawn.len());
+        };
+        drawn
+    }
+
+    /// Whether `a` and `b` are the same within `by`.
+    fn near(a: egui::Vec2, b: egui::Vec2, by: f32) -> bool {
+        (a - b).length() <= by
+    }
+
+    /// The point of the photo drawn at `drawn` under `at`, in fractions of
+    /// its width and height.
+    fn under(drawn: egui::Rect, at: egui::Pos2) -> egui::Vec2 {
+        (at - drawn.min) / drawn.size()
+    }
+
+    /// The input of a click at `pos`, `clicks` times over, for one frame.
+    fn push_clicks(
+        harness: &mut Harness<'_, PhotographyWorkbenchApp>,
+        pos: egui::Pos2,
+        clicks: usize,
+    ) {
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(pos));
+        for _ in 0..clicks {
+            for pressed in [true, false] {
+                events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                });
+            }
+        }
+    }
+
+    /// Turn the wheel by `delta` in `unit`, with `modifiers` held and the
+    /// pointer at `pos`, then let the smoothing run out.
+    fn wheel_at(
+        harness: &mut Harness<'_, PhotographyWorkbenchApp>,
+        pos: egui::Pos2,
+        unit: egui::MouseWheelUnit,
+        delta: egui::Vec2,
+        modifiers: Modifiers,
+    ) {
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(pos));
+        events.push(egui::Event::MouseWheel {
+            unit,
+            delta,
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        });
+        wait(harness, 1.0);
+    }
+
+    /// Drag from `from` by `by`, in four moves of a frame each, and let
+    /// the app settle.
+    fn drag(harness: &mut Harness<'_, PhotographyWorkbenchApp>, from: egui::Pos2, by: egui::Vec2) {
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        };
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(from));
+        events.push(button(from, true));
+        harness.step();
+        for step in 1..=4 {
+            let pos = from + by * step as f32 / 4.0;
+            harness
+                .input_mut()
+                .events
+                .push(egui::Event::PointerMoved(pos));
+            harness.step();
+        }
+        harness.input_mut().events.push(button(from + by, false));
+        harness.run();
+    }
+
+    /// A click on the photo shows it at 100 %, each of its pixels on a
+    /// pixel of the screen, the point clicked at the room's middle and its
+    /// corner on a whole pixel, on a screen of one pixel a point and of
+    /// two; a click on it then fits it again, gliding there over the
+    /// time a click's move takes.
+    #[test]
+    fn a_click_shows_the_photo_at_100_percent_and_another_fits_it() {
+        for ppp in [1.0, 2.0] {
+            let (mut harness, _dir, _) = zoom_harness(ppp);
+            let room = viewer_room(&harness);
+            let (_, fitted) = viewer_texture(&harness);
+            assert_fitted(fitted, room, 1.5);
+            let at = room.center() + egui::vec2(40.0, 30.0);
+            let point = under(fitted, at);
+            click_at(&mut harness, at);
+            let (_, full) = viewer_texture(&harness);
+            let size = egui::vec2(2400.0, 1600.0) / ppp;
+            assert!(near(full.size(), size, 0.01), "{ppp}: {full:?}");
+            assert!(
+                near(under(full, room.center()), point, 1.0 / size.y),
+                "{ppp}: {full:?}"
+            );
+            let corner = full.min.to_vec2() * ppp;
+            assert_eq!(corner, corner.round(), "{ppp}: {full:?}");
+
+            let start = harness.ctx.input(|i| i.time) + 1.0;
+            push_clicks(&mut harness, room.center(), 1);
+            frame_at(&mut harness, start);
+            assert!(near(viewer_texture(&harness).1.size(), size, 0.01), "{ppp}");
+            frame_at(&mut harness, start + crate::zoom::GLIDE / 2.0);
+            let (_, half) = viewer_texture(&harness);
+            let between = (half.width() - (fitted.width() + size.x) / 2.0).abs() <= 1.0;
+            assert!(between, "{ppp}: {half:?}");
+            frame_at(&mut harness, start + crate::zoom::GLIDE);
+            assert_fitted(viewer_texture(&harness).1, room, 1.5);
+        }
+    }
+
+    /// A double-click on the photo zooms it once, whether its clicks come
+    /// in frames of their own or in one: in, and in again from fitted,
+    /// never in and straight back out.
+    #[test]
+    fn a_double_click_zooms_once() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let full = egui::vec2(2400.0, 1600.0);
+        let start = harness.ctx.input(|i| i.time) + 1.0;
+        push_clicks(&mut harness, room.center(), 1);
+        frame_at(&mut harness, start);
+        push_clicks(&mut harness, room.center(), 1);
+        frame_at(&mut harness, start + 0.1);
+        frame_at(&mut harness, start + 0.5);
+        assert!(near(viewer_texture(&harness).1.size(), full, 0.01));
+        push_clicks(&mut harness, room.center(), 2);
+        frame_at(&mut harness, start + 2.0);
+        frame_at(&mut harness, start + 2.5);
+        assert_fitted(viewer_texture(&harness).1, room, 1.5);
+    }
+
+    /// A drag moves a photo larger than the room with the pointer, never
+    /// so far that its edge comes inside the room's, and a fitted photo
+    /// not at all.
+    #[test]
+    fn a_drag_moves_a_zoomed_photo_within_its_bounds() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let (_, fitted) = viewer_texture(&harness);
+        drag(&mut harness, room.center(), egui::vec2(-100.0, -60.0));
+        assert_eq!(viewer_texture(&harness).1, fitted);
+
+        click_at(&mut harness, room.center());
+        let (_, before) = viewer_texture(&harness);
+        drag(&mut harness, room.center(), egui::vec2(-100.0, -60.0));
+        let (_, after) = viewer_texture(&harness);
+        let moved = after.min - before.min;
+        assert!(near(moved, egui::vec2(-100.0, -60.0), 1.0), "{moved:?}");
+        drag(&mut harness, room.center(), egui::vec2(5000.0, 5000.0));
+        let (_, far) = viewer_texture(&harness);
+        assert!(
+            near(far.min.to_vec2(), room.min.to_vec2(), 0.75),
+            "{far:?} in {room:?}"
+        );
+        assert!(far.contains_rect(room), "{far:?} in {room:?}");
+    }
+
+    /// A notch of the mouse wheel, three of them here, zooms the photo by
+    /// about 1.22 each about the pointer, the point of the photo under it
+    /// staying there, smoothed over a few frames rather than at once.
+    #[test]
+    fn the_mouse_wheel_zooms_about_the_pointer() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let (_, fitted) = viewer_texture(&harness);
+        let at = room.center() + egui::vec2(60.0, 40.0);
+        let point = under(fitted, at);
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(at));
+        events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 3.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        harness.step();
+        let factor = 0.6_f32.exp();
+        let (_, first) = viewer_texture(&harness);
+        assert!(
+            first.width() > fitted.width() && first.width() < fitted.width() * factor - 1.0,
+            "not smoothed: {first:?}"
+        );
+        wait(&mut harness, 1.0);
+        let (_, zoomed) = viewer_texture(&harness);
+        assert!(
+            near(zoomed.size(), fitted.size() * factor, 0.5),
+            "{zoomed:?}"
+        );
+        assert!(near(under(zoomed, at), point, 0.002), "{zoomed:?}");
+    }
+
+    /// The wheel with Ctrl or Cmd held zooms the photo as much as the
+    /// wheel alone, counted once, and so does a trackpad's pinch, by as
+    /// much as it says; neither touches egui's zoom of the whole window.
+    #[test]
+    fn ctrl_and_the_wheel_or_a_pinch_zoom_the_photo_once_and_not_the_window() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let (_, fitted) = viewer_texture(&harness);
+        let line = egui::MouseWheelUnit::Line;
+        wheel_at(
+            &mut harness,
+            room.center(),
+            line,
+            egui::vec2(0.0, 1.0),
+            Modifiers::COMMAND,
+        );
+        let (_, zoomed) = viewer_texture(&harness);
+        let factor = 0.2_f32.exp();
+        assert!(
+            near(zoomed.size(), fitted.size() * factor, 0.5),
+            "{zoomed:?}"
+        );
+        assert_eq!(harness.ctx.zoom_factor(), 1.0);
+
+        harness.input_mut().events.push(egui::Event::Zoom(1.5));
+        harness.run();
+        let (_, pinched) = viewer_texture(&harness);
+        assert!(
+            near(pinched.size(), zoomed.size() * 1.5, 0.5),
+            "{pinched:?}"
+        );
+        assert_eq!(harness.ctx.zoom_factor(), 1.0);
+    }
+
+    /// The wheel's events are read while the photo's 100 % is not known
+    /// yet, so the scrolling egui smooths over the frames after them is
+    /// taken for what it is once it is: a mouse's notches turned just
+    /// before then zoom the photo.
+    #[test]
+    fn the_wheel_is_read_before_the_photo_s_100_percent_is_known() {
+        let (dir, photos) = folder_of_jpegs(2400, 1600);
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        harness.state_mut().textures.stall(true);
+        click(&mut harness, "Home");
+        click(&mut harness, "Image viewer");
+        assert!(
+            viewer_photo(&harness, "DSC_0001.jpg").is_some(),
+            "no viewer"
+        );
+        let room = viewer_room(&harness);
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(room.center()));
+        events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Line,
+            delta: egui::vec2(0.0, 3.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        });
+        harness.step();
+        assert_eq!(harness.state().textures.largest(&photos[0]), None);
+        harness.state_mut().textures.stall(false);
+        wait(&mut harness, 1.0);
+        let (_, drawn) = viewer_texture(&harness);
+        let fitted = room.width().min(room.height() * 1.5);
+        assert!(
+            drawn.width() > fitted + 1.0,
+            "not zoomed: {drawn:?} in {room:?}"
+        );
+    }
+
+    /// A trackpad's two fingers, scrolling in points, move a zoomed photo
+    /// with them, and leave a fitted one where it is.
+    #[test]
+    fn a_trackpad_s_scrolling_moves_a_zoomed_photo_and_not_a_fitted_one() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let (_, fitted) = viewer_texture(&harness);
+        let point = egui::MouseWheelUnit::Point;
+        let delta = egui::vec2(-30.0, -20.0);
+        wheel_at(&mut harness, room.center(), point, delta, Modifiers::NONE);
+        assert_eq!(viewer_texture(&harness).1, fitted);
+
+        click_at(&mut harness, room.center());
+        let (_, before) = viewer_texture(&harness);
+        wheel_at(&mut harness, room.center(), point, delta, Modifiers::NONE);
+        let (_, after) = viewer_texture(&harness);
+        assert_eq!(after.size(), before.size());
+        let moved = after.min - before.min;
+        assert!(near(moved, delta, 1.0), "{moved:?}");
+    }
+
+    /// Zoomed past its picture, the photo is decoded at its largest, here
+    /// as long as the largest texture egui takes in the harness, 2048
+    /// pixels, and drawn from that; fitted again, it is drawn from its
+    /// picture.
+    #[test]
+    fn zoomed_past_its_picture_the_photo_is_drawn_at_its_largest() {
+        let (mut harness, _dir, photos) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let side = picture_side(&harness);
+        assert!(side < 2048, "{side}");
+        let picture = harness.state().textures.texture(&photos[0], side);
+        assert_eq!(Some(viewer_texture(&harness).0), picture);
+        assert_eq!(harness.state().textures.texture(&photos[0], 2048), None);
+        click_at(&mut harness, room.center());
+        let largest = harness.state().textures.texture(&photos[0], 2048);
+        assert!(largest.is_some(), "not decoded at its largest");
+        assert_eq!(Some(viewer_texture(&harness).0), largest);
+        assert_eq!(texture_size(&harness, largest.unwrap()), [2048, 1365]);
+        assert_eq!(harness.state().textures.texture(&photos[1], 2048), None);
+        click_at(&mut harness, room.center());
+        assert_eq!(Some(viewer_texture(&harness).0), picture);
+    }
+
+    /// While the photo at its largest is on its way, its picture stands
+    /// in, and half a second after it was first wanted, as the click's
+    /// move grew the photo past its picture, the viewer says it is
+    /// loading; once it comes, it is drawn, and the viewer says so no
+    /// longer.
+    #[test]
+    fn the_viewer_says_it_is_loading_while_the_largest_takes_a_while() {
+        let (mut harness, _dir, photos) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let picture = harness
+            .state()
+            .textures
+            .texture(&photos[0], picture_side(&harness));
+        harness.state_mut().textures.stall(true);
+        let start = harness.ctx.input(|i| i.time) + 1.0;
+        push_clicks(&mut harness, room.center(), 1);
+        frame_at(&mut harness, start);
+        // The click's move is over, and the largest wanted from then.
+        let wanted = start + crate::zoom::GLIDE;
+        frame_at(&mut harness, wanted);
+        frame_at(&mut harness, wanted + 0.375);
+        assert_eq!(Some(viewer_texture(&harness).0), picture);
+        assert!(!says_loading(&harness));
+        frame_at(&mut harness, wanted + 0.5);
+        assert!(says_loading(&harness));
+        harness.state_mut().textures.stall(false);
+        frame_at(&mut harness, wanted + 0.75);
+        frame_at(&mut harness, wanted + 1.0);
+        assert!(!says_loading(&harness));
+        let largest = harness.state().textures.texture(&photos[0], 2048);
+        assert!(largest.is_some(), "not decoded at its largest");
+        assert_eq!(Some(viewer_texture(&harness).0), largest);
+    }
+
+    /// Zoomed, the photo at its largest stays drawn when the photos are
+    /// read again, as the window comes back to the front, while it and the
+    /// picture are decoded again, rather than the picture standing in.
+    #[test]
+    fn the_largest_stays_drawn_while_the_photos_are_read_again() {
+        let (mut harness, _dir, photos) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        click_at(&mut harness, room.center());
+        let largest = harness.state().textures.texture(&photos[0], 2048);
+        assert!(largest.is_some(), "not decoded at its largest");
+        harness.state_mut().textures.stall(true);
+        leave_and_come_back(&mut harness);
+        assert_eq!(Some(viewer_texture(&harness).0), largest);
+    }
+
+    /// When the photo cannot be decoded at its largest, its picture stays
+    /// shown, zoomed, and the viewer says nothing of loading.
+    #[test]
+    fn a_largest_that_cannot_be_decoded_leaves_the_picture_shown() {
+        let (mut harness, _dir, photos) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        let picture = harness
+            .state()
+            .textures
+            .texture(&photos[0], picture_side(&harness));
+        let ctx = harness.ctx.clone();
+        let damaged = previews::Failure::Damaged;
+        harness
+            .state_mut()
+            .textures
+            .fail(&ctx, &photos[0], 2048, damaged);
+        let start = harness.ctx.input(|i| i.time) + 1.0;
+        push_clicks(&mut harness, room.center(), 1);
+        for later in [0.0, 0.5, 2.0] {
+            frame_at(&mut harness, start + later);
+            assert!(!says_loading(&harness), "{later}");
+        }
+        let (texture, drawn) = viewer_texture(&harness);
+        assert_eq!(Some(texture), picture);
+        assert!(
+            near(drawn.size(), egui::vec2(2400.0, 1600.0), 0.01),
+            "{drawn:?}"
+        );
+        assert_eq!(repaint_delay(&harness), std::time::Duration::MAX);
+    }
+
+    /// Right keeps the zoom and the pan on the next photo, which is drawn
+    /// at 100 % where the one before was, and at its largest.
+    #[test]
+    fn right_keeps_the_zoom_on_the_next_photo() {
+        let (mut harness, _dir, photos) = zoom_harness(1.0);
+        let room = viewer_room(&harness);
+        click_at(&mut harness, room.center() + egui::vec2(-80.0, 50.0));
+        let (_, before) = viewer_texture(&harness);
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+        assert!(viewer_shows(&harness, "DSC_0002.jpg"));
+        let (texture, after) = viewer_texture(&harness);
+        assert_eq!(after, before);
+        let largest = harness.state().textures.texture(&photos[1], 2048);
+        assert_eq!(Some(texture), largest);
     }
 
     /// The reference lists the keys that move between photos, under

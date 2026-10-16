@@ -53,6 +53,14 @@ Nothing has been released yet.
   are read again when the window comes back to the front, so photos
   copied in meanwhile show, photos changed meanwhile show as they are
   now, and the current photo stays the current one.
+- In Library's viewer, a click on the photo switches between fitted
+  and 100 %, where each pixel of the photo's largest image is a pixel
+  of the screen, the point clicked brought to the middle. The mouse
+  wheel, with or without Ctrl (Cmd on macOS), or a trackpad's pinch,
+  zooms about the pointer, from fitted up to 800 %, and a drag, or a
+  trackpad's two fingers, moves a photo zoomed larger than the viewer.
+  The zoom stays as it is from one photo to the next, and a photo
+  zoomed past the screen's size is shown sharp from its largest image.
 - In Library, with the viewer, the filmstrip under it shows the
   folder's photos in a row, each with its name and its format (NEF, ARW
   or JPEG) above its thumbnail, the current one outlined; a long name

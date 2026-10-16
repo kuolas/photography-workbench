@@ -1,12 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The viewer in Library's centre: the current photo alone, as large as
-//! the centre allows, sharp at the screen's resolution.
+//! the centre allows or zoomed, sharp at the screen's resolution.
 //!
 //! The photo is fitted in the centre less a margin on every side
 //! ([`MARGIN`]), its aspect kept, in the middle, and enlarged when it is
 //! smaller than that room, so it always reaches two of the room's sides.
 //! It sits straight on the viewer's backdrop with nothing behind it.
+//!
+//! The pointer zooms it ([`crate::zoom`]) once a decode of the photo has
+//! told the size of its largest image, which 100 % shows; until then the
+//! photo stays fitted. A click on the photo shows it at 100 %, the point
+//! clicked at the room's middle, and a click on it zoomed larger than the
+//! room, or at 100 % or past it, fits it again, the photo gliding from one
+//! to the other; a double-click is one click ([`counts`]). The mouse
+//! wheel, the wheel with Ctrl or Cmd held, and a trackpad's pinch zoom it
+//! about the pointer, from the fit up to 800 %, as egui smooths them
+//! ([`wheel`]), the wheel's events being read in every frame the viewer
+//! is drawn, its photo's 100 % known or not, so what egui smooths of them
+//! in the frames after is taken for what it is; a drag, and a trackpad's
+//! two fingers, move a photo larger than the room. Only the room shows
+//! the photo, so its margin stays clear however it is zoomed. The zoom
+//! and the pan are kept from one photo to the next, and bounded for each,
+//! and the pointer shows what a click or a drag on the photo does
+//! ([`cursor`]).
 //!
 //! What is drawn is the photo's picture ([`crate::textures`]): the photo
 //! decoded at the long side of that room in the screen's pixels, rounded
@@ -23,31 +40,44 @@
 //! of the one before are wanted too, at the same size and below everything
 //! on screen, so stepping to either shows it sharp at once; not before, so
 //! they never hold up the current one, and a damaged current photo does
-//! not keep them from being made ready ([`want_order`]).
+//! not keep them from being made ready ([`want_order`]). Once the picture
+//! is held, or known not to decode, and the photo is drawn longer than it,
+//! in the screen's pixels, and its largest image is longer still, the
+//! photo is wanted at its largest too, right after the picture: that image
+//! whole, no longer than the largest texture the card takes
+//! ([`largest_side`]). Only the current photo is; the picture stands in
+//! for it meanwhile, and when it cannot be decoded.
 //!
-//! When the picture has taken half a second ([`LOADING_AFTER`]) since the
-//! photo or the size wanted last changed, "Loading…" shows in the margin
-//! under the photo until it comes; not when it cannot be decoded and
-//! something else of the photo is shown, nor while the photo is shown as
-//! one that cannot be shown. A photo that cannot be shown at all shows an
-//! icon in the middle, and why in its tooltip, once its thumbnails and its
-//! picture at some size are known not to decode, while a size wanted that
-//! is not tried yet is still decoded; nothing is drawn until some texture
-//! of the photo is decoded or that is known.
+//! When the sharpest texture wanted, the picture or the photo at its
+//! largest, has taken half a second ([`LOADING_AFTER`]) since the photo
+//! or the size wanted last changed, "Loading…" shows in the margin under
+//! the photo until it comes; not when it cannot be decoded and something
+//! else of the photo is shown, nor while the photo is shown as one that
+//! cannot be shown. A photo that cannot be shown at all shows an icon in
+//! the middle, and why in its tooltip, once its thumbnails and its picture
+//! at some size are known not to decode, while a size wanted that is not
+//! tried yet is still decoded; nothing is drawn until some texture of the
+//! photo is decoded or that is known.
 //!
 //! The viewer draws the photos it is handed, whatever they were read
 //! from, and the textures the app holds, and names the photo to screen
-//! readers by its file name. What it keeps between frames is how long it
-//! has waited ([`Waiting`]), which the app holds for it.
+//! readers by its file name. What it keeps between frames is its
+//! [`State`], which the app holds for it: the zoom and the pan, the glide
+//! a click began, what the wheel last was, and how long it has waited.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use catalog::photos::Photo;
 use desktop_ui::theme::Palette;
-use egui::{Margin, Rect, Sense, WidgetInfo, WidgetType};
+use egui::{
+    Color32, CursorIcon, Event, InputOptions, InputState, Margin, Modifiers, MouseWheelUnit,
+    PointerButton, Rect, Sense, Vec2, WidgetInfo, WidgetType, epaint::RectShape, pos2, vec2,
+};
+use previews::Size;
 
 use crate::textures::{self, CURRENT, CURRENT_PICTURE, NEIGHBOURS, Textures, Thumbnail};
+use crate::zoom::{self, Framing, Stage};
 
 /// The room kept between the centre's edges and the photo, on every
 /// side, so the photo stands clear of the parts of the window around it.
@@ -68,21 +98,128 @@ const LOADING_AFTER: f64 = 0.5;
 /// What the viewer says while its picture takes a while.
 const LOADING: &str = "Loading…";
 
-/// How long the viewer has wanted the picture it shows, kept by the app
-/// from one frame to the next and never saved.
+/// The natural logarithm of the factor a notch of the mouse wheel zooms
+/// by: about 1.22, as much as egui zooms by a notch with Ctrl or Cmd held.
+const NOTCH_ZOOM: f32 = 0.2;
+
+/// What the viewer keeps from one frame to the next, held by the app and
+/// never saved.
 #[derive(Debug, Default)]
-pub struct Waiting {
+pub struct State {
+    /// How large the photo is shown, and which part of it: kept from one
+    /// photo to the next.
+    framing: Framing,
+    /// The move a click began, once begun, until another photo is shown.
+    glide: Option<Glide>,
+    /// What the wheel is, as its last event said, for what egui smooths of
+    /// it in the frames after.
+    wheel: Wheel,
+    /// egui's time of the last click that zoomed the photo, so the click
+    /// that makes it a double-click does not undo it.
+    clicked: Option<f64>,
+    /// How long the viewer has waited for the sharpest texture it wants.
+    waiting: Waiting,
+}
+
+impl State {
+    /// Where the photo on `stage` is drawn at egui's time `now`: gliding
+    /// to where its framing puts it while a click's move is under way, and
+    /// there, its corner on a whole pixel at 100 %, once it is not.
+    fn drawn(&self, stage: &Stage, now: f64) -> Rect {
+        let to = stage.place(self.framing);
+        match &self.glide {
+            Some(glide) if zoom::gliding(glide.since, now) => {
+                zoom::glided(glide.from, to, glide.since, now)
+            }
+            _ => stage.snapped(to),
+        }
+    }
+
+    /// Whether a click's move is under way at egui's time `now`.
+    fn gliding(&self, now: f64) -> bool {
+        self.glide
+            .as_ref()
+            .is_some_and(|glide| zoom::gliding(glide.since, now))
+    }
+}
+
+/// The move a click began, from where the photo was drawn then to where
+/// the click's framing puts it.
+#[derive(Debug)]
+struct Glide {
+    /// The file of the photo it moves: another photo shown ends it.
+    path: PathBuf,
+    /// Where the photo was drawn when it began.
+    from: Rect,
+    /// egui's time when it began, in seconds.
+    since: f64,
+}
+
+/// What the scrolling egui smooths over a few frames comes from, as the
+/// last event of the wheel or the trackpad said: egui tells the frame's
+/// scrolling in points, whatever it came from.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Wheel {
+    /// Something the viewer leaves alone, as the wheel with Shift or Alt
+    /// held, or nothing yet.
+    #[default]
+    Other,
+    /// A mouse wheel turned by notches, each `notch` points of scrolling,
+    /// which zooms.
+    Notched {
+        /// The points of scrolling egui counts a notch as.
+        notch: f32,
+    },
+    /// A trackpad's two fingers, which scroll smoothly, in points, and
+    /// pan.
+    Smooth,
+}
+
+impl Wheel {
+    /// What an event of the wheel or the trackpad in `unit`, with
+    /// `modifiers` held, says it is, for egui's `options`, on a screen
+    /// `page` points high; `None` for one egui takes as a zoom, held with
+    /// its zoom modifier, Ctrl or Cmd, which it counts as a zoom and not
+    /// as scrolling, so it says nothing of what the scrolling is.
+    fn of(
+        unit: MouseWheelUnit,
+        modifiers: Modifiers,
+        options: &InputOptions,
+        page: f32,
+    ) -> Option<Self> {
+        if modifiers.matches_any(options.zoom_modifier) {
+            return None;
+        }
+        if !modifiers.is_none() {
+            return Some(Self::Other);
+        }
+        Some(match unit {
+            MouseWheelUnit::Line => Self::Notched {
+                notch: options.line_scroll_speed,
+            },
+            MouseWheelUnit::Page => Self::Notched { notch: page },
+            MouseWheelUnit::Point => Self::Smooth,
+        })
+    }
+}
+
+/// How long the viewer has wanted the sharpest texture it wants of its
+/// photo.
+#[derive(Debug, Default)]
+struct Waiting {
     /// What the viewer last wanted, and since when. `None` until the
     /// viewer is first drawn.
     since: Option<Since>,
 }
 
-/// The picture the viewer wanted when it was last drawn, and since when.
+/// The sharpest texture the viewer wanted when it was last drawn, and
+/// since when.
 #[derive(Debug)]
 struct Since {
     /// The photo's file.
     path: PathBuf,
-    /// The longest side of the picture, in pixels.
+    /// The longest side of the texture, in pixels: the picture's, or the
+    /// photo's at its largest.
     longest: u32,
     /// egui's time when the viewer began wanting it, in seconds.
     at: f64,
@@ -92,7 +229,7 @@ struct Since {
 
 impl Waiting {
     /// How long, in seconds, the viewer drawn at egui's time `now` in its
-    /// pass numbered `pass` has wanted the picture of the photo at `path`
+    /// pass numbered `pass` has wanted the texture of the photo at `path`
     /// at `longest` pixels: since the photo or the size last changed, or
     /// since the viewer came back on screen, not drawn in the pass before.
     /// Remembers what it was asked, for the next pass.
@@ -150,23 +287,26 @@ enum Wanted {
     Thumbnail,
     /// Its picture.
     Picture,
+    /// The photo at its largest, this many pixels long.
+    Largest(u32),
 }
 
 /// The viewer of the photo at `current` of `photos`, filling `ui`, with
-/// the textures in `textures`; it says in `palette`'s colours when the
-/// picture takes a while, as `waiting` times it. Nothing is drawn when
-/// there is no photo at `current`.
+/// the textures in `textures`, zoomed and timed as `state` keeps; it says
+/// in `palette`'s colours when the picture takes a while. Nothing is
+/// drawn when there is no photo at `current`.
 pub fn show(
     ui: &mut egui::Ui,
     palette: &Palette,
     textures: &mut Textures,
-    waiting: &mut Waiting,
+    state: &mut State,
     photos: &[Photo],
     current: usize,
 ) {
     let Some(photo) = photos.get(current) else {
         return;
     };
+    let path = photo.path();
     let centre = ui.max_rect();
     let room = room(centre);
     let points = room.size().max_elem();
@@ -175,37 +315,104 @@ pub fn show(
     // integration reports it, and its default until then.
     let max_side = ui.input(|i| i.max_texture_side);
     let longest = picture_side(points, pixels_per_point, max_side);
-    let picture = textures.picture(photo.path(), longest);
+    let now = ui.input(|i| i.time);
+    if state.glide.as_ref().is_some_and(|glide| glide.path != path) {
+        state.glide = None;
+    }
+    let largest = textures.largest(path);
+    let stage = largest.map(|largest| Stage::new(largest, room, pixels_per_point));
+    let picture = textures.picture(path, longest);
     // A photo shown as one that cannot be shown, its picture failed at
     // another size and its thumbnails too, is settled as one whose picture
     // failed at this size is, though this size is still tried: the viewer
     // says nothing of loading meanwhile, nor holds the neighbours up.
     let cannot = matches!(picture.shown, Thumbnail::Failed(_));
+
+    // Where the photo is before this frame's input, for the input to act
+    // on: the pointer zooms nothing until the photo's size is known.
+    let before = match &stage {
+        Some(stage) => state.drawn(stage, now),
+        None => textures::placed(picture.shown, room),
+    };
+    let sense = match stage {
+        Some(_) => Sense::CLICK | Sense::DRAG,
+        None => Sense::hover(),
+    };
+    let name = photo.name().into_owned();
+    let id = ui.make_persistent_id("viewer");
+    let response = ui.interact(before.intersect(room), id, sense);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Image, true, &name));
+    // Every frame, the stage known or not, so the wheel's last event is
+    // known however it came, for the scrolling egui smooths over the
+    // frames after it.
+    let options = ui.ctx().options(|o| o.input_options);
+    let wheeled = ui.input(|i| wheel(i, &options, &mut state.wheel));
+    let drawn = stage.map(|stage| {
+        steer(ui, &response, &stage, state, path, now, wheeled);
+        if response.hovered() || response.dragged() {
+            let icon = cursor(&stage, state.framing, response.dragged());
+            ui.ctx().set_cursor_icon(icon);
+        }
+        state.drawn(&stage, now)
+    });
+    if state.gliding(now) {
+        ui.ctx().request_repaint();
+    }
+
+    // Once the picture is no longer on its way: held, from before the
+    // photos were last read or since, or known not to decode.
+    let at_largest = match (largest, drawn) {
+        (Some(largest), Some(drawn)) if !picture.coming => {
+            let pixels = drawn.size().max_elem() * pixels_per_point;
+            largest_side(pixels, longest, largest, max_side)
+        }
+        _ => None,
+    };
     let thumbnail = textures::longest(points, pixels_per_point);
-    let failed = picture.failed || cannot;
-    let order = want_order(current, photos.len(), picture.decoded, failed);
+    let order = want_order(
+        current,
+        photos.len(),
+        picture.decoded,
+        picture.failed || cannot,
+        at_largest,
+    );
     for (index, wanted, priority) in order {
         let side = match wanted {
             Wanted::Thumbnail => thumbnail,
             Wanted::Picture => longest,
+            Wanted::Largest(side) => side,
         };
         textures.want(photos[index].path(), side, priority);
     }
+    // The sharpest texture wanted, which is shown once it is held.
+    let sharpest = at_largest.unwrap_or(longest);
+    let shown = match at_largest {
+        Some(side) => textures.picture(path, side),
+        None => picture,
+    };
 
-    let name = photo.name().into_owned();
-    let id = ui.make_persistent_id("viewer");
-    let response = ui.interact(textures::placed(picture.shown, room), id, Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Image, true, &name));
     // The viewer shows no name, so its tooltip only says why a photo
     // cannot be shown: one naming the photo would cover it whenever the
     // pointer rests on it.
-    if let Some(failure) = textures::paint(ui, picture.shown, room, FAILED_ICON_SIZE) {
+    let failure = match (drawn, shown.shown) {
+        (Some(drawn), Thumbnail::Ready { texture, size }) => {
+            // As every view draws a texture, but where the zoom puts it,
+            // and only what is in the room.
+            let whole = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+            let at = painted(size, drawn);
+            let image = RectShape::filled(at, 0, Color32::WHITE).with_texture(texture, whole);
+            ui.painter_at(room).add(image);
+            None
+        }
+        _ => textures::paint(ui, shown.shown, room, FAILED_ICON_SIZE),
+    };
+    if let Some(failure) = failure {
         response.on_hover_text(failure.to_string());
     }
 
-    let now = ui.input(|i| i.time);
-    let waited = waiting.waited(photo.path(), longest, now, ui.ctx().cumulative_pass_nr());
-    match loading(picture.coming && !cannot, waited) {
+    let pass = ui.ctx().cumulative_pass_nr();
+    let waited = state.waiting.waited(path, sharpest, now, pass);
+    match loading(shown.coming && !cannot, waited) {
         Loading::No => {}
         // A frame then, for an idle window to say it on time.
         Loading::In(seconds) => ui
@@ -218,6 +425,164 @@ pub fn show(
             let text = egui::RichText::new(LOADING).small().color(palette.text);
             ui.put(below, egui::Label::new(text).selectable(false));
         }
+    }
+}
+
+/// Frame the photo on `stage`, of the file at `path`, as the pointer asks
+/// in this frame, at egui's time `now`, `response` being the photo's own
+/// and `wheeled` what the wheel, a pinch and a trackpad ask ([`wheel`]): a
+/// click zooms it in or out, gliding there; a drag moves it while it is
+/// larger than the room; and while the pointer is over the viewer, the
+/// wheel, a pinch or a trackpad's two fingers zoom it about the pointer or
+/// move it. While a click's move is under way, only another click acts.
+fn steer(
+    ui: &egui::Ui,
+    response: &egui::Response,
+    stage: &Stage,
+    state: &mut State,
+    path: &Path,
+    now: f64,
+    (factor, scroll): (f32, Vec2),
+) {
+    let drawn = state.drawn(stage, now);
+    if response.clicked_by(PointerButton::Primary)
+        && let Some(at) = response.interact_pointer_pos()
+    {
+        let again = response.double_clicked() || response.triple_clicked();
+        let delay = ui.ctx().options(|o| o.input_options.max_double_click_delay);
+        if counts(again, state.clicked, now, delay) {
+            state.clicked = Some(now);
+            state.framing = stage.click(state.framing, drawn, at);
+            state.glide = Some(Glide {
+                path: path.to_path_buf(),
+                from: drawn,
+                since: now,
+            });
+        }
+        return;
+    }
+    if state.gliding(now) {
+        return;
+    }
+    if response.dragged() && stage.larger(state.framing) {
+        state.framing = stage.pan_by(state.framing, response.drag_delta());
+    }
+    if !ui.rect_contains_pointer(ui.max_rect()) {
+        return;
+    }
+    if factor != 1.0 {
+        let room = self::room(ui.max_rect());
+        // A pinch on a touch screen zooms about its fingers' middle.
+        let anchor = ui.input(|i| {
+            let touch = i.multi_touch().map(|touch| touch.center_pos);
+            touch.or_else(|| i.pointer.hover_pos())
+        });
+        let anchor = anchor
+            .filter(|at| room.contains(*at))
+            .unwrap_or_else(|| room.center());
+        state.framing = stage.zoom_about(state.framing, factor, anchor);
+    }
+    if scroll != Vec2::ZERO && stage.larger(state.framing) {
+        state.framing = stage.pan_by(state.framing, scroll);
+    }
+}
+
+/// What the wheel, a pinch and a trackpad ask of the viewer in the frame
+/// whose input is `input`, under egui's `options`, `wheel` being what the
+/// wheel last was, which this keeps up to date: the factor to zoom by,
+/// and how far to move the photo, in points.
+///
+/// egui counts the wheel with its zoom modifier held, Ctrl or Cmd, and a
+/// pinch, in its zoom alone, and smooths the scrolling of the wheel over
+/// a few frames, telling it in points, whatever it came from; so the
+/// scrolling of a mouse's notches zooms, a notch by [`NOTCH_ZOOM`], and a
+/// trackpad's moves the photo, as the wheel's last event says
+/// ([`Wheel::of`]). Neither is counted twice.
+fn wheel(input: &InputState, options: &InputOptions, wheel: &mut Wheel) -> (f32, Vec2) {
+    let page = input.viewport_rect().height();
+    for event in &input.events {
+        if let Event::MouseWheel {
+            unit, modifiers, ..
+        } = *event
+            && let Some(of) = Wheel::of(unit, modifiers, options, page)
+        {
+            *wheel = of;
+        }
+    }
+    let zoom = input.zoom_delta();
+    let scroll = input.smooth_scroll_delta;
+    match *wheel {
+        // Up, away from the photographer, zooms in.
+        Wheel::Notched { notch } => (zoom * (NOTCH_ZOOM * scroll.y / notch).exp(), Vec2::ZERO),
+        Wheel::Smooth => (zoom, scroll),
+        Wheel::Other => (zoom, Vec2::ZERO),
+    }
+}
+
+/// Whether a click at egui's time `now` zooms the photo, `again` when it
+/// makes a double- or triple-click of the clicks before it, the last
+/// click that zoomed being at `clicked`, egui taking clicks `delay`
+/// seconds apart at most as a double-click: a click no part of one does,
+/// and one that is only when the click it follows zoomed nothing, as when
+/// both came in one frame. So a double-click zooms once.
+fn counts(again: bool, clicked: Option<f64>, now: f64, delay: f64) -> bool {
+    // egui takes three clicks within twice the delay as a triple-click.
+    !again || clicked.is_none_or(|at| now - at > 2.0 * delay)
+}
+
+/// The pointer over the photo on `stage` framed by `framing`, `dragged`
+/// or not: a closed hand while a drag moves it, an open one while it is
+/// larger than the room, and otherwise what a click does, to fit or to
+/// 100 %: zooming in when that shows the photo larger, and out when it
+/// shows it smaller ([`Stage::click_enlarges`]).
+fn cursor(stage: &Stage, framing: Framing, dragged: bool) -> CursorIcon {
+    if stage.larger(framing) {
+        if dragged {
+            CursorIcon::Grabbing
+        } else {
+            CursorIcon::Grab
+        }
+    } else if stage.click_enlarges(framing) {
+        CursorIcon::ZoomIn
+    } else {
+        CursorIcon::ZoomOut
+    }
+}
+
+/// The longest side, in pixels, to decode a photo at its largest at, when
+/// it is drawn `drawn` pixels long on the screen, its picture is decoded
+/// at `longest`, its largest image is `largest`, and the graphics card
+/// takes textures of at most `max_side` pixels a side: that image's long
+/// side, no longer than `max_side`, once the photo is drawn longer than
+/// its picture, by more than half a pixel, and only if that is longer than
+/// the picture. `None` while the picture holds every pixel drawn, or every
+/// pixel there is.
+fn largest_side(drawn: f32, longest: u32, largest: Size, max_side: usize) -> Option<u32> {
+    let max_side = u32::try_from(max_side).unwrap_or(u32::MAX);
+    let side = largest.width.max(largest.height).min(max_side);
+    (side > longest && drawn > longest as f32 + 0.5).then_some(side)
+}
+
+/// Where to draw a texture of `size` pixels of the photo the zoom places
+/// at `place`, its largest image's aspect: fitted in it, its own aspect
+/// kept, in the middle, as a stand-in decoded from a RAW file's preview of
+/// another aspect than the largest is; or the whole place when its own
+/// aspect is the largest's but for the rounding of its sides to whole
+/// pixels, so a photo at 100 % keeps its corner on a whole pixel. Its
+/// short side is rounded by half a pixel at most, which leaves it short of
+/// the place's long side by half a pixel times the aspect, long side over
+/// short, at most: twice that is taken for rounding. Where the photo is
+/// placed is what the pointer and the zoom go by, whatever is drawn.
+fn painted(size: [usize; 2], place: Rect) -> Rect {
+    let size = vec2(size[0] as f32, size[1] as f32);
+    let fitted = textures::fitted(size, place);
+    let texel = fitted.width() / size.x;
+    let aspect = place.size().max_elem() / place.size().min_elem();
+    let short = (place.size() - fitted.size()).max_elem();
+    if short <= texel * aspect {
+        place
+    } else {
+        fitted
     }
 }
 
@@ -249,28 +614,34 @@ pub fn picture_side(points: f32, pixels_per_point: f32, max_side: usize) -> u32 
 /// decoded, the best first, each with a priority of its own from the
 /// highest down ([`textures::ranked`]), when the photo's picture is
 /// `decoded` or not, and is known to have `failed` or not, as it is too
-/// while the photo is shown as one that cannot be shown.
+/// while the photo is shown as one that cannot be shown, and the photo is
+/// wanted at its largest, `at_largest` pixels long, or not.
 ///
 /// Until the picture is decoded, the photo's thumbnail ([`CURRENT`]), the
 /// quick stand-in, then its picture ([`CURRENT_PICTURE`]); once it is, the
 /// picture alone, kept by being wanted, as the thumbnail is not shown.
-/// Once the picture is settled, decoded or known to have failed, the
-/// pictures of the next photo and of the one before ([`NEIGHBOURS`]) come
-/// after, as far as there are photos, so stepping to either shows it
-/// sharp at once; they are wanted only then, so they never hold up the
-/// current one, and a current photo that cannot be decoded does not stop
-/// them.
+/// The photo at its largest comes right after its picture, in the same
+/// tier, which stands in for it and is what the fit shows again. Once
+/// the picture is settled, decoded or known to have failed, the pictures
+/// of the next photo and of the one before ([`NEIGHBOURS`]) come after,
+/// as far as there are photos, so stepping to either shows it sharp at
+/// once; they are wanted only then, so they never hold up the current
+/// one, and a current photo that cannot be decoded does not stop them.
 fn want_order(
     current: usize,
     len: usize,
     decoded: bool,
     failed: bool,
+    at_largest: Option<u32>,
 ) -> Vec<(usize, Wanted, u32)> {
     let mut order = Vec::new();
     if !decoded {
         order.push((current, Wanted::Thumbnail, CURRENT));
     }
     order.push((current, Wanted::Picture, CURRENT_PICTURE));
+    if let Some(side) = at_largest {
+        order.push((current, Wanted::Largest(side), CURRENT_PICTURE));
+    }
     if decoded || failed {
         let next = (current + 1 < len).then_some(current + 1);
         for neighbour in [next, current.checked_sub(1)].into_iter().flatten() {
@@ -291,10 +662,15 @@ fn want_order(
 mod tests {
     use std::path::Path;
 
-    use egui::{Rect, TextureId, pos2, vec2};
+    use egui::{CursorIcon, InputOptions, Modifiers, MouseWheelUnit, Rect, TextureId, pos2, vec2};
+    use previews::Size;
 
-    use super::{LOADING_AFTER, Loading, Waiting, Wanted, loading, picture_side, room, want_order};
+    use super::{
+        LOADING_AFTER, Loading, Waiting, Wanted, Wheel, counts, cursor, largest_side, loading,
+        painted, picture_side, room, want_order,
+    };
     use crate::textures::{self, CURRENT, CURRENT_PICTURE, NEIGHBOURS, Thumbnail, placed};
+    use crate::zoom::{Framing, Stage, Zoom};
 
     /// Where the viewer draws a photo of `size` pixels in a centre at
     /// `centre`.
@@ -343,16 +719,17 @@ mod tests {
     }
 
     /// Until the current photo's picture is decoded, the viewer wants its
-    /// thumbnail, then the picture; once it is, the picture alone. Once
+    /// thumbnail, then the picture; once it is, the picture alone, and
+    /// the photo at its largest right after it when that is wanted. Once
     /// the picture is settled, decoded or known to have failed, the next
     /// photo's picture and the one before's come after, as far as there
     /// are photos, and not before. Each is at a priority of its own,
-    /// falling.
+    /// falling, the largest in the picture's tier.
     #[test]
     fn the_neighbours_are_wanted_once_the_picture_is_settled() {
-        use Wanted::{Picture, Thumbnail};
+        use Wanted::{Largest, Picture, Thumbnail};
         let wanted = |current, len, decoded, failed| -> Vec<(usize, Wanted)> {
-            let order = want_order(current, len, decoded, failed);
+            let order = want_order(current, len, decoded, failed, None);
             assert!(
                 order.windows(2).all(|pair| pair[0].2 > pair[1].2),
                 "{order:?}"
@@ -379,7 +756,7 @@ mod tests {
             ranked.into_iter().map(|(_, p)| p).collect()
         };
         let of = |decoded, failed| -> Vec<u32> {
-            let order = want_order(4, 10, decoded, failed);
+            let order = want_order(4, 10, decoded, failed, None);
             order.into_iter().map(|(_, _, p)| p).collect()
         };
         assert_eq!(
@@ -388,6 +765,151 @@ mod tests {
         );
         let settled = [(0, CURRENT_PICTURE), (1, NEIGHBOURS), (2, NEIGHBOURS)];
         assert_eq!(of(true, false), priorities(&settled));
+
+        let order = want_order(4, 10, true, false, Some(6000));
+        let wanted: Vec<(usize, Wanted)> = order.iter().map(|&(i, of, _)| (i, of)).collect();
+        assert_eq!(
+            wanted,
+            [(4, Picture), (4, Largest(6000)), (5, Picture), (3, Picture)]
+        );
+        let largest = [
+            (0, CURRENT_PICTURE),
+            (1, CURRENT_PICTURE),
+            (2, NEIGHBOURS),
+            (3, NEIGHBOURS),
+        ];
+        let given: Vec<u32> = order.into_iter().map(|(_, _, p)| p).collect();
+        assert_eq!(given, priorities(&largest));
+    }
+
+    /// The photo is wanted at its largest once it is drawn longer than its
+    /// picture by more than half a pixel, and only when its largest image
+    /// is longer than the picture: the image's long side, no longer than
+    /// the card's largest texture.
+    #[test]
+    fn the_largest_is_wanted_once_the_photo_is_drawn_past_its_picture() {
+        let wide = Size {
+            width: 6000,
+            height: 4000,
+        };
+        assert_eq!(largest_side(1536.0, 1536, wide, 16384), None);
+        assert_eq!(largest_side(1536.5, 1536, wide, 16384), None);
+        assert_eq!(largest_side(1537.0, 1536, wide, 16384), Some(6000));
+        assert_eq!(largest_side(6000.0, 1536, wide, 4096), Some(4096));
+        let tall = Size {
+            width: 4000,
+            height: 6000,
+        };
+        assert_eq!(largest_side(3000.0, 1536, tall, 16384), Some(6000));
+        // The picture holds the whole of a photo no longer than it.
+        let small = Size {
+            width: 1200,
+            height: 800,
+        };
+        assert_eq!(largest_side(2400.0, 1536, small, 16384), None);
+        assert_eq!(largest_side(9000.0, 2048, wide, 2048), None);
+    }
+
+    /// A click zooms unless it makes a double- or a triple-click of the
+    /// click before it that zoomed; one that makes a double-click of a
+    /// click that zoomed nothing, as when both came in one frame, zooms.
+    #[test]
+    fn a_double_click_zooms_once() {
+        let delay = 0.3;
+        assert!(counts(false, None, 10.0, delay));
+        assert!(counts(false, Some(9.9), 10.0, delay));
+        assert!(!counts(true, Some(9.9), 10.0, delay), "a double-click");
+        assert!(!counts(true, Some(9.5), 10.0, delay), "a triple-click");
+        assert!(counts(true, None, 10.0, delay), "both in one frame");
+        assert!(counts(true, Some(5.0), 10.0, delay), "both in one frame");
+    }
+
+    /// The pointer over the photo is a zoom-in while a click shows it
+    /// larger, at 100 % or fitted, a zoom-out while a click shows it
+    /// smaller and it is no larger than the room, an open hand while it is
+    /// larger, and a closed one while a drag moves it.
+    #[test]
+    fn the_pointer_shows_what_a_click_or_a_drag_does() {
+        let room = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+        let stage = |width, height| Stage::new(Size { width, height }, room, 1.0);
+        let at = |scale| Framing {
+            zoom: Zoom::Scale(scale),
+            ..Framing::default()
+        };
+        let large = stage(3000, 2000);
+        assert_eq!(
+            cursor(&large, Framing::default(), false),
+            CursorIcon::ZoomIn
+        );
+        assert_eq!(cursor(&large, at(1.0), false), CursorIcon::Grab);
+        assert_eq!(cursor(&large, at(1.0), true), CursorIcon::Grabbing);
+        // Fitted at 200 %: a click shows it at 100 %, smaller, and one at
+        // 100 % or past it, no larger than the room, fits it, larger.
+        let small = stage(300, 200);
+        assert_eq!(
+            cursor(&small, Framing::default(), false),
+            CursorIcon::ZoomOut
+        );
+        assert_eq!(cursor(&small, at(1.0), false), CursorIcon::ZoomIn);
+        assert_eq!(cursor(&small, at(1.0), true), CursorIcon::ZoomIn);
+        assert_eq!(cursor(&small, at(1.5), false), CursorIcon::ZoomIn);
+        assert_eq!(cursor(&small, at(0.5), false), CursorIcon::ZoomIn);
+    }
+
+    /// A texture is drawn fitted in the place the zoom puts the photo, its
+    /// own aspect kept, in the middle, as a RAW file's preview of another
+    /// aspect standing in for its largest is; one of the largest's aspect
+    /// but for the rounding of its sides fills the place.
+    #[test]
+    fn a_texture_of_another_aspect_keeps_its_own_in_the_photo_s_place() {
+        // A 668 by 432 preview of a photo whose largest is 5472 by 3648,
+        // at 100 %.
+        let place = Rect::from_min_size(pos2(-100.0, -50.0), vec2(5472.0, 3648.0));
+        let drawn = painted([668, 432], place);
+        let aspect = drawn.width() / drawn.height();
+        assert!((aspect - 668.0 / 432.0).abs() < 1e-4, "{drawn:?}");
+        assert_eq!(drawn.width(), place.width(), "{drawn:?}");
+        assert!(
+            (drawn.center() - place.center()).length() < 0.01,
+            "{drawn:?}"
+        );
+        // The largest decoded at 2048 pixels, 2048 by 1365 of 2400 by 1600.
+        let place = Rect::from_min_size(pos2(10.0, 20.0), vec2(2400.0, 1600.0));
+        assert_eq!(painted([2048, 1365], place), place);
+        assert_eq!(painted([2400, 1600], place), place);
+        // A panorama of 8000 by 1999 decoded at 2048 pixels: 2048 by 512,
+        // short of its place across by a texel and more.
+        let place = Rect::from_min_size(pos2(0.0, 0.0), vec2(8000.0, 1999.0));
+        assert_eq!(painted([2048, 512], place), place);
+    }
+
+    /// A mouse wheel's notches, in lines or in pages, with nothing held,
+    /// zoom, a notch being the points egui scrolls a line by, or a page;
+    /// a trackpad's scrolling, in points, moves the photo; with Shift or
+    /// Alt held neither does; and the wheel with Ctrl or Cmd held, which
+    /// egui counts as a zoom alone, says nothing of the scrolling.
+    #[test]
+    fn the_wheel_s_last_event_says_what_its_scrolling_does() {
+        let options = InputOptions::default();
+        let of = |unit, modifiers| Wheel::of(unit, modifiers, &options, 800.0);
+        let line = options.line_scroll_speed;
+        assert_eq!(
+            of(MouseWheelUnit::Line, Modifiers::NONE),
+            Some(Wheel::Notched { notch: line })
+        );
+        assert_eq!(
+            of(MouseWheelUnit::Page, Modifiers::NONE),
+            Some(Wheel::Notched { notch: 800.0 })
+        );
+        assert_eq!(
+            of(MouseWheelUnit::Point, Modifiers::NONE),
+            Some(Wheel::Smooth)
+        );
+        for unit in [MouseWheelUnit::Line, MouseWheelUnit::Point] {
+            assert_eq!(of(unit, Modifiers::SHIFT), Some(Wheel::Other), "{unit:?}");
+            assert_eq!(of(unit, Modifiers::ALT), Some(Wheel::Other), "{unit:?}");
+            assert_eq!(of(unit, Modifiers::COMMAND), None, "{unit:?}");
+        }
     }
 
     /// The wait for a picture runs from when its photo or its size last

@@ -22,6 +22,7 @@ mod mode;
 mod textures;
 mod view;
 mod viewer;
+mod zoom;
 
 pub use app::PhotographyWorkbenchApp;
 pub use graphics::wgpu_setup;
