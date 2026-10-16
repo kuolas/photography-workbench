@@ -18,6 +18,7 @@ mod keymap;
 mod layout;
 mod menu;
 mod mode;
+mod thumbnails;
 mod view;
 
 pub use app::PhotographyWorkbenchApp;

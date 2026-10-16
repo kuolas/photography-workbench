@@ -41,12 +41,14 @@ Nothing has been released yet.
   is expanded and selected is remembered between runs.
 - In Library, selecting a folder shows its photos, the RAW files of
   Nikon and Sony cameras and JPEG files, in the grid: a tile for each,
-  showing its name until thumbnails come, the current one outlined. A
+  showing its name and its thumbnail, the current one outlined. A photo
+  that cannot be shown says why when the pointer rests on it. A
   click makes a photo the current one, and a double-click opens it in
   the viewer, which shows its name for now. The toolbar shows which
   photo of how many is the current one. The photos are read again when
   the window comes back to the front, so photos copied in meanwhile
-  show, and the current photo stays the current one.
+  show, photos changed meanwhile show as they are now, and the current
+  photo stays the current one.
 - In Library, with the viewer, the filmstrip under it shows the
   folder's photos in a row, each with its name and its format (NEF, ARW
   or JPEG) above the place its thumbnail will fill, the current one
