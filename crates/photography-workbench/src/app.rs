@@ -263,9 +263,18 @@ impl PhotographyWorkbenchApp {
     /// stand down while a dialog is open, all but the reference's own
     /// chord, which closes it, and while a text field has the keyboard,
     /// as what is typed there is the field's.
+    ///
+    /// The keys of the shortcuts that apply here are taken out of the
+    /// frame's input before anything is drawn, held down as well as
+    /// pressed. egui takes Enter and Space for a click on the control that
+    /// has the keyboard focus, which assistive technology can give any
+    /// control, so one press would otherwise do two things: Enter in the
+    /// grid, with the gear focused, would open both the viewer and
+    /// Settings. The keys of shortcuts standing down are left to the
+    /// dialog or the field.
     fn shortcuts(&mut self, ctx: &egui::Context) {
         let surface = self.surface();
-        let pressed = |action| keymap::pressed(ctx, surface, action);
+        let pressed = |action| keymap::take_pressed(ctx, surface, action);
         if self.show_shortcuts && pressed(Action::Shortcuts) {
             self.perform(ctx, Action::Shortcuts);
             return;
@@ -279,11 +288,12 @@ impl PhotographyWorkbenchApp {
         // system repeats it. Here those keys show and hide the docks and
         // move between photos instead, and none of them moves the focus,
         // even where it does nothing else, or held, as the docks' keys
-        // ignore the repeats.
+        // ignore the repeats. This looks at the keys before they are
+        // taken, below.
         if ctx.input(|i| i.events.iter().any(moves_focus)) {
             ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
         }
-        let actions = keymap::pressed_actions(ctx, surface);
+        let actions = keymap::take_pressed_actions(ctx, surface);
         // A row key pressed in the same frame as a key that changes the
         // grid's rows does nothing too, whichever of them the table puts
         // first.
@@ -3111,6 +3121,59 @@ mod tests {
         assert_eq!((app.mode, app.docks), (Mode::Library, docks));
         assert!(!app.show_settings && !app.show_about && !app.show_shortcuts);
         assert_eq!(count(&harness), nth(3, 30));
+    }
+
+    /// Give the control named `label` the keyboard focus, as assistive
+    /// technology gives it, and let the app settle.
+    fn focus(harness: &mut Harness<'_, PhotographyWorkbenchApp>, label: &str) {
+        harness.get_by_label(label).focus();
+        harness.run();
+        assert!(harness.get_by_label(label).is_focused(), "{label}");
+    }
+
+    /// Enter in the grid opens the viewer and does nothing else, whichever
+    /// control has the keyboard focus, though egui takes Enter for a
+    /// click on it: the gear opens no Settings, a dock's toggle hides no
+    /// dock, and the grid's button does not switch back to the grid.
+    #[test]
+    fn enter_in_the_grid_does_not_also_press_the_focused_control() {
+        let dir = folder_of_photos();
+        for label in ["Settings", LEFT_TOGGLE, "Thumbnail grid"] {
+            let mut harness = grid_harness(dir.path());
+            focus(&mut harness, label);
+            let docks = harness.state().docks;
+            press(&mut harness, Modifiers::NONE, Key::Enter);
+            let app = harness.state();
+            assert_eq!(app.view, View::Viewer, "{label}");
+            assert_eq!((app.mode, app.docks), (Mode::Library, docks), "{label}");
+            let dialog = app.show_settings || app.show_about || app.show_shortcuts;
+            assert!(!dialog, "{label}");
+        }
+    }
+
+    /// A key that does nothing where it is pressed still reaches the
+    /// control that has the keyboard focus: in the viewer, where Enter
+    /// opens nothing, Enter on the gear opens Settings.
+    #[test]
+    fn a_key_with_no_shortcut_here_presses_the_focused_control() {
+        let mut harness = viewer_harness();
+        focus(&mut harness, "Settings");
+        press(&mut harness, Modifiers::NONE, Key::Enter);
+        assert!(harness.state().show_settings);
+        assert_eq!(harness.state().view, View::Viewer);
+    }
+
+    /// Esc goes back to the grid from the viewer with a control focused,
+    /// and egui still takes the keyboard focus away from it, as it does
+    /// on Esc before the keys are looked at.
+    #[test]
+    fn esc_goes_back_to_the_grid_and_still_takes_the_focus_away() {
+        let mut harness = viewer_harness();
+        focus(&mut harness, "Settings");
+        press(&mut harness, Modifiers::NONE, Key::Escape);
+        assert_eq!(harness.state().view, View::Grid);
+        assert!(!harness.state().show_settings);
+        assert_eq!(harness.ctx.memory(|m| m.focused()), None);
     }
 
     /// The room the viewer fits its photo in: the centre less 24 points
