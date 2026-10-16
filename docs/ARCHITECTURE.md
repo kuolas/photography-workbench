@@ -18,7 +18,7 @@ never:
 | Crate | Holds | May depend on |
 |---|---|---|
 | `crates/catalog` | the photos on disk: the folder tree of the home folder and the mounted volumes, and a folder's photo list and its current photo | `raw-files`; never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
-| `crates/previews` | decoding the photos' embedded previews on worker threads. Empty so far | never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
+| `crates/previews` | decoding the photos into images to show: a JPEG, or the embedded preview of a RAW file, made small and upright. No worker threads yet | `raw-files`, `image`; never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the style, the typeface, the icons, the parts of the title bar, the action bars, the docks, the toolbar, the dialogs' frame, the About dialog, and the keyboard shortcuts' chords and reference. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
 | `crates/photography-workbench` | the app: the window and what it shows. The only crate with a binary | any other crate here, and any external one |
 
@@ -92,9 +92,23 @@ Paths are relative to `crates/catalog`:
 
 ### previews
 
-Empty so far: its `src/lib.rs` holds only the crate's description. It
-has no GUI dependency, so its tests will run on a machine with no
-display.
+The previews crate decodes but starts no thread of its own: decoding
+takes a while, so whoever calls it decides where the waiting happens.
+It turns a photo into an image of its own, 8-bit RGB pixels with no
+GUI's type, so it has no GUI dependency and its tests run on a machine
+with no display, over files they build themselves: JPEGs encoded in
+the test and NEF files written around them. Every file is taken for
+untrusted: a damaged or hostile one is a `Failure`, never a panic, and
+the memory one file may take is capped. Paths are relative to
+`crates/previews`:
+
+| File | Holds | May depend on |
+|---|---|---|
+| `src/lib.rs` | the library root | its own modules |
+| `src/decode.rs` | `decode`, a photo's file turned into a `Decoded`: the `Image`, upright, its longer side at most as long as asked, scaled down by area averaging and never up, and the `Size`, upright, of what it was scaled down from, which is what 100 % shows. What the file holds is told by its content, never its name: a file that starts as every JPEG does (`FF D8 FF`) is handed to the JPEG decoder, which reads it whole, up to 128 MiB, and turned upright by its own EXIF orientation; any other is opened with raw-files, which refuses what it does not read, and of its embedded previews the smallest whose longer side is as long as asked is decoded, or the largest when none is, turned upright by the RAW file's orientation. A JPEG may have at most 32,768 pixels on a side, and the pixels of a decode may take at most 512 MiB in all the buffers it holds at once (the decoded image, and the copy scaled, made RGB or turned a quarter, each while the one before it is held), both checked before it is decoded | `image`, `raw-files`, its own `failure` |
+| `src/failure.rs` | `Failure`, why a photo could not be shown, in a sentence for the photographer: the file could not be read (with the system's kind of error), is not a photo the app shows, is a RAW file with no preview, is damaged, or is too large; and how each error of the file system, raw-files and the JPEG decoder becomes one | `image`, `raw-files` |
+| `src/fixtures.rs` | for the tests only: JPEGs encoded from flat colours, and a small writer of TIFF structures, for a JPEG's EXIF block and for NEF files holding up to two previews | `image` |
+| `tests/local_corpus.rs` | a test run only when asked for, with `PW_LOCAL_CORPUS` naming a folder of one's own photos: it decodes as a thumbnail every file under it that the app's photo list would show, one of a format raw-files reads or a JPEG, and lists those that fail | the crate |
 
 ### How it fits together
 
@@ -215,8 +229,10 @@ Choices that shape the code still to come, such as rating storage, are open
 — see [ROADMAP.md](ROADMAP.md#open-questions).
 
 **Decided, not yet built.** `catalog` holds what the first release needs
-of it. The rest of that release's work fills `previews`, below the
-GUI-free line, and builds the window on both
+of it, and `previews` decodes one photo at a time on its caller's
+thread. The rest of that release's work gives `previews` the worker
+threads that decode a folder's photos while the window stays responsive,
+below the GUI-free line, and builds the window on both
 ([ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)).
 This file is rewritten with each of those changes, in the same pull request.
 
