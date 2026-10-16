@@ -8,8 +8,8 @@
 //! tree, which the app draws in it. The tool rail picks what the
 //! right dock shows, in Library one thing so far, the photo's
 //! information. The bottom dock is the filmstrip's, which only the viewer
-//! has: the grid shows the photos as thumbnails already. It is empty so
-//! far.
+//! has: the grid shows the photos as thumbnails already. The app draws
+//! the filmstrip in it, on the viewer's backdrop.
 
 use desktop_ui::action_bar::{self, Edge};
 use desktop_ui::chrome;
@@ -201,26 +201,31 @@ pub fn side_docks(
     }
 }
 
-/// The bottom dock, if `layout` has it, shown or hidden as `docks` says.
-/// It comes after the side docks, so it runs between them, under the
-/// centre only. Without it, the widgets after it keep the ids they have
-/// with it, as they do when it is only hidden.
-pub fn bottom_dock(ui: &mut egui::Ui, palette: &Palette, layout: Layout, docks: &mut Docks) {
+/// The bottom dock, if `layout` has it, shown or hidden as `docks` says,
+/// `filmstrip` adding what it holds on the viewer's backdrop, so it reads
+/// as part of the viewer above it. It comes after the side docks, so it
+/// runs between them, under the centre only. Without it, the widgets
+/// after it keep the ids they have with it, as they do when it is only
+/// hidden.
+pub fn bottom_dock(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    layout: Layout,
+    docks: &mut Docks,
+    filmstrip: impl FnOnce(&mut egui::Ui),
+) {
     if layout.bottom_dock {
         let panel = egui::Panel::bottom("bottom_dock")
             .resizable(false)
             .exact_size(FILMSTRIP_HEIGHT);
-        dock::show(panel, ui, &mut docks.bottom, |ui| filmstrip(ui, palette));
+        dock::show(panel, ui, &mut docks.bottom, |ui| {
+            ui.painter()
+                .rect_filled(ui.max_rect(), 0.0, palette.viewer_backdrop);
+            filmstrip(ui);
+        });
     } else {
         ui.skip_ahead_auto_ids(1);
     }
-}
-
-/// The bottom dock: the filmstrip, on the viewer's backdrop, so it reads
-/// as part of the viewer above it.
-fn filmstrip(ui: &mut egui::Ui, palette: &Palette) {
-    ui.painter()
-        .rect_filled(ui.max_rect(), 0.0, palette.viewer_backdrop);
 }
 
 /// The right dock showing Info: the selected photo's information, or a
