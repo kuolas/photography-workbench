@@ -30,7 +30,7 @@ fn main() -> eframe::Result {
         .with_titlebar_shown(false)
         .with_title_shown(false)
         .with_fullsize_content_view(true);
-    let options = eframe::NativeOptions {
+    let mut options = eframe::NativeOptions {
         viewport,
         // The app gives macOS a menu bar of its own (`menu.rs`), whose
         // Quit closes the window. The one the system gives by default
@@ -42,6 +42,10 @@ fn main() -> eframe::Result {
         })),
         ..Default::default()
     };
+    // Textures as large as the graphics card supports, rather than egui's
+    // 8192 pixels a side, so a photo's largest preview fits in one
+    // (`graphics.rs`). The rest of eframe's wgpu options stay its own.
+    options.wgpu_options.wgpu_setup = photography_workbench::wgpu_setup();
     eframe::run_native(
         PhotographyWorkbenchApp::NAME,
         options,

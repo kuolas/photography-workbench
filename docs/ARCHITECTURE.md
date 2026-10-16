@@ -31,8 +31,9 @@ relative to `crates/photography-workbench`:
 
 | File | Holds | May depend on |
 |---|---|---|
-| `src/main.rs` | the binary: sets up logging and the window (its size, and its frame on each system), turns off the menu bar winit makes on macOS by default, whose Quit would end the app without closing the window, then hands control to eframe | the library, `eframe`, `env_logger`; on macOS `winit` |
-| `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` | its own modules |
+| `src/main.rs` | the binary: sets up logging and the window (its size, and its frame on each system), turns off the menu bar winit makes on macOS by default, whose Quit would end the app without closing the window, has eframe open the graphics card as `src/graphics.rs` says, then hands control to eframe | the library, `eframe`, `env_logger`; on macOS `winit` |
+| `src/lib.rs` | the library root; re-exports `PhotographyWorkbenchApp` and `wgpu_setup` | its own modules |
+| `src/graphics.rs` | `wgpu_setup`, how eframe opens the graphics card: as egui does, but asking for textures as large as the card reports it supports, rather than egui's 8192 pixels a side, so a photo's largest preview fits in one; on OpenGL, egui's limits as they are | `eframe` |
 | `src/dialogs.rs` | the app's dialogs, in the frame `desktop_ui::dialog` gives every dialog: Settings, which holds the theme choice, About, which `desktop_ui::about` draws from the app's name, tagline, version, copyright, licence and home page, and the reference of keyboard shortcuts, which `desktop_ui::keys` draws from the keymap's sections | `egui`, `desktop_ui` |
 | `src/mode.rs` | `Mode`, the app's modes (Library, Organizer, Develop): each one's name and icon, whether it is built yet, and its `Layout`, the parts of the window it has around its centre | `desktop_ui` |
 | `src/view.rs` | `View`, the ways Library shows a folder's photos (a grid of thumbnails, or one photo in the viewer): each one's name and icon | `desktop_ui` (tests only) |

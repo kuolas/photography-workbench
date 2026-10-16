@@ -13,6 +13,7 @@ mod disk;
 mod filmstrip;
 mod folder_tree;
 mod follow;
+mod graphics;
 mod grid;
 mod keymap;
 mod layout;
@@ -22,3 +23,4 @@ mod thumbnails;
 mod view;
 
 pub use app::PhotographyWorkbenchApp;
+pub use graphics::wgpu_setup;
