@@ -3,14 +3,21 @@
 //! The filmstrip in the viewer's bottom dock: a cell for each of a
 //! folder's photos, side by side in one row, the current one outlined.
 //!
-//! A cell holds the photo's name and format over an empty tile, where
-//! the photo's thumbnail goes once the app decodes previews. A click on a
-//! cell makes its photo the current one.
+//! A cell holds the photo's name and format over its thumbnail, which
+//! sits straight on the strip's backdrop with nothing behind it, or, for
+//! a photo that cannot be shown, an icon there, and why in its tooltip.
+//! The current photo's thumbnail is outlined, a little clear of its
+//! edge, or, until there is one, the room it goes in. A click on a cell makes its photo the current
+//! one.
 //!
 //! The strip draws a list of photos and the index of the current one,
-//! whatever they were read from. Only the cells near the view are laid
-//! out, so a folder of thousands of photos scrolls as smoothly as one of
-//! ten. A mouse's wheel, which turns up and down, scrolls it sideways.
+//! whatever they were read from, and the thumbnails the app holds
+//! ([`crate::thumbnails`]). Only the cells near the view are laid out,
+//! so a folder of thousands of photos scrolls as smoothly as one of ten;
+//! their thumbnails are decoded the current photo's first, then those in
+//! view, then those past its ends, each the nearest the current photo
+//! first ([`want_order`]). A mouse's wheel, which turns up and down,
+//! scrolls it sideways.
 //!
 //! The strip brings the current photo into view when the current photo
 //! changes, when the list does, or when the strip comes back on screen,
@@ -19,6 +26,8 @@
 //! photographer looking along the folder is not pulled back
 //! ([`crate::follow`]).
 
+use std::cmp::Reverse;
+use std::ops::Range;
 use std::path::Path;
 
 use catalog::photos::{Kind, Photo};
@@ -32,12 +41,15 @@ use egui::{
 };
 
 use crate::follow;
+use crate::thumbnails::{self, AHEAD, CURRENT, ON_SCREEN, Thumbnail, Thumbnails};
 
 /// The width of a cell. Cells run the strip's height and touch.
 const CELL: f32 = 120.0;
 
-/// The room between a cell's edges and its tile, where its photo's
-/// thumbnail goes; the photo's name is in the band above the tile.
+/// The room between a cell's edges and its tile, the room its photo's
+/// thumbnail is fitted in, which has no fill of its own: the strip's
+/// backdrop shows around the thumbnail. The photo's name is in the band
+/// above the tile.
 const TILE_INSET: Margin = Margin {
     left: 10,
     right: 10,
@@ -62,21 +74,28 @@ const FORMAT_SIZE: f32 = 8.5;
 /// The room kept between the end of a name cut short and the format.
 const LABEL_GAP: f32 = 4.0;
 
-/// The width of the outline around the current photo's tile.
+/// The width of the outline around the current photo: around its
+/// thumbnail, or around its tile while there is none to draw,
+/// [`thumbnails::MARK_GAP`] clear of either.
 const OUTLINE: f32 = 1.5;
 
 /// How many cells are laid out past each end of the view, so the strip
 /// has them ready as it scrolls.
 const NEAR: usize = 4;
 
+/// The size of the icon a tile shows when its photo cannot be shown.
+const FAILED_ICON_SIZE: f32 = 24.0;
+
 /// The filmstrip of `photos`, the photos of `folder`, filling `ui`, with
-/// the photo at `current` outlined; it scrolls sideways when the cells do
-/// not fit. `folder` tells one list from another, so the strip brings
-/// the current photo into view when the list changes. Nothing is drawn
-/// when there are no photos. The index of the photo clicked on, if any.
+/// the photo at `current` outlined and the thumbnails in `thumbnails`;
+/// it scrolls sideways when the cells do not fit. `folder` tells one
+/// list from another, so the strip brings the current photo into view
+/// when the list changes. Nothing is drawn when there are no photos. The
+/// index of the photo clicked on, if any.
 pub fn show(
     ui: &mut egui::Ui,
     palette: &Palette,
+    thumbnails: &mut Thumbnails,
     photos: &[Photo],
     current: Option<usize>,
     folder: &Path,
@@ -114,26 +133,33 @@ pub fn show(
                 }
 
                 // The cells in view, and NEAR more at each end.
-                let first =
-                    ((viewport.left() / CELL).floor().max(0.0) as usize).saturating_sub(NEAR);
-                let end =
-                    ((viewport.right() / CELL).ceil().max(0.0) as usize + NEAR).min(photos.len());
+                let in_view = in_view(viewport, photos.len());
+                let first = in_view.start.saturating_sub(NEAR);
+                let end = (in_view.end + NEAR).min(photos.len());
+                // Every cell's thumbnail fits in the same tile.
+                let tile = (cell(0) - TILE_INSET).size();
+                let longest = thumbnails::longest(tile.max_elem(), ui.pixels_per_point());
+                for (index, priority) in want_order(first..end, in_view, current) {
+                    thumbnails.want(photos[index].path(), longest, priority);
+                }
                 let mut outline = None;
                 for (index, photo) in photos.iter().enumerate().take(end).skip(first) {
                     let rect = cell(index);
                     let is_current = current == Some(index);
-                    if photo_cell(ui, palette, photo, rect, is_current) {
+                    let thumbnail = thumbnails.thumbnail(photo.path(), longest);
+                    if photo_cell(ui, photo, thumbnail, rect, is_current) {
                         click = Some(index);
                     }
                     if is_current {
-                        outline = Some(rect - TILE_INSET);
+                        let place = thumbnails::placed(thumbnail, rect - TILE_INSET);
+                        outline = Some(place.expand(thumbnails::MARK_GAP));
                     }
                 }
                 // Last, so the cells next to it do not cover it.
-                if let Some(tile) = outline {
+                if let Some(around) = outline {
                     let stroke = Stroke::new(OUTLINE, palette.accent);
                     ui.painter()
-                        .rect_stroke(tile, 0.0, stroke, StrokeKind::Outside);
+                        .rect_stroke(around, 0.0, stroke, StrokeKind::Outside);
                 }
             });
     });
@@ -145,15 +171,57 @@ pub fn show(
     click
 }
 
-/// The cell of `photo` at `rect`, its tile outlined elsewhere when
-/// `is_current`. Whether it was clicked.
+/// The cells of a strip of `len` photos in its `viewport`, measured from
+/// the strip's left edge, however little of each; not one that only
+/// touches the viewport's edge.
+fn in_view(viewport: Rect, len: usize) -> Range<usize> {
+    let start = (viewport.left() / CELL).floor().max(0.0) as usize;
+    let end = ((viewport.right() / CELL).ceil().max(0.0) as usize).min(len);
+    start.min(end)..end
+}
+
+/// The photos whose thumbnails the strip wants while it lays out the
+/// cells in `laid_out`, those in `in_view` in its view, the best first,
+/// each with a priority of its own from the highest down
+/// ([`thumbnails::ranked`]).
+///
+/// A photographer in the viewer steps from the current photo to the
+/// next or the one before, so the cells nearest the current photo are
+/// the ones looked at next: the current photo comes first ([`CURRENT`]),
+/// then the cells in view, then those past the view's ends, each the
+/// nearest the current photo first and, of two as near, the one after
+/// it, as a photographer mostly moves on. With no current photo, the
+/// first in view stands in for it.
+fn want_order(
+    laid_out: Range<usize>,
+    in_view: Range<usize>,
+    current: Option<usize>,
+) -> Vec<(usize, u32)> {
+    let from = current.unwrap_or(in_view.start);
+    let tier = |index| {
+        if current == Some(index) {
+            CURRENT
+        } else if in_view.contains(&index) {
+            ON_SCREEN
+        } else {
+            AHEAD
+        }
+    };
+    let mut order: Vec<usize> = laid_out.collect();
+    order.sort_by_key(|&index| (Reverse(tier(index)), index.abs_diff(from), index < from));
+    thumbnails::ranked(order.into_iter().map(|index| (index, tier(index))))
+}
+
+/// The cell of `photo` at `rect`, its tile showing `thumbnail` on the
+/// strip's backdrop, outlined elsewhere when `is_current`. Whether it was
+/// clicked.
 ///
 /// Its id comes from its photo's path, not from where it is, so a cell
 /// keeps its state when photos before it come or go.
 fn photo_cell(
     ui: &mut egui::Ui,
-    palette: &Palette,
     photo: &Photo,
+    thumbnail: Thumbnail,
     rect: Rect,
     is_current: bool,
 ) -> bool {
@@ -163,9 +231,8 @@ fn photo_cell(
     response
         .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, is_current, &name));
 
-    let tile = rect - TILE_INSET;
     let painter = ui.painter();
-    painter.rect_filled(tile, 0.0, palette.chip);
+    let failure = thumbnails::paint(ui, thumbnail, rect - TILE_INSET, FAILED_ICON_SIZE);
     // Above the tile, dimmer than the photo they name: the photo's format
     // at the right, and its name without the extension at the left, cut
     // short with "…" where it would run into the format, so the end of a
@@ -189,10 +256,9 @@ fn photo_cell(
     let galley = painter.layout_job(job);
     let elided = galley.elided;
     painter.galley(pos2(left, middle - galley.size().y / 2.0), galley, colour);
-    let response = if elided {
-        response.on_hover_text(name)
-    } else {
-        response
+    let response = match thumbnails::tooltip(name, elided, failure) {
+        Some(tooltip) => response.on_hover_text(tooltip),
+        None => response,
     };
     response.clicked()
 }
@@ -225,7 +291,56 @@ mod tests {
 
     use catalog::photos::Kind;
 
-    use super::{format_of, stem};
+    use egui::{Rect, pos2};
+
+    use super::{format_of, in_view, stem, want_order};
+    use crate::thumbnails::{self, AHEAD, CURRENT, ON_SCREEN};
+
+    /// A cell is in view however little of it is, and not when it only
+    /// touches the view's edge, and as far as there are photos. Cells are
+    /// 120 points wide.
+    #[test]
+    fn a_cell_is_in_view_however_little_of_it_is() {
+        let viewport = Rect::from_x_y_ranges(250.0..=490.0, 0.0..=142.0);
+        assert_eq!(in_view(viewport, 6), 2..5);
+        let edges = Rect::from_min_max(pos2(240.0, 0.0), pos2(480.0, 142.0));
+        assert_eq!(in_view(edges, 6), 2..4);
+        assert_eq!(in_view(viewport, 3), 2..3);
+        assert_eq!(in_view(viewport, 1), 1..1);
+    }
+
+    /// The cells are wanted the best first, each at a priority of its own
+    /// from the highest down, so a worker that takes one while the rest
+    /// are still being wanted takes the best: the current photo, then the
+    /// cells in view, then those past the view's ends, each the nearest
+    /// the current photo first, and of two as near the one after it.
+    #[test]
+    fn the_cells_are_wanted_the_best_first_at_falling_priorities() {
+        let order = want_order(0..8, 2..6, Some(3));
+        let indices: Vec<usize> = order.iter().map(|&(index, _)| index).collect();
+        assert_eq!(indices, [3, 4, 2, 5, 1, 6, 0, 7]);
+        let tiers = [
+            CURRENT, ON_SCREEN, ON_SCREEN, ON_SCREEN, AHEAD, AHEAD, AHEAD, AHEAD,
+        ];
+        assert_eq!(order, thumbnails::ranked(indices.into_iter().zip(tiers)));
+        assert!(
+            order.windows(2).all(|pair| pair[0].1 > pair[1].1),
+            "{order:?}"
+        );
+        // The current photo at the view's left edge: the cells in view
+        // before the nearer ones past the edge.
+        let indices: Vec<usize> = want_order(0..10, 4..8, Some(4))
+            .into_iter()
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(indices, [4, 5, 6, 7, 3, 2, 1, 8, 0, 9]);
+        // With no current photo, from the first in view.
+        let indices: Vec<usize> = want_order(0..4, 1..3, None)
+            .into_iter()
+            .map(|(index, _)| index)
+            .collect();
+        assert_eq!(indices, [1, 2, 0, 3]);
+    }
 
     /// A photo's format is named the way photographers name it, whatever
     /// its file's extension.

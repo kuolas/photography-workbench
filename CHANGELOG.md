@@ -51,9 +51,10 @@ Nothing has been released yet.
   photo stays the current one.
 - In Library, with the viewer, the filmstrip under it shows the
   folder's photos in a row, each with its name and its format (NEF, ARW
-  or JPEG) above the place its thumbnail will fill, the current one
-  outlined; a long name is cut short, and the format stays in sight. A
-  click makes a photo the current one. A mouse wheel scrolls it
+  or JPEG) above its thumbnail, the current one outlined; a long name
+  is cut short, and the format stays in sight. A photo that cannot be
+  shown says why when the pointer rests on it. A click makes a photo
+  the current one. A mouse wheel scrolls it
   sideways, and it brings the current photo into view when the current
   photo changes, never while it is being scrolled.
 - In Library, two buttons on a toolbar under the centre choose how the

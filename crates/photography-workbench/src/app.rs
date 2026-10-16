@@ -59,7 +59,7 @@ pub struct PhotographyWorkbenchApp {
     /// tree is saved between runs.
     browser: Browser,
     /// The photos' thumbnails, decoded off the window's thread, which
-    /// the grid draws.
+    /// the grid and the filmstrip draw.
     thumbnails: Thumbnails,
     /// How many tiles the grid laid out in a row the last time it was
     /// drawn, which the keys that move a row up or down go by. `None`
@@ -644,11 +644,14 @@ impl eframe::App for PhotographyWorkbenchApp {
             };
             toolbar::show(ui, "toolbar", &palette, start, end);
         }
-        // The same photos as the grid's, sharing the current one.
+        // The same photos as the grid's, sharing the current one and the
+        // thumbnails.
         let film = |ui: &mut egui::Ui| {
             if let Photos::Read(list) = self.browser.photos() {
-                let photos = list.photos();
-                let clicked = filmstrip::show(ui, &palette, photos, list.current(), list.folder());
+                let (photos, current) = (list.photos(), list.current());
+                let thumbnails = &mut self.thumbnails;
+                let clicked =
+                    filmstrip::show(ui, &palette, thumbnails, photos, current, list.folder());
                 if let Some(index) = clicked {
                     self.browser.select_photo(index);
                 }
@@ -668,7 +671,8 @@ impl eframe::App for PhotographyWorkbenchApp {
         egui::CentralPanel::default()
             .frame(centre)
             .show(ui, |ui| self.centre(ui, &palette));
-        // Once every view of the photos is drawn: the thumbnails none of
+        // Once every view of the photos is drawn, the filmstrip in the
+        // bottom dock and the grid in the centre: the thumbnails none of
         // them wanted in this frame are not decoded.
         self.thumbnails.end_frame(ui.ctx());
 
@@ -769,15 +773,28 @@ mod tests {
     /// the roots it reads are those the handle returned holds, which a
     /// test changes to mount and unmount volumes, the change showing on
     /// the next frame. The thumbnails are decoded on the window's thread
-    /// too, as the frame after the one that wants them begins.
+    /// too, as the frame after the one that wants them begins, so a view
+    /// that scrolls to another place takes a frame more to settle there,
+    /// and the app is let run up to 8 frames to settle, not egui's 4.
     fn harness_on(
         storage: Option<&MemoryStorage>,
         roots: Vec<Root>,
+    ) -> (Harness<'_, PhotographyWorkbenchApp>, Arc<Mutex<Vec<Root>>>) {
+        harness_at(storage, roots, 1.0)
+    }
+
+    /// [`harness_on`], on a screen of `pixels_per_point` pixels a point.
+    fn harness_at(
+        storage: Option<&MemoryStorage>,
+        roots: Vec<Root>,
+        pixels_per_point: f32,
     ) -> (Harness<'_, PhotographyWorkbenchApp>, Arc<Mutex<Vec<Root>>>) {
         let roots = Arc::new(Mutex::new(roots));
         let disk = Disk::inline(Arc::clone(&roots));
         let harness = Harness::builder()
             .with_size(PhotographyWorkbenchApp::MIN_WINDOW)
+            .with_pixels_per_point(pixels_per_point)
+            .with_max_steps(8)
             .build_eframe(|cc| {
                 if let Some(storage) = storage {
                     cc.storage = Some(storage);
@@ -2488,8 +2505,9 @@ mod tests {
     /// 8 from its bottom. In the band above, their middles 10 points below
     /// the cell's top, are its photo's name without the extension, 8
     /// points in from the cell's left, and its format, ending 8 points in
-    /// from its right. The current photo's tile is outlined in the accent
-    /// colour.
+    /// from its right. Nothing is filled behind the tile; the current
+    /// photo, an empty file that cannot be shown, has its tile outlined in
+    /// the accent colour, 2 points clear of it.
     #[test]
     fn the_filmstrip_s_cells_are_laid_out_in_a_row() {
         let dir = folder_of_30_photos();
@@ -2508,22 +2526,9 @@ mod tests {
             first.left_top() + egui::vec2(10.0, 22.0),
             first.right_bottom() - egui::vec2(10.0, 8.0),
         );
-        let palette = theme::resolve(harness.state().theme, &harness.ctx).palette();
+        assert!(!chip_filled_in(&harness, first), "a fill in {first:?}");
+        assert_eq!(current_outline(&harness, 1.5), Some(tile.expand(2.0)));
         let shapes = &harness.output().shapes;
-        let filled = shapes.iter().any(|clipped| match &clipped.shape {
-            egui::Shape::Rect(rect) => rect.rect == tile && rect.fill == palette.chip,
-            _ => false,
-        });
-        assert!(filled, "no tile at {tile:?}");
-        let outlined = shapes.iter().any(|clipped| match &clipped.shape {
-            egui::Shape::Rect(rect) => {
-                rect.rect == tile
-                    && rect.stroke == egui::Stroke::new(1.5, palette.accent)
-                    && rect.stroke_kind == egui::StrokeKind::Outside
-            }
-            _ => false,
-        });
-        assert!(outlined, "no outline around {tile:?}");
         // The text laid out where it says, as (its left, its right, its
         // middle), if it is there.
         let text_at = |said: &str| {
@@ -2613,15 +2618,154 @@ mod tests {
         assert!(in_filmstrip_view(&harness, &photo(1)));
     }
 
+    /// A filmstrip cell's tile shows its photo's thumbnail, the same
+    /// texture the grid showed, fitted in the tile, its aspect kept; a
+    /// photo that cannot be shown shows an icon there instead, and says
+    /// why under the pointer.
+    #[test]
+    fn a_film_cell_shows_its_photo_s_thumbnail_or_why_it_cannot_be_shown() {
+        let dir = photos_folder();
+        let (photo, broken) = (
+            dir.path().join("DSC_0001.jpg"),
+            dir.path().join("DSC_0002.NEF"),
+        );
+        std::fs::write(&photo, crate::thumbnails::jpeg(300, 200)).unwrap();
+        std::fs::write(&broken, b"not a photo").unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let texture = harness.state().thumbnails.texture(&photo, 256);
+        let texture = texture.expect("no texture for the photo");
+        click(&mut harness, "Image viewer");
+
+        let (photo_tile, broken_tile) = (
+            film_tile(&harness, "DSC_0001.jpg"),
+            film_tile(&harness, "DSC_0002.NEF"),
+        );
+        let (drawn_texture, drawn) = texture_in(&harness, photo_tile);
+        assert_eq!(
+            drawn_texture, texture,
+            "the grid's, of the same size, is not shared"
+        );
+        assert_fitted_3_2(drawn, photo_tile);
+        assert!(textures_in(&harness, broken_tile).is_empty());
+        assert!(failure_icon_in(&harness, broken_tile, 24.0), "no icon");
+        assert!(!failure_icon_in(&harness, photo_tile, 24.0), "an icon");
+        let why = "This is not a kind of photo the app can show";
+        assert!(
+            tooltip_shows(&mut harness, "DSC_0002.NEF", why),
+            "no tooltip"
+        );
+    }
+
+    /// A film cell has nothing behind its thumbnail, or behind the icon of
+    /// a photo that cannot be shown: the strip's backdrop shows around
+    /// it. The current photo's outline goes 2 points clear of its
+    /// thumbnail as drawn, or of its tile when there is none to draw.
+    #[test]
+    fn a_film_cell_has_nothing_behind_its_thumbnail_and_its_outline_hugs_it() {
+        let dir = photos_folder();
+        std::fs::write(
+            dir.path().join("DSC_0001.jpg"),
+            crate::thumbnails::jpeg(300, 200),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("DSC_0002.NEF"), b"not a photo").unwrap();
+        let mut harness = filmstrip_harness(dir.path());
+        for label in ["DSC_0001.jpg", "DSC_0002.NEF"] {
+            let (cell, _) = film_cell(&harness, label).expect("no cell");
+            assert!(!chip_filled_in(&harness, cell), "a fill in {label}'s cell");
+        }
+
+        let (_, drawn) = texture_in(&harness, film_tile(&harness, "DSC_0001.jpg"));
+        let outline = current_outline(&harness, 1.5).expect("no outline");
+        assert_clear_around(outline, drawn);
+
+        make_current(&mut harness, 2);
+        let broken_tile = film_tile(&harness, "DSC_0002.NEF");
+        assert_eq!(
+            current_outline(&harness, 1.5),
+            Some(broken_tile.expand(2.0))
+        );
+    }
+
+    /// Where the filmstrip's cell for the photo named `label` keeps its
+    /// thumbnail, its tile: the cell less 10 points at each side, 22 at
+    /// the top and 8 at the bottom.
+    fn film_tile(harness: &Harness<'_, PhotographyWorkbenchApp>, label: &str) -> egui::Rect {
+        let (cell, _) = film_cell(harness, label).expect("no cell");
+        egui::Rect::from_min_max(
+            cell.min + egui::vec2(10.0, 22.0),
+            cell.max - egui::vec2(10.0, 8.0),
+        )
+    }
+
+    /// The width and height in pixels of the texture `id`.
+    fn texture_size(
+        harness: &Harness<'_, PhotographyWorkbenchApp>,
+        id: egui::TextureId,
+    ) -> [usize; 2] {
+        let manager = harness.ctx.tex_manager();
+        manager.read().meta(id).expect("no such texture").size
+    }
+
+    /// On a screen of two pixels a point, the grid draws a texture of
+    /// 512 pixels, and the filmstrip, whose tiles are smaller, one of 256
+    /// made for it, not the grid's drawn at half its size.
+    #[test]
+    fn each_view_draws_a_texture_made_for_its_size() {
+        let dir = photos_folder();
+        let jpeg = crate::thumbnails::jpeg(800, 600);
+        std::fs::write(dir.path().join("DSC_0001.jpg"), jpeg).unwrap();
+        let (mut harness, _) = harness_at(None, vec![home(dir.path())], 2.0);
+        click(&mut harness, "Home");
+        let (grid, _) = texture_in(&harness, tile_room(&harness, "DSC_0001.jpg"));
+        assert_eq!(texture_size(&harness, grid), [512, 384]);
+        click(&mut harness, "Image viewer");
+        let (film, _) = texture_in(&harness, film_tile(&harness, "DSC_0001.jpg"));
+        assert_eq!(texture_size(&harness, film), [256, 192]);
+    }
+
+    /// The filmstrip's thumbnails are decoded the current photo's first,
+    /// then the nearest it first, of two as near the one after it first.
+    #[test]
+    fn the_filmstrip_s_thumbnails_are_decoded_nearest_the_current_photo_first() {
+        let dir = photos_folder();
+        for n in 1..=5 {
+            let name = format!("DSC_000{n}.jpg");
+            std::fs::write(dir.path().join(name), crate::thumbnails::jpeg(60, 40)).unwrap();
+        }
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        click(&mut harness, "Image viewer");
+        make_current(&mut harness, 3);
+        for n in 1..=5 {
+            let name = format!("DSC_000{n}.jpg");
+            assert!(in_filmstrip_view(&harness, &name), "{name}");
+        }
+        // Read again, so every thumbnail is decoded again, in the order
+        // wanted with the third photo current.
+        leave_and_come_back(&mut harness);
+        let mut by_age: Vec<(u64, usize)> = (1..=5)
+            .map(|n| {
+                let tile = film_tile(&harness, &format!("DSC_000{n}.jpg"));
+                (made(texture_in(&harness, tile).0), n)
+            })
+            .collect();
+        by_age.sort_unstable();
+        let order: Vec<usize> = by_age.into_iter().map(|(_, n)| n).collect();
+        assert_eq!(order, [3, 4, 2, 5, 1]);
+    }
+
     /// A photo's name too long for its cell is cut short before its
     /// format, which stays whole, and the name shows whole in a tooltip.
     #[test]
     fn a_long_name_in_the_filmstrip_shows_whole_in_a_tooltip() {
         let dir = photos_folder();
         let long = "Z_holiday_photo_from_a_phone_camera.jpg";
-        for name in ["DSC_0001.NEF", long] {
-            std::fs::write(dir.path().join(name), b"").unwrap();
-        }
+        std::fs::write(dir.path().join("DSC_0001.NEF"), b"").unwrap();
+        // A photo that can be shown, so its tooltip holds its name alone.
+        let jpeg = crate::thumbnails::jpeg(300, 200);
+        std::fs::write(dir.path().join(long), jpeg).unwrap();
         let mut harness = filmstrip_harness(dir.path());
         let (cell, _) = film_cell(&harness, long).unwrap();
         let laid_out = |shape: &egui::Shape| match shape {
