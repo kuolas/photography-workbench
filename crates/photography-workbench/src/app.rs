@@ -2436,6 +2436,34 @@ mod tests {
         assert_eq!(count(&harness), nth(29, 30));
     }
 
+    /// Holding Right goes on through the photos, a photo each time the
+    /// system repeats the key, and Tab held with it shows or hides the
+    /// side docks once.
+    #[test]
+    fn a_held_arrow_key_goes_on_through_the_photos() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        let docks = harness.state().docks;
+        for _ in 0..3 {
+            // egui counts a key that goes down again while it is down as
+            // the system repeating it.
+            for key in [Key::ArrowRight, Key::Tab] {
+                harness.input_mut().events.push(egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                });
+            }
+            harness.step();
+        }
+        harness.run();
+        assert_eq!(count(&harness), nth(4, 30));
+        assert_ne!(harness.state().docks, docks, "Tab not done");
+        assert_eq!(harness.state().docks.left, !docks.left, "Tab done twice");
+    }
+
     /// In the grid, Down and Up move a row, in the same column. Up stays
     /// put in the first row and Down in the last, and Down into a last
     /// row too short to reach the column goes to the last photo.

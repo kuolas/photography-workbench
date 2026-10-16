@@ -44,10 +44,28 @@ impl Chord {
     /// its first press counts, so a chord that shows or hides something
     /// does it once.
     pub fn pressed(self, ctx: &egui::Context) -> bool {
+        self.went_down(ctx, false)
+    }
+
+    /// Whether the chord was pressed in this frame, as for
+    /// [`pressed`](Self::pressed), or its key, held down since, repeated:
+    /// for a chord that moves through something, as to the next photo,
+    /// which keeps moving while the key is held. A held key repeats as
+    /// the system repeats it in a text field, after the system's delay
+    /// and at its pace, so a press moves once and a short hold no more.
+    pub fn pressed_or_repeated(self, ctx: &egui::Context) -> bool {
+        self.went_down(ctx, true)
+    }
+
+    /// Whether the chord's key went down in this frame with its
+    /// modifiers held, counting a held key's repeats when `repeats`.
+    fn went_down(self, ctx: &egui::Context, repeats: bool) -> bool {
         ctx.input(|input| {
             input.events.iter().any(|event| {
-                matches!(event, Event::Key { key, physical_key, pressed: true, repeat: false, modifiers }
-                    if *key == self.key && self.held_with(*modifiers, *physical_key))
+                matches!(event, Event::Key { key, physical_key, pressed: true, repeat, modifiers }
+                    if *key == self.key
+                        && (repeats || !*repeat)
+                        && self.held_with(*modifiers, *physical_key))
             })
         })
     }
@@ -247,6 +265,18 @@ mod tests {
     /// which `key` goes down with `modifiers` held: egui counts every
     /// frame after the first as the key repeating.
     fn pressed_by(chord: Chord, key: Key, modifiers: Modifiers, frames: usize) -> Vec<bool> {
+        went_down_by(chord, key, modifiers, frames, Chord::pressed)
+    }
+
+    /// Whether `went_down` says `chord` went down in each of a run of
+    /// frames, as for [`pressed_by`].
+    fn went_down_by(
+        chord: Chord,
+        key: Key,
+        modifiers: Modifiers,
+        frames: usize,
+        went_down: fn(Chord, &egui::Context) -> bool,
+    ) -> Vec<bool> {
         let ctx = egui::Context::default();
         let press = Event::Key {
             key,
@@ -262,7 +292,7 @@ mod tests {
                     ..RawInput::default()
                 };
                 let mut pressed = false;
-                let mut output = ctx.run_ui(input, |ui| pressed = chord.pressed(ui.ctx()));
+                let mut output = ctx.run_ui(input, |ui| pressed = went_down(chord, ui.ctx()));
                 // A headless frame has no renderer to hand the font atlas to.
                 output.textures_delta.clear();
                 pressed
@@ -354,6 +384,21 @@ mod tests {
         let tab = Chord::new(Modifiers::NONE, Key::Tab);
         let presses = pressed_by(tab, Key::Tab, Modifiers::NONE, 3);
         assert_eq!(presses, [true, false, false]);
+    }
+
+    /// A key held down repeats a chord that asks for its repeats, with
+    /// exactly its modifiers held, as when it was first pressed.
+    #[test]
+    fn a_key_held_down_repeats_a_chord_that_counts_its_repeats() {
+        let right = Chord::new(Modifiers::NONE, Key::ArrowRight);
+        let held =
+            |key, modifiers| went_down_by(right, key, modifiers, 3, Chord::pressed_or_repeated);
+        assert_eq!(held(Key::ArrowRight, Modifiers::NONE), [true, true, true]);
+        assert_eq!(
+            held(Key::ArrowRight, Modifiers::SHIFT),
+            [false, false, false]
+        );
+        assert_eq!(held(Key::ArrowLeft, Modifiers::NONE), [false, false, false]);
     }
 
     #[test]
