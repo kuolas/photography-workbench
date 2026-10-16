@@ -57,3 +57,12 @@ unimplemented = "warn"
 lto = true
 codegen-units = 1
 strip = true
+
+# Debug builds compile the dependencies with optimisations, and only the
+# workspace's own crates without: decoding a photo with an unoptimised
+# JPEG decoder takes seconds rather than a fraction of one, which makes
+# the app built by `cargo run` too slow to try. The dependencies compile
+# once; the workspace's crates still rebuild quickly, with full debug
+# information.
+[profile.dev.package."*"]
+opt-level = 3
