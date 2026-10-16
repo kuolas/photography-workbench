@@ -170,6 +170,13 @@ const BINDINGS: &[Binding] = &[
     ),
     bind(
         Group::Views,
+        (NONE, Key::Enter),
+        Action::View(View::Viewer),
+        GRID,
+        "Open the photo in the viewer",
+    ),
+    bind(
+        Group::Views,
         (NONE, Key::Escape),
         Action::View(View::Grid),
         VIEWER,
@@ -436,6 +443,35 @@ mod tests {
         assert_eq!(actions, [Action::View(View::Grid)]);
     }
 
+    /// Enter opens the viewer from the grid, and does nothing in the
+    /// viewer itself.
+    #[test]
+    fn enter_opens_the_viewer_from_the_grid_only() {
+        let actions = |surface| {
+            // A context of its own, so Enter goes down afresh, not as the
+            // system repeating it.
+            let ctx = egui::Context::default();
+            let input = egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: NONE,
+                }],
+                ..egui::RawInput::default()
+            };
+            let mut actions = Vec::new();
+            let mut output = ctx.run_ui(input, |ui| {
+                actions = pressed_actions(ui.ctx(), surface);
+            });
+            output.textures_delta.clear();
+            actions
+        };
+        assert_eq!(actions(Surface::Grid), [Action::View(View::Viewer)]);
+        assert_eq!(actions(Surface::Viewer), []);
+    }
+
     /// A key held down does again, as the system repeats it, an action
     /// that steps through the photos, and not one that shows or hides
     /// something, which would flicker on and off.
@@ -489,6 +525,9 @@ mod tests {
         let grid = Action::View(View::Grid);
         assert_eq!(label(Surface::Viewer, grid).as_deref(), Some("G"));
         assert_eq!(label(Surface::Grid, grid).as_deref(), Some("G"));
+        // Enter opens the viewer from the grid too, after E in the table.
+        let viewer = Action::View(View::Viewer);
+        assert_eq!(label(Surface::Grid, viewer).as_deref(), Some("E"));
         let filmstrip = Action::Dock(Side::Bottom);
         assert_eq!(label(Surface::Viewer, filmstrip).as_deref(), Some("F6"));
         assert_eq!(label(Surface::Grid, filmstrip), None);

@@ -21,6 +21,7 @@ mod menu;
 mod mode;
 mod textures;
 mod view;
+mod viewer;
 
 pub use app::PhotographyWorkbenchApp;
 pub use graphics::wgpu_setup;

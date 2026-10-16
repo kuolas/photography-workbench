@@ -43,12 +43,13 @@ Nothing has been released yet.
   Nikon and Sony cameras and JPEG files, in the grid: a tile for each,
   showing its name and its thumbnail, the current one outlined. A photo
   that cannot be shown says why when the pointer rests on it. A
-  click makes a photo the current one, and a double-click opens it in
-  the viewer, which shows its name for now. The toolbar shows which
-  photo of how many is the current one. The photos are read again when
-  the window comes back to the front, so photos copied in meanwhile
-  show, photos changed meanwhile show as they are now, and the current
-  photo stays the current one.
+  click makes a photo the current one, and a double-click, or Enter,
+  opens it in the viewer, which shows it alone, as large as the centre
+  allows, or why it cannot be shown when the pointer rests on it. The
+  toolbar shows which photo of how many is the current one. The photos
+  are read again when the window comes back to the front, so photos
+  copied in meanwhile show, photos changed meanwhile show as they are
+  now, and the current photo stays the current one.
 - In Library, with the viewer, the filmstrip under it shows the
   folder's photos in a row, each with its name and its format (NEF, ARW
   or JPEG) above its thumbnail, the current one outlined; a long name
@@ -62,8 +63,9 @@ Nothing has been released yet.
   time in a viewer. The choice is remembered between runs.
 - Keyboard shortcuts, the ones established photography tools use for
   the same things: G and E for the thumbnail grid and the image viewer,
-  Esc from the viewer back to the grid, Tab and Shift+Tab to show or
-  hide the side docks or all of them, F6, F7 and F8 for the filmstrip
+  Enter to open the current photo in the viewer from the grid, Esc from
+  the viewer back to the grid, Tab and Shift+Tab to show or hide the
+  side docks or all of them, F6, F7 and F8 for the filmstrip
   and the left and right docks, Ctrl+Alt+1 for Library, Ctrl+, for
   Settings and Ctrl+Q to quit, with Cmd for Ctrl and Option for Alt on
   macOS. Ctrl+/, or a button beside the settings gear, opens a

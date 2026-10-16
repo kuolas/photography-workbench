@@ -21,6 +21,7 @@ use crate::menu::{self, MacMenu};
 use crate::mode::{Layout, Mode};
 use crate::textures::Textures;
 use crate::view::View;
+use crate::viewer;
 
 /// The Lucide icons of the title bar's settings gear and of its button
 /// for the reference of keyboard shortcuts, and the text shown in place
@@ -59,7 +60,7 @@ pub struct PhotographyWorkbenchApp {
     /// tree is saved between runs.
     browser: Browser,
     /// The photos' thumbnails, decoded off the window's thread, which
-    /// the grid and the filmstrip draw.
+    /// the grid, the filmstrip and the viewer draw.
     textures: Textures,
     /// How many tiles the grid laid out in a row the last time it was
     /// drawn, which the keys that move a row up or down go by. `None`
@@ -441,16 +442,9 @@ impl PhotographyWorkbenchApp {
                     }
                 }
             }
-            // The photo's name, in place of the photo, which the viewer
-            // does not show yet.
             View::Viewer => {
                 if let Some(photo) = list.current_photo() {
-                    let name = egui::RichText::new(photo.name())
-                        .size(VIEWER_NAME_SIZE)
-                        .color(palette.text);
-                    ui.centered_and_justified(|ui| {
-                        ui.add(egui::Label::new(name).selectable(false));
-                    });
+                    viewer::show(ui, &mut self.textures, photo);
                 }
             }
         }
@@ -491,9 +485,6 @@ impl PhotographyWorkbenchApp {
         }
     }
 }
-
-/// The size of the current photo's name in the viewer.
-const VIEWER_NAME_SIZE: f32 = 13.5;
 
 /// The size of the toolbar's count of photos.
 const COUNT_SIZE: f32 = 12.5;
@@ -672,8 +663,8 @@ impl eframe::App for PhotographyWorkbenchApp {
             .frame(centre)
             .show(ui, |ui| self.centre(ui, &palette));
         // Once every view of the photos is drawn, the filmstrip in the
-        // bottom dock and the grid in the centre: the thumbnails none of
-        // them wanted in this frame are not decoded.
+        // bottom dock and the grid or the viewer in the centre: the
+        // thumbnails none of them wanted in this frame are not decoded.
         self.textures.end_frame(ui.ctx());
 
         // Above everything but the dialogs.
@@ -1928,18 +1919,28 @@ mod tests {
         harness.run();
     }
 
-    /// Whether the viewer shows the name of the photo named `label` in the
-    /// centre, where the photo goes: as a name, not as a tile of the grid.
+    /// Where the viewer put the photo named `label` in the last frame, if
+    /// it showed it, found as the image screen readers are told of: where
+    /// the photo was drawn, or, with none to draw, the room it goes in.
+    fn viewer_photo(
+        harness: &Harness<'_, PhotographyWorkbenchApp>,
+        label: &str,
+    ) -> Option<egui::Rect> {
+        harness
+            .query_all_by_label(label)
+            .find(|node| node.accesskit_node().role() == Role::Image)
+            .map(|node| node.rect())
+    }
+
+    /// Whether the viewer shows the photo named `label` in the centre.
     fn viewer_shows(harness: &Harness<'_, PhotographyWorkbenchApp>, label: &str) -> bool {
         let centre = centre(harness);
-        harness.query_all_by_label(label).any(|node| {
-            centre.contains_rect(node.rect()) && node.accesskit_node().toggled().is_none()
-        })
+        viewer_photo(harness, label).is_some_and(|place| centre.contains_rect(place))
     }
 
     /// A double-click on a tile makes its photo the current one and opens
-    /// it in the viewer, which shows its name; so does one just after a
-    /// click on another tile.
+    /// it in the viewer, which shows it; so does one just after a click
+    /// on another tile.
     #[test]
     fn a_double_click_on_a_tile_opens_its_photo_in_the_viewer() {
         let dir = folder_of_photos();
@@ -2449,7 +2450,7 @@ mod tests {
 
     /// In the viewer, the filmstrip shows a cell for each photo, the
     /// current one shown current. A click on another makes it the current
-    /// one: the viewer shows its name, and the toolbar's count follows.
+    /// one: the viewer shows it, and the toolbar's count follows.
     #[test]
     fn a_click_in_the_filmstrip_makes_its_photo_current() {
         let dir = folder_of_30_photos();
@@ -3082,6 +3083,113 @@ mod tests {
             assert_eq!(count(&harness), nth(16, 30), "{key:?}");
         }
         assert_eq!(harness.state().view, View::Viewer);
+    }
+
+    /// In the grid, Enter opens the current photo in the viewer, as a
+    /// double-click on its tile does, and Esc goes back to the grid with
+    /// the same photo current. Enter just after a click on a view button
+    /// opens the viewer and does nothing else: egui takes Enter for a
+    /// click on the control that has the keyboard focus, and a click
+    /// gives a button none.
+    #[test]
+    fn enter_opens_the_current_photo_in_the_viewer_and_esc_goes_back() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        make_current(&mut harness, 3);
+        press(&mut harness, Modifiers::NONE, Key::Enter);
+        assert_eq!(harness.state().view, View::Viewer);
+        assert!(viewer_shows(&harness, &photo(3)));
+        press(&mut harness, Modifiers::NONE, Key::Escape);
+        assert_eq!(harness.state().view, View::Grid);
+        assert_eq!(count(&harness), nth(3, 30));
+
+        click(&mut harness, "Thumbnail grid");
+        let docks = harness.state().docks;
+        press(&mut harness, Modifiers::NONE, Key::Enter);
+        let app = harness.state();
+        assert_eq!(app.view, View::Viewer);
+        assert_eq!((app.mode, app.docks), (Mode::Library, docks));
+        assert!(!app.show_settings && !app.show_about && !app.show_shortcuts);
+        assert_eq!(count(&harness), nth(3, 30));
+    }
+
+    /// The room the viewer fits its photo in: the centre less 24 points
+    /// on every side.
+    fn viewer_room(harness: &Harness<'_, PhotographyWorkbenchApp>) -> egui::Rect {
+        centre(harness).shrink(24.0)
+    }
+
+    /// Check that `drawn`, where a photo `aspect` times as wide as it is
+    /// high was drawn, is fitted in `room`: as wide as it or as high, in
+    /// its middle, its aspect kept, give or take a pixel.
+    fn assert_fitted(drawn: egui::Rect, room: egui::Rect, aspect: f32) {
+        let near = |a: f32, b: f32| (a - b).abs() <= 1.0;
+        let fits = room.expand(0.5).contains_rect(drawn);
+        let reaches = near(drawn.width(), room.width()) || near(drawn.height(), room.height());
+        assert!(fits && reaches, "{drawn:?} in {room:?}");
+        assert!(near(drawn.width(), drawn.height() * aspect), "{drawn:?}");
+        assert!(
+            (drawn.center() - room.center()).length() <= 1.0,
+            "{drawn:?} in {room:?}"
+        );
+    }
+
+    /// The viewer draws the current photo's thumbnail, made at the
+    /// largest size, as large as the centre allows less 24 points on
+    /// every side, enlarged from its pixels, its aspect kept, in the
+    /// middle: a wide photo across the room, a tall one from its top to
+    /// its bottom. Right steps to the next photo, which it then draws.
+    #[test]
+    fn the_viewer_shows_the_current_photo_as_large_as_the_centre_allows() {
+        let dir = photos_folder();
+        let (wide, tall) = (
+            dir.path().join("DSC_0001.jpg"),
+            dir.path().join("DSC_0002.jpg"),
+        );
+        std::fs::write(&wide, crate::textures::jpeg(300, 200)).unwrap();
+        std::fs::write(&tall, crate::textures::jpeg(200, 300)).unwrap();
+        let mut harness = filmstrip_harness(dir.path());
+        let room = viewer_room(&harness);
+        assert!(room.width() > 512.0, "{room:?}");
+
+        let place = viewer_photo(&harness, "DSC_0001.jpg").expect("no photo");
+        assert_fitted(place, room, 1.5);
+        let (texture, drawn) = texture_in(&harness, room);
+        assert_eq!(harness.state().textures.texture(&wide, 512), Some(texture));
+        assert_fitted(drawn, room, 1.5);
+        assert!(drawn.width() > 300.0, "not enlarged: {drawn:?}");
+
+        press(&mut harness, Modifiers::NONE, Key::ArrowRight);
+        assert!(viewer_photo(&harness, "DSC_0001.jpg").is_none());
+        let place = viewer_photo(&harness, "DSC_0002.jpg").expect("no photo");
+        assert_fitted(place, room, 2.0 / 3.0);
+        let (texture, drawn) = texture_in(&harness, room);
+        assert_eq!(harness.state().textures.texture(&tall, 512), Some(texture));
+        assert_fitted(drawn, room, 2.0 / 3.0);
+    }
+
+    /// A photo that cannot be shown shows an icon in the middle of the
+    /// viewer, and says why under the pointer.
+    #[test]
+    fn the_viewer_says_why_a_photo_cannot_be_shown() {
+        let dir = photos_folder();
+        std::fs::write(dir.path().join("broken.jpg"), [0xFF, 0xD8, 0xFF, 0xE0]).unwrap();
+        let mut harness = filmstrip_harness(dir.path());
+        let room = viewer_room(&harness);
+        assert!(textures_in(&harness, room).is_empty());
+        assert!(failure_icon_in(&harness, room, 48.0), "no icon");
+        let why = "The file is damaged";
+        assert!(harness.query_by_label(why).is_none());
+        harness
+            .query_all_by_label("broken.jpg")
+            .find(|node| node.accesskit_node().role() == Role::Image)
+            .expect("no photo")
+            .hover();
+        let shown = (0..20).any(|_| {
+            harness.step();
+            harness.query_by_label(why).is_some()
+        });
+        assert!(shown, "no tooltip");
     }
 
     /// The reference lists the keys that move between photos, under
