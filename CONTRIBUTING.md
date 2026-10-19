@@ -238,6 +238,17 @@ one another only in the direction
 sets; run it yourself after adding a dependency. CI is the real gate: a
 pull request is merged only when all of its checks pass.
 
+A change to how the window looks can be reviewed in screenshots. This
+test, run only when asked for, draws the window in every theme and
+writes a PNG file of each scene to the folder `PW_SCREENSHOTS` names;
+`PW_SCREENSHOT_PHOTOS`, if set, names a folder of photos to show in
+place of a few plain JPEGs:
+
+```sh
+PW_SCREENSHOTS=/path/to/folder cargo test -p photography-workbench \
+    --lib screenshots -- --ignored
+```
+
 A few conventions:
 
 - **Bug fixes come with a regression test** — one you have seen fail without
