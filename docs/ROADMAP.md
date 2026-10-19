@@ -68,7 +68,7 @@ whose milestones unlock the ones above:
 | raw-files milestone | What it unlocks here |
 |---|---|
 | 1 and 2, embedded previews of NEF and ARW files (released as 0.1.0) | Browse fast |
-| 3, basic metadata: capture time, camera, lens, exposure, orientation, sizes | Rename by EXIF; sort by capture time; the Info dock's camera data |
+| 3, basic metadata: capture time, camera, lens, exposure, orientation, sizes (released as 0.2.0) | The Info dock's camera data; later, Rename by EXIF and sorting by capture time |
 | 4, focus points in image coordinates | Rate sharpness |
 | 5, the sensor data; 6, development to a linear image with its colour model | Develop a RAW file |
 
@@ -79,7 +79,7 @@ JPEG files open directly.
 ## Smaller things after 0.1.0
 
 - A full-screen view, and comparing two or four photos side by side.
-- Sorting by capture time (needs raw-files milestone 3).
+- Sorting by capture time.
 - A thumbnail cache on disk, so a folder opens as fast the second time.
 - Packaged builds: an AppImage and a Flatpak on Linux, a disk image on
   macOS, an installer on Windows. Until then releases are source only.
