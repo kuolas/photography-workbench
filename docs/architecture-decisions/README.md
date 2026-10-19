@@ -21,6 +21,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR013](adr013-a-workspace-of-small-crates.md) | A workspace of small crates | Accepted |
 | [ADR014](adr014-the-parts-of-the-window.md) | The parts of the window | Accepted |
 | [ADR015](adr015-the-keys.md) | The keys | Accepted |
+| [ADR016](adr016-the-viewer-s-zoom.md) | The viewer's zoom | Accepted |
 
 ## When to write one
 
