@@ -15,6 +15,7 @@ mod folder_tree;
 mod follow;
 mod graphics;
 mod grid;
+mod info;
 mod keymap;
 mod layout;
 mod menu;

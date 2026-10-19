@@ -50,11 +50,14 @@
 //! a smaller one is only soft where a larger one is jagged. Going back to
 //! a folder shows its thumbnails at once, if they are still held.
 //!
-//! Every decode of a photo also tells the size of the photo's largest
-//! image, a JPEG's own or a RAW file's largest preview, whatever size was
-//! decoded, and the store keeps it with the texture: it is what the
-//! viewer shows at 100 % ([`Textures::largest`]), known once any texture
-//! of the photo is held, a thumbnail or a picture.
+//! Every decode of a photo also tells what the photo's file holds, whatever
+//! size was decoded, and the store keeps it with the texture ([`Details`]):
+//! the size of the photo's largest image, a JPEG's own or a RAW file's
+//! largest preview, which is what the viewer shows at 100 %
+//! ([`Textures::largest`]), the file's size on disk, the sizes of its
+//! previews and what the camera recorded, which the Info dock shows
+//! ([`Textures::details`]); known once any texture of the photo is held, a
+//! thumbnail or a picture.
 //!
 //! Why a photo cannot be shown is remembered for each size apart, as its
 //! textures are, since a RAW file's sizes may be decoded from different
@@ -88,11 +91,16 @@ use desktop_ui::icons;
 use egui::load::SizedTexture;
 use egui::{Align2, ColorImage, Rect, TextureHandle, TextureId, TextureOptions, Vec2, vec2};
 use previews::{Answer, Decoder, Failure, Size};
+use raw_files::Metadata;
 
 /// The sizes thumbnails are decoded at, as the longest side in pixels,
 /// smallest first. Few sizes mean few textures of a photo, each serving
 /// a view at any zoom near its size.
 const SIZES: [u32; 3] = [256, 384, 512];
+
+/// The longest side of the smallest thumbnail, in pixels: the quickest
+/// to decode.
+pub const SMALLEST_THUMBNAIL: u32 = SIZES[0];
 
 /// The longest side of the largest thumbnail, in pixels: a texture
 /// decoded at more than this is a picture.
@@ -235,6 +243,23 @@ pub struct Picture {
     pub coming: bool,
 }
 
+/// What a decode of a photo told of its file, besides the image, as
+/// [`Textures::details`] gives it: whichever size was decoded, the same.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Details {
+    /// The size of the photo's largest image, upright: a JPEG's own size,
+    /// or a RAW file's largest preview's, which 100 % shows.
+    pub largest: Size,
+    /// How many bytes the file takes on disk.
+    pub bytes: u64,
+    /// The upright sizes of the previews a RAW file holds, smallest first;
+    /// none for a JPEG file.
+    pub previews: Vec<Size>,
+    /// What the camera recorded, read from a RAW file; `None` for a JPEG
+    /// file.
+    pub metadata: Option<Metadata>,
+}
+
 /// A texture of a photo, and what it was decoded at.
 struct Held {
     /// The texture, freed when this is dropped.
@@ -244,9 +269,9 @@ struct Held {
     longest: u32,
     /// The memory it takes, in bytes.
     bytes: usize,
-    /// The size of the photo's largest image, upright, as the decode told
-    /// it: what 100 % shows, whichever size was decoded.
-    largest: Size,
+    /// What the decode told of the photo's file, the size of its largest
+    /// image among it, whichever size was decoded.
+    details: Details,
     /// The number of the frame it was last wanted or drawn in.
     used: u64,
     /// How many reads of photos the store had seen when it was decoded:
@@ -346,6 +371,12 @@ impl Textures {
         Some(held.texture.id())
     }
 
+    /// How many decodes are still to come.
+    #[cfg(test)]
+    pub fn pending(&self) -> usize {
+        self.decoder.as_ref().map_or(0, Decoder::pending)
+    }
+
     /// Take no answers while `stalled`, so what is wanted stays on its
     /// way, and take them again once not.
     #[cfg(test)]
@@ -411,7 +442,12 @@ impl Textures {
         };
         let image = decoded.image();
         let size = [image.width() as usize, image.height() as usize];
-        let largest = decoded.largest();
+        let details = Details {
+            largest: decoded.largest(),
+            bytes: decoded.bytes(),
+            previews: decoded.previews().to_vec(),
+            metadata: decoded.metadata().cloned(),
+        };
         let texture = ctx.load_texture(
             path.display().to_string(),
             ColorImage::from_rgb(size, image.pixels()),
@@ -422,7 +458,7 @@ impl Textures {
             longest,
             // Four bytes a pixel on the graphics card.
             bytes: 4 * size[0] * size[1],
-            largest,
+            details,
             used: self.frame,
             reads: self.reads,
         };
@@ -501,7 +537,10 @@ impl Textures {
     /// none held and no answer for that size yet, why the photo could not
     /// be shown at another thumbnail's size, so a photo that cannot be
     /// shown says so at once at a size not tried yet. Never a picture,
-    /// which would be jagged drawn this small. It wants nothing decoded
+    /// which would be jagged drawn this small. Asked at a picture's size,
+    /// it answers as for a thumbnail larger than any held: never the
+    /// picture, but why the photo cannot be shown at that size, if it
+    /// cannot, or a thumbnail held standing in. It wants nothing decoded
     /// ([`want`](Self::want) does).
     pub fn thumbnail(&mut self, path: &Path, longest: u32) -> Thumbnail {
         let (frame, reads) = (self.frame, self.reads);
@@ -603,15 +642,38 @@ impl Textures {
 
     /// The size of the largest image of the photo at `path`, upright: a
     /// JPEG's own size, or a RAW file's largest preview's, which 100 %
-    /// shows. Every decode of a photo tells it, whatever size it was
-    /// decoded at, a thumbnail's or a picture's, so it is known once any
-    /// texture of the photo is held: the newest decode's, from before the
-    /// photos were last read until the photo is decoded again, as the
-    /// texture is. `None` while no texture of the photo is held.
+    /// shows; known as its [`details`](Self::details) are.
     pub fn largest(&self, path: &Path) -> Option<Size> {
+        Some(self.details(path)?.largest)
+    }
+
+    /// What the photo's file at `path` holds, as a decode of it told.
+    /// Every decode of a photo tells it, whatever size it was decoded at,
+    /// a thumbnail's or a picture's, so it is known once any texture of
+    /// the photo is held: the newest decode's, from before the photos
+    /// were last read until the photo is decoded again, as the texture
+    /// is. `None` while no texture of the photo is held.
+    pub fn details(&self, path: &Path) -> Option<&Details> {
         let sizes = self.held.get(path)?;
         let newest = sizes.iter().max_by_key(|held| held.reads)?;
-        Some(newest.largest)
+        Some(&newest.details)
+    }
+
+    /// The longest side, in pixels, of the smallest texture of the photo
+    /// at `path` held, a thumbnail or a picture, whenever it was decoded;
+    /// `None` while none is held. Any texture brings the photo's
+    /// [`details`](Self::details), so what wants only those can want this
+    /// one rather than have another decoded.
+    pub fn smallest_held(&self, path: &Path) -> Option<u32> {
+        self.held.get(path)?.iter().map(|held| held.longest).min()
+    }
+
+    /// Whether a texture of the photo at `path`, of any size, has been
+    /// wanted in this frame so far ([`want`](Self::want)). Drawing one
+    /// ([`thumbnail`](Self::thumbnail), [`picture`](Self::picture)) is not
+    /// wanting it.
+    pub fn is_wanted(&self, path: &Path) -> bool {
+        self.wanted.iter().any(|(wanted, _)| wanted == path)
     }
 
     /// End a frame, after everything is drawn: drop the requests of the
@@ -1275,34 +1337,66 @@ mod tests {
         assert!(!shown.decoded && !shown.coming, "{shown:?}");
     }
 
-    /// The size of a photo's largest image is known from its first decode,
-    /// a thumbnail's or a picture's, whatever size was decoded; it is the
-    /// one known from before the photos were read again until the photo
+    /// What a photo's file holds, the size of its largest image and its
+    /// size on disk among it, is known from its first decode, a
+    /// thumbnail's or a picture's, whatever size was decoded; it is what
+    /// was known from before the photos were read again until the photo
     /// is decoded again, and goes with the photo's last texture.
     #[test]
-    fn a_photo_s_largest_size_is_known_from_any_of_its_decodes() {
+    fn a_photo_s_details_are_known_from_any_of_its_decodes() {
         let dir = folder();
         let [a, b] = ["a.jpg", "b.jpg"].map(|name| dir.path().join(name));
         let ctx = egui::Context::default();
         let mut store = Textures::inline();
         let size = |width, height| Some(Size { width, height });
+        let on_disk = |path: &Path| fs::metadata(path).unwrap().len();
         assert_eq!(store.largest(&a), None);
+        assert_eq!(store.details(&a), None);
         decoded(&mut store, &ctx, &a, 256);
         assert_eq!(store.largest(&a), size(400, 300), "from a thumbnail");
+        let before = on_disk(&a);
+        let details = store.details(&a).unwrap();
+        assert_eq!(details.bytes, before);
+        assert_eq!((details.previews.len(), &details.metadata), (0, &None));
         decoded(&mut store, &ctx, &b, 1024);
         assert_eq!(store.largest(&b), size(400, 300), "from a picture");
 
         fs::write(&a, jpeg(600, 200)).unwrap();
+        assert_ne!(on_disk(&a), before);
         store.shown(1);
         assert_eq!(store.largest(&a), size(400, 300), "until decoded again");
+        assert_eq!(store.details(&a).unwrap().bytes, before);
         decoded(&mut store, &ctx, &a, 1024);
         assert_eq!(store.largest(&a), size(600, 200), "the newest decode's");
+        assert_eq!(store.details(&a).unwrap().bytes, on_disk(&a));
 
         store.budget.pictures = 1;
         store.budget.thumbnails = 1;
         store.begin_frame(&ctx);
         store.end_frame(&ctx);
         assert_eq!(store.largest(&a), None);
+        assert_eq!(store.details(&a), None);
+    }
+
+    /// A photo is wanted in a frame once a texture of it of any size is,
+    /// and not by being drawn; the next frame starts with none wanted.
+    #[test]
+    fn a_photo_is_wanted_in_a_frame_at_any_size_and_not_by_being_drawn() {
+        let dir = folder();
+        let [a, b] = ["a.jpg", "b.jpg"].map(|name| dir.path().join(name));
+        let ctx = egui::Context::default();
+        let mut store = Textures::inline();
+        decoded(&mut store, &ctx, &b, 256);
+        store.begin_frame(&ctx);
+        assert!(!store.is_wanted(&a));
+        store.want(&a, 1024, CURRENT_PICTURE);
+        assert!(store.is_wanted(&a));
+        assert!(texture_of(store.thumbnail(&b, 256)).is_some());
+        assert!(!store.is_wanted(&b), "drawn, not wanted");
+        store.end_frame(&ctx);
+        store.begin_frame(&ctx);
+        assert!(!store.is_wanted(&a));
+        store.end_frame(&ctx);
     }
 
     /// Thumbnails and pictures are let go past budgets of their own:

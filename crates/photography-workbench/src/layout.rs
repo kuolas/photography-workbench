@@ -5,11 +5,11 @@
 //! has it.
 //!
 //! The left dock is where photos are browsed from: it holds the folder
-//! tree, which the app draws in it. The tool rail picks what the
-//! right dock shows, in Library one thing so far, the photo's
-//! information. The bottom dock is the filmstrip's, which only the viewer
-//! has: the grid shows the photos as thumbnails already. The app draws
-//! the filmstrip in it, on the viewer's backdrop.
+//! tree, which the app draws in it. The tool rail picks what the right
+//! dock shows, in Library one thing so far, the photo's information,
+//! which the app draws in it. The bottom dock is the filmstrip's, which
+//! only the viewer has: the grid shows the photos as thumbnails already.
+//! The app draws the filmstrip in it, on the viewer's backdrop.
 
 use desktop_ui::action_bar::{self, Edge};
 use desktop_ui::chrome;
@@ -177,13 +177,15 @@ pub fn tool_rail(ui: &mut egui::Ui, palette: &Palette, docks: &mut Docks) {
 }
 
 /// The side docks `layout` has, each shown or hidden as `docks` says,
-/// `left` adding what the left dock holds. They come before anything
-/// along the bottom, so they run down to the window's bottom edge.
+/// `left` adding what the left dock holds and `right` what the right
+/// dock shows. They come before anything along the bottom, so they run
+/// down to the window's bottom edge.
 pub fn side_docks(
     ui: &mut egui::Ui,
     layout: Layout,
     docks: &mut Docks,
     left: impl FnOnce(&mut egui::Ui),
+    right: impl FnOnce(&mut egui::Ui),
 ) {
     if layout.left_dock {
         let (width, widths) = LEFT_DOCK;
@@ -197,7 +199,7 @@ pub fn side_docks(
         let panel = egui::Panel::right("right_dock")
             .default_size(width)
             .size_range(widths);
-        dock::show(panel, ui, &mut docks.right, info);
+        dock::show(panel, ui, &mut docks.right, right);
     }
 }
 
@@ -226,16 +228,6 @@ pub fn bottom_dock(
     } else {
         ui.skip_ahead_auto_ids(1);
     }
-}
-
-/// The right dock showing Info: the selected photo's information, or a
-/// message saying no photo is selected.
-fn info(ui: &mut egui::Ui) {
-    dock::empty_message(
-        ui,
-        "No photo selected",
-        "Select a photo to see its information",
-    );
 }
 
 #[cfg(test)]
