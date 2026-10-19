@@ -879,8 +879,9 @@ mod tests {
     use eframe::{App as _, Storage as _};
     use egui::accesskit::{Role, Toggled};
     use egui::{Key, Modifiers, ViewportCommand, ViewportId};
-    use egui_kittest::Harness;
     use egui_kittest::kittest::{NodeT as _, Queryable as _};
+    use egui_kittest::wgpu::WgpuTestRenderer;
+    use egui_kittest::{Harness, HarnessBuilder};
 
     use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
     use desktop_ui::keys::KeyCombination;
@@ -948,11 +949,21 @@ mod tests {
         roots: Vec<Root>,
         pixels_per_point: f32,
     ) -> (Harness<'_, PhotographyWorkbenchApp>, Arc<Mutex<Vec<Root>>>) {
+        let builder = Harness::builder().with_pixels_per_point(pixels_per_point);
+        harness_built(builder, storage, roots)
+    }
+
+    /// [`harness_on`], built by `builder`, which says the screen's pixels
+    /// a point and what draws the window, if anything does.
+    fn harness_built(
+        builder: HarnessBuilder<PhotographyWorkbenchApp>,
+        storage: Option<&MemoryStorage>,
+        roots: Vec<Root>,
+    ) -> (Harness<'_, PhotographyWorkbenchApp>, Arc<Mutex<Vec<Root>>>) {
         let roots = Arc::new(Mutex::new(roots));
         let disk = Disk::inline(Arc::clone(&roots));
-        let harness = Harness::builder()
+        let harness = builder
             .with_size(PhotographyWorkbenchApp::MIN_WINDOW)
-            .with_pixels_per_point(pixels_per_point)
             .with_max_steps(8)
             .build_eframe(|cc| {
                 if let Some(storage) = storage {
@@ -5137,5 +5148,140 @@ mod tests {
         let icon = PhotographyWorkbenchApp::icon();
         assert_eq!((icon.width, icon.height), (size, size));
         assert_eq!(icon.rgba.len(), (size * size * 4) as usize);
+    }
+
+    /// How many times [`settle`] lets the app run until it asks for no
+    /// further frame, up to 8 frames each time.
+    const SETTLE_RUNS: usize = 20;
+
+    /// Run frames until no decode is still to come and the app asks for no
+    /// further frame, or [`SETTLE_RUNS`] runs have gone by, so the
+    /// thumbnails and pictures wanted are drawn.
+    fn settle(harness: &mut Harness<'_, PhotographyWorkbenchApp>) {
+        for _ in 0..SETTLE_RUNS {
+            let still = harness.run_ok().is_some();
+            if still && harness.state().textures.pending() == 0 {
+                return;
+            }
+        }
+    }
+
+    /// The app, drawn by the graphics card at one pixel a point, with the
+    /// settings in `storage` saved by an earlier run, and the home folder
+    /// at `folder` selected and settled.
+    fn drawn_harness<'a>(
+        storage: &'a MemoryStorage,
+        folder: &Path,
+    ) -> Harness<'a, PhotographyWorkbenchApp> {
+        let builder = Harness::builder()
+            .with_pixels_per_point(1.0)
+            .renderer(WgpuTestRenderer::default());
+        let (mut harness, _) = harness_built(builder, Some(storage), vec![home(folder)]);
+        harness.get_by_label("Home").click();
+        // The pointer leaves the window once it has clicked, so neither it
+        // nor a hover is drawn.
+        harness.remove_cursor();
+        settle(&mut harness);
+        harness
+    }
+
+    /// Write what `harness` shows to `<theme>-<scene>.png` in `folder`,
+    /// the theme's name in lower case.
+    fn screenshot(
+        harness: &mut Harness<'_, PhotographyWorkbenchApp>,
+        folder: &Path,
+        theme: Theme,
+        scene: &str,
+    ) {
+        let image = harness.render().expect("the window is drawn");
+        let name = format!("{}-{scene}.png", theme.name().to_lowercase());
+        let path = folder.join(name);
+        image.save(&path).unwrap();
+        println!("wrote {}", path.display());
+    }
+
+    /// [`photos_folder`], holding beside its folders a few JPEGs of one
+    /// colour each, in the shapes photos come in: landscape, portrait,
+    /// square and wide.
+    fn generated_photos() -> tempfile::TempDir {
+        let dir = photos_folder();
+        let sizes = [
+            (3000, 2000),
+            (2000, 3000),
+            (2400, 2400),
+            (3200, 1800),
+            (1500, 1000),
+            (1000, 1500),
+        ];
+        for (index, (width, height)) in sizes.into_iter().enumerate() {
+            let name = format!("DSC_{:04}.jpg", index + 1);
+            let jpeg = crate::textures::jpeg(width, height);
+            std::fs::write(dir.path().join(name), jpeg).unwrap();
+        }
+        dir
+    }
+
+    /// The window, drawn by the graphics card at its smallest size, one
+    /// pixel a point, in every theme and scene, written as PNG files for
+    /// people to review the look of every surface. It runs only when asked
+    /// for, with `PW_SCREENSHOTS` naming the folder to write them to:
+    ///
+    /// ```sh
+    /// PW_SCREENSHOTS=/path/to/folder cargo test -p photography-workbench \
+    ///     --lib screenshots -- --ignored
+    /// ```
+    ///
+    /// Each file is named `<theme>-<scene>.png`, the theme's name in lower
+    /// case. The scenes: `grid`, the grid with the home folder selected
+    /// and Info showing its first photo; `viewer`, that photo in the
+    /// viewer, with the filmstrip and Info; `settings`, `about` and
+    /// `shortcuts`, each dialog open over the grid; and `empty`, a folder
+    /// with no photos selected. The home folder is the one
+    /// `PW_SCREENSHOT_PHOTOS` names, to show real photos, or else holds a
+    /// few JPEGs of one colour each, made for the run.
+    #[test]
+    #[ignore = "needs PW_SCREENSHOTS, a folder to write the screenshots to"]
+    fn screenshots() {
+        let Some(out) = std::env::var_os("PW_SCREENSHOTS") else {
+            println!("skipped: PW_SCREENSHOTS names no folder");
+            return;
+        };
+        let out = Path::new(&out);
+        std::fs::create_dir_all(out).unwrap();
+        let generated;
+        let photos = match std::env::var_os("PW_SCREENSHOT_PHOTOS") {
+            Some(folder) => std::path::PathBuf::from(folder),
+            None => {
+                generated = generated_photos();
+                generated.path().to_path_buf()
+            }
+        };
+        let empty = photos_folder();
+        type Shown = fn(&mut PhotographyWorkbenchApp) -> &mut bool;
+        let dialogs: [(&str, Shown); 3] = [
+            ("settings", |app| &mut app.show_settings),
+            ("about", |app| &mut app.show_about),
+            ("shortcuts", |app| &mut app.show_shortcuts),
+        ];
+        for theme in Theme::ALL {
+            let mut storage = MemoryStorage::default();
+            storage.set_string(THEME_KEY, theme.name().to_owned());
+
+            let mut harness = drawn_harness(&storage, &photos);
+            screenshot(&mut harness, out, theme, "grid");
+            for (scene, shown) in dialogs {
+                *shown(harness.state_mut()) = true;
+                settle(&mut harness);
+                screenshot(&mut harness, out, theme, scene);
+                *shown(harness.state_mut()) = false;
+                settle(&mut harness);
+            }
+            harness.state_mut().view = View::Viewer;
+            settle(&mut harness);
+            screenshot(&mut harness, out, theme, "viewer");
+
+            let mut harness = drawn_harness(&storage, empty.path());
+            screenshot(&mut harness, out, theme, "empty");
+        }
     }
 }

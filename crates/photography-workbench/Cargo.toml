@@ -40,9 +40,12 @@ raw-window-handle.workspace = true
 winit.workspace = true
 
 [dev-dependencies]
-egui_kittest = { workspace = true, features = ["eframe"] }
-# JPEG files encoded in the thumbnails' tests.
-image.workspace = true
+# `wgpu` draws the window into an image, for the screenshots rendered on
+# request (src/app.rs).
+egui_kittest = { workspace = true, features = ["eframe", "wgpu"] }
+# JPEG files encoded in the thumbnails' tests, and the screenshots saved as
+# PNG files.
+image = { workspace = true, features = ["png"] }
 # Temporary folders for the folder tree's tests to browse.
 tempfile.workspace = true
 # tests/package_metadata.rs reads this file.

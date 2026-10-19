@@ -57,7 +57,14 @@ relative to `crates/photography-workbench`:
 
 Keeping everything but start-up in the library lets tests drive the UI
 without a display: [egui_kittest](https://github.com/emilk/egui/tree/main/crates/egui_kittest)
-runs the app headless and queries its widgets through AccessKit.
+runs the app headless and queries its widgets through AccessKit. One
+test, `screenshots` in `src/app.rs`, runs only when asked for, with
+`PW_SCREENSHOTS` naming a folder: it has the graphics card draw the
+window at its smallest size, one pixel a point, and writes a PNG file
+of each scene (the grid, the viewer, each dialog, a folder with no
+photos) in each theme, for people to review the look of every surface,
+showing the photos of the folder `PW_SCREENSHOT_PHOTOS` names, or a few
+JPEGs made for the run.
 
 ### desktop-ui
 
