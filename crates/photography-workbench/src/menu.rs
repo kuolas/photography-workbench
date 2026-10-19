@@ -4,8 +4,8 @@
 //! has no menu bar of its own on any system, but a Mac app without one at
 //! the top of the screen is out of place there, so on macOS the app gives
 //! the system one: the app menu with About, Settings and Quit, View with
-//! the views and the docks, Window with the modes, and Help with the
-//! reference of keyboard shortcuts.
+//! the views, the viewer's zoom and the docks, Window with the modes, and
+//! Help with the reference of keyboard shortcuts.
 //!
 //! Its items ask for the app's actions, which the app does just as it
 //! does them for a key or a button. Which items can be chosen and which
@@ -23,6 +23,16 @@
 //! a toggle done again undoes itself, where the window's keys act on a
 //! key's first press only.
 //!
+//! The system gives a key equivalent to its item before the window sees
+//! the key, so a chord an item carries is done once, by the item, and
+//! never by the window's keys too. It does so even while the item cannot
+//! be chosen, when the key does nothing. The zoom's items carry the
+//! viewer's chords, as they can be chosen only there; in the grid, and
+//! wherever else they cannot be chosen, the window's keys would zoom
+//! nothing either. Held down, zooming in or out goes on by a step as the
+//! system repeats the key, until it can go no further, where the window's
+//! keys zoom once.
+//!
 //! Quit closes the window, as closing it any other way does. The menu bar
 //! winit, the windowing library, makes by default has a Quit that would
 //! end the app without closing it, so the app turns that one off
@@ -30,10 +40,12 @@
 
 use desktop_ui::dock::Side;
 
-use crate::keymap::{self, Action};
+use crate::keymap::{self, Action, Surface};
 use crate::layout::Docks;
 use crate::mode::{Layout, Mode};
 use crate::view::View;
+use crate::viewer;
+use crate::zoom::{Framing, Stage, Zooming};
 
 /// What the menu bar shows of the app.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +58,8 @@ pub struct State {
     pub parts: Layout,
     /// Which docks are shown.
     pub docks: Docks,
+    /// Which of the zoom's items can be chosen.
+    pub zooms: Zooms,
     /// Whether a dialog is open.
     pub dialog: bool,
     /// Whether the dialog open is the reference of keyboard shortcuts.
@@ -56,7 +70,8 @@ impl State {
     /// Whether the item that asks for `action` can be chosen. While a
     /// dialog is open none can, as the keys stand down then, but the
     /// reference's own item, which closes it. A mode not built yet cannot
-    /// be chosen, nor a dock the window does not have.
+    /// be chosen, nor a dock the window does not have, nor a change of the
+    /// zoom the toolbar's control for it is disabled for.
     pub fn enabled(&self, action: Action) -> bool {
         if self.dialog {
             return self.shortcuts && action == Action::Shortcuts;
@@ -64,6 +79,7 @@ impl State {
         match action {
             Action::Mode(mode) => mode.is_available(),
             Action::Dock(side) => self.parts.has_dock(side),
+            Action::Zoom(zooming) => self.zooms.can(zooming),
             _ => true,
         }
     }
@@ -82,20 +98,53 @@ impl State {
     }
 }
 
+/// Which of the zoom's items can be chosen, in the order of [`ZOOMS`]:
+/// each while the change of the viewer's zoom it asks for can be, as the
+/// toolbar's control for it is enabled ([`viewer::can_zoom`]); none
+/// outside the viewer, nor before the photo's 100 % is known.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Zooms([bool; ZOOMS.len()]);
+
+impl Zooms {
+    /// The changes that can be asked for of the zoom `shown`: the framing
+    /// the viewer draws its photo with and the stage it zooms it on, `None`
+    /// while nothing can be zoomed.
+    pub fn of(shown: Option<(Framing, Stage)>) -> Self {
+        Self(ZOOMS.map(|(zooming, _)| viewer::can_zoom(shown, zooming)))
+    }
+
+    /// Whether `zooming` can be asked for from its item; never when no
+    /// item asks for it, as for the switch between fitted and 100 %.
+    fn can(self, zooming: Zooming) -> bool {
+        ZOOMS
+            .iter()
+            .zip(self.0)
+            .any(|(&(of, _), can)| of == zooming && can)
+    }
+}
+
 /// The key equivalent of the item that asks for `action`, as the menu
 /// library spells it ("Cmd+Alt+1"): the chord that does `action`
-/// everywhere, when it holds Cmd and the action is no toggle. `None` for
-/// any other.
+/// wherever its item can be chosen, everywhere or, for the zoom, in the
+/// viewer, when it holds Cmd and the action is no toggle. `None` for any
+/// other.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn key_equivalent(action: Action) -> Option<String> {
     let toggles = matches!(
         action,
-        Action::Shortcuts | Action::SideDocks | Action::AllDocks | Action::Dock(_)
+        Action::Shortcuts
+            | Action::SideDocks
+            | Action::AllDocks
+            | Action::Dock(_)
+            | Action::Zoom(Zooming::Toggle)
     );
     if toggles {
         return None;
     }
-    let chord = keymap::chord_everywhere(action)?;
+    let chord = match action {
+        Action::Zoom(_) => keymap::chord_for(Surface::Viewer, action),
+        _ => keymap::chord_everywhere(action),
+    }?;
     let held = chord.modifiers;
     if !held.command {
         return None;
@@ -108,9 +157,22 @@ fn key_equivalent(action: Action) -> Option<String> {
         spelled.push_str("+Shift");
     }
     spelled.push('+');
-    spelled.push_str(chord.key.name());
+    // The menu library knows `=` as "Equal", where egui names it "Equals".
+    spelled.push_str(match chord.key {
+        egui::Key::Equals => "Equal",
+        key => key.name(),
+    });
     Some(spelled)
 }
+
+/// The names of the items for the zoom, in the View menu's order: the
+/// toolbar's names for its controls that do the same.
+const ZOOMS: [(Zooming, &str); 4] = [
+    (Zooming::In, "Zoom in"),
+    (Zooming::Out, "Zoom out"),
+    (Zooming::Fit, "Zoom to fit"),
+    (Zooming::Full, "Zoom to 100 %"),
+];
 
 /// The names of the items for the docks, in the View menu's order.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -174,6 +236,8 @@ impl MacMenu {
         let settings = item("Settings…", Action::Settings);
         let quit = item(&format!("Quit {name}"), Action::Quit);
         let shortcuts = item("Keyboard shortcuts", Action::Shortcuts);
+        let [zoom_in, zoom_out, fit, full] =
+            ZOOMS.map(|(zooming, label)| item(label, Action::Zoom(zooming)));
         let mut checks = Vec::new();
         let mut check = |label: &str, action| {
             let item = CheckMenuItem::new(label, true, false, key(action));
@@ -213,6 +277,11 @@ impl MacMenu {
             &[
                 &grid,
                 &viewer,
+                &PredefinedMenuItem::separator(),
+                &zoom_in,
+                &zoom_out,
+                &fit,
+                &full,
                 &PredefinedMenuItem::separator(),
                 &left,
                 &right,
@@ -325,6 +394,7 @@ impl MacMenu {
 mod tests {
     use super::*;
     use crate::keymap::Step;
+    use crate::zoom::Zoom;
 
     /// Library's grid, every dock shown, no dialog open.
     fn library() -> State {
@@ -333,8 +403,83 @@ mod tests {
             view: View::Grid,
             parts: Mode::Library.layout(),
             docks: Docks::default(),
+            zooms: Zooms::default(),
             dialog: false,
             shortcuts: false,
+        }
+    }
+
+    /// The zoom of a photo 2400 by 1600 pixels, its 100 % known, in a
+    /// room of 800 by 600 points on a screen of a pixel a point, zoomed to
+    /// `zoom`: its framing and its stage.
+    fn shown(zoom: Zoom) -> (Framing, Stage) {
+        let largest = previews::Size {
+            width: 2400,
+            height: 1600,
+        };
+        let room = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let framing = Framing {
+            zoom,
+            ..Framing::default()
+        };
+        (framing, Stage::new(largest, room, 1.0))
+    }
+
+    /// The viewer showing the photo of [`shown`], zoomed to `zoom`.
+    fn viewer(zoom: Zoom) -> State {
+        State {
+            view: View::Viewer,
+            parts: Mode::Library.layout(),
+            zooms: Zooms::of(Some(shown(zoom))),
+            ..library()
+        }
+    }
+
+    /// Whether each of the zoom's items can be chosen, in the View menu's
+    /// order.
+    fn zoom_items(state: State) -> [bool; 4] {
+        ZOOMS.map(|(zooming, _)| state.enabled(Action::Zoom(zooming)))
+    }
+
+    /// Where nothing can be zoomed, in the grid or before the photo's
+    /// 100 % is known, none of the zoom's items can be chosen.
+    #[test]
+    fn the_zoom_s_items_wait_for_a_zoom() {
+        let nothing = State {
+            zooms: Zooms::of(None),
+            ..library()
+        };
+        assert_eq!(zoom_items(nothing), [false; 4]);
+        assert_eq!(zoom_items(library()), [false; 4]);
+    }
+
+    /// Zooming out cannot be chosen while the photo is fitted, nor zooming
+    /// in at 800 %; fitting and 100 % can be whenever something can be
+    /// zoomed.
+    #[test]
+    fn the_zoom_s_items_follow_what_would_change() {
+        assert_eq!(zoom_items(viewer(Zoom::Fit)), [true, false, true, true]);
+        let most = viewer(Zoom::Scale(crate::zoom::MAX_SCALE));
+        assert_eq!(zoom_items(most), [false, true, true, true]);
+        assert_eq!(zoom_items(viewer(Zoom::Scale(1.0))), [true; 4]);
+    }
+
+    /// Each of the zoom's items can be chosen exactly when the viewer's
+    /// rule, which the toolbar's controls follow too, says its change can
+    /// be asked for, whatever the zoom; no item asks for the switch
+    /// between fitted and 100 %.
+    #[test]
+    fn the_zoom_s_items_follow_the_viewer_s_rule() {
+        let scales = [0.25, 0.5, 1.0, 3.0, crate::zoom::MAX_SCALE];
+        let zooms = std::iter::once(Zoom::Fit).chain(scales.map(Zoom::Scale));
+        for zoom in zooms {
+            let state = viewer(zoom);
+            for (zooming, _) in ZOOMS {
+                let can = viewer::can_zoom(Some(shown(zoom)), zooming);
+                let enabled = state.enabled(Action::Zoom(zooming));
+                assert_eq!(enabled, can, "{zoom:?} {zooming:?}");
+            }
+            assert!(!state.enabled(Action::Zoom(Zooming::Toggle)), "{zoom:?}");
         }
     }
 
@@ -385,13 +530,18 @@ mod tests {
             Action::View(View::Viewer),
             Action::Photo(Step::Next),
             Action::Dock(Side::Left),
+            Action::Zoom(Zooming::In),
+            Action::Zoom(Zooming::Out),
+            Action::Zoom(Zooming::Fit),
+            Action::Zoom(Zooming::Full),
         ];
+        let zoomed = viewer(Zoom::Scale(1.0));
         let settings = State {
             dialog: true,
-            ..library()
+            ..zoomed
         };
         for action in actions {
-            assert!(library().enabled(action), "{action:?}");
+            assert!(zoomed.enabled(action), "{action:?}");
             assert!(!settings.enabled(action), "{action:?}");
         }
         let reference = State {
@@ -417,6 +567,26 @@ mod tests {
         assert_eq!(spelled(Action::Dock(Side::Left)), None, "F7");
         assert_eq!(spelled(Action::Photo(Step::Next)), None, "Right");
         assert_eq!(spelled(Action::About), None, "no chord");
+        let zoom = |zooming| spelled(Action::Zoom(zooming));
+        assert_eq!(zoom(Zooming::In).as_deref(), Some("Cmd+Equal"));
+        assert_eq!(zoom(Zooming::Out).as_deref(), Some("Cmd+Minus"));
+        assert_eq!(zoom(Zooming::Fit).as_deref(), Some("Cmd+0"));
+        assert_eq!(zoom(Zooming::Full).as_deref(), Some("Cmd+Alt+0"));
+        assert_eq!(zoom(Zooming::Toggle), None, "a toggle");
+    }
+
+    /// The zoom's items carry the chords the viewer's keys and the
+    /// toolbar's controls name, which hold Cmd.
+    #[test]
+    fn the_zoom_s_items_carry_the_viewer_s_chords() {
+        for (zooming, _) in ZOOMS {
+            let chord = keymap::chord_for(Surface::Viewer, Action::Zoom(zooming)).unwrap();
+            assert!(chord.modifiers.command, "{zooming:?}");
+            assert!(
+                key_equivalent(Action::Zoom(zooming)).is_some(),
+                "{zooming:?}"
+            );
+        }
     }
 
     /// The menu library reads every key equivalent as the chord it is.
@@ -432,6 +602,22 @@ mod tests {
             (
                 Action::Mode(Mode::Library),
                 Accelerator::new(cmd | Modifiers::ALT, Code::Digit1),
+            ),
+            (
+                Action::Zoom(Zooming::In),
+                Accelerator::new(cmd, Code::Equal),
+            ),
+            (
+                Action::Zoom(Zooming::Out),
+                Accelerator::new(cmd, Code::Minus),
+            ),
+            (
+                Action::Zoom(Zooming::Fit),
+                Accelerator::new(cmd, Code::Digit0),
+            ),
+            (
+                Action::Zoom(Zooming::Full),
+                Accelerator::new(cmd | Modifiers::ALT, Code::Digit0),
             ),
         ];
         for (action, accelerator) in expected {

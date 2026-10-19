@@ -330,23 +330,32 @@ impl PhotographyWorkbenchApp {
     /// can have changed that, by opening a dialog, for one.
     fn perform_from_menu(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
         for action in actions {
-            if self.menu_state().enabled(action) {
+            if self.menu_state(ctx).enabled(action) {
                 self.perform(ctx, action);
             }
         }
     }
 
     /// What the menu bar shows of the app: the mode, the view and the
-    /// docks shown, and whether a dialog is open.
-    fn menu_state(&self) -> menu::State {
+    /// docks shown, which changes of the zoom can be asked for, as the
+    /// toolbar's zoom controls show them, and whether a dialog is open.
+    fn menu_state(&self, ctx: &egui::Context) -> menu::State {
+        let zoom = self.shows_viewer().then(|| self.zoom_shown(ctx)).flatten();
         menu::State {
             mode: self.mode,
             view: self.view,
             parts: self.parts(),
             docks: self.docks,
+            zooms: menu::Zooms::of(zoom),
             dialog: self.show_settings || self.show_about || self.show_shortcuts,
             shortcuts: self.show_shortcuts,
         }
+    }
+
+    /// Whether the centre shows Library's viewer, which alone has the
+    /// zoom controls.
+    fn shows_viewer(&self) -> bool {
+        self.mode == Mode::Library && self.view == View::Viewer
     }
 
     /// Do what `action` asks, whether a key, a button or a menu item asked
@@ -575,9 +584,9 @@ const ZOOM_GAP: f32 = 6.0;
 /// and no zoom is shown. The zoom shown is a whole percent, fitted too,
 /// the fit's for the room the viewer was last drawn in, so it changes as
 /// the window or the docks do. Zooming in and out are disabled where they
-/// would change nothing; fit is shown selected while the photo is fitted,
-/// and 100 % while the zoom shown reads 100 %, fitted or not. What was
-/// clicked, if anything.
+/// would change nothing ([`viewer::can_zoom`]); fit is shown selected
+/// while the photo is fitted, and 100 % while the zoom shown reads 100 %,
+/// fitted or not. What was clicked, if anything.
 fn zoom_controls(
     ui: &mut egui::Ui,
     palette: &theme::Palette,
@@ -586,12 +595,7 @@ fn zoom_controls(
     let percent = shown.map(|(framing, stage)| stage.percent(framing.zoom));
     let mut clicked = None;
     let mut button = |ui: &mut egui::Ui, (zooming, name, icon): (Zooming, &str, (&str, char))| {
-        let enabled = match zooming {
-            Zooming::In | Zooming::Out => {
-                shown.is_some_and(|(framing, stage)| stage.zoomed(framing, zooming) != framing)
-            }
-            _ => shown.is_some(),
-        };
+        let enabled = viewer::can_zoom(shown, zooming);
         let selected = match zooming {
             Zooming::Fit => shown.is_some_and(|(framing, _)| framing.zoom == Zoom::Fit),
             Zooming::Full => percent == Some(100),
@@ -717,7 +721,7 @@ impl eframe::App for PhotographyWorkbenchApp {
     /// it showing, and its Quit must still close the window.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.menu_clicks(ctx);
-        let state = self.menu_state();
+        let state = self.menu_state(ctx);
         if let Some(menu) = &mut self.menu {
             menu.show(state);
         }
@@ -767,8 +771,7 @@ impl eframe::App for PhotographyWorkbenchApp {
             // The mode's own controls hold the app while the toolbar is
             // drawn, so the zoom controls read the viewer's zoom before it,
             // and a click on one is done after it, still before the centre.
-            let viewer = self.mode == Mode::Library && self.view == View::Viewer;
-            let zoom_shown = viewer.then(|| self.zoom_shown(ui.ctx()));
+            let zoom_shown = self.shows_viewer().then(|| self.zoom_shown(ui.ctx()));
             let mut zoomed = None;
             let start = |ui: &mut egui::Ui| self.mode_controls(ui, &palette);
             let end = |ui: &mut egui::Ui| {
@@ -840,7 +843,7 @@ impl eframe::App for PhotographyWorkbenchApp {
         }
 
         // The menu bar shows the app as this frame leaves it.
-        let state = self.menu_state();
+        let state = self.menu_state(ui.ctx());
         if let Some(menu) = &mut self.menu {
             menu.show(state);
         }
@@ -877,7 +880,7 @@ mod tests {
 
     use super::{
         Action, Docks, Framing, MODE_KEY, Mode, PhotographyWorkbenchApp, Side, THEME_KEY,
-        TITLE_BAR_ICONS, Textures, Theme, VIEW_KEY, View, ZOOM_BUTTONS,
+        TITLE_BAR_ICONS, Textures, Theme, VIEW_KEY, View, ZOOM_BUTTONS, Zooming,
     };
 
     /// Settings kept in memory, in place of eframe's file.
@@ -1274,7 +1277,8 @@ mod tests {
             ..PhotographyWorkbenchApp::default()
         };
         app.docks.right = false;
-        let state = app.menu_state();
+        let ctx = egui::Context::default();
+        let state = app.menu_state(&ctx);
         assert_eq!(state.mode, Mode::Library);
         assert_eq!(state.view, View::Viewer);
         assert!(state.parts.bottom_dock, "the viewer has the filmstrip");
@@ -1286,11 +1290,11 @@ mod tests {
         ] {
             let mut app = PhotographyWorkbenchApp::default();
             open(&mut app);
-            let state = app.menu_state();
+            let state = app.menu_state(&ctx);
             assert!(state.dialog && !state.shortcuts);
         }
         app.show_shortcuts = true;
-        let state = app.menu_state();
+        let state = app.menu_state(&ctx);
         assert!(state.dialog && state.shortcuts);
     }
 
@@ -4300,6 +4304,80 @@ mod tests {
         assert_eq!(zoom_shown(&harness), fitted_shown(&harness));
         assert!(is_on(&harness, "Zoom to fit"));
         assert_fitted(viewer_texture(&harness).1, room, 1.5);
+    }
+
+    /// The menu bar's zoom items can be chosen exactly when the toolbar's
+    /// controls that do the same are enabled: none in the grid, before the
+    /// viewer is shown or after, nor in the viewer before the photo's
+    /// 100 % is known; zooming out not while the photo is fitted, nor
+    /// zooming in at 800 %.
+    #[test]
+    fn the_zoom_s_menu_items_follow_its_controls() {
+        let zoomings = [Zooming::In, Zooming::Out, Zooming::Fit, Zooming::Full];
+        let labels = ["Zoom in", "Zoom out", "Zoom to fit", "Zoom to 100 %"];
+        let items = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let state = harness.state().menu_state(&harness.ctx);
+            zoomings.map(|zooming| state.enabled(Action::Zoom(zooming)))
+        };
+        let controls = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            labels.map(|label| !harness.get_by_label(label).accesskit_node().is_disabled())
+        };
+        let (dir, _) = folder_of_jpegs(2400, 1600);
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        harness.state_mut().textures.stall(true);
+        click(&mut harness, "Home");
+        assert_eq!(items(&harness), [false; 4], "the grid");
+        click(&mut harness, "Image viewer");
+        assert_eq!(items(&harness), [false; 4], "100 % not known");
+        assert_eq!(controls(&harness), [false; 4], "100 % not known");
+
+        harness.state_mut().textures.stall(false);
+        harness.run();
+        assert_eq!(items(&harness), [true, false, true, true], "fitted");
+        assert_eq!(controls(&harness), items(&harness), "fitted");
+        // A step at a time, past the last step, which does nothing.
+        for _ in crate::zoom::STEPS {
+            click(&mut harness, "Zoom in");
+        }
+        assert_eq!(zoom_shown(&harness), "800 %");
+        assert_eq!(items(&harness), [false, true, true, true], "800 %");
+        assert_eq!(controls(&harness), items(&harness), "800 %");
+        click(&mut harness, "Thumbnail grid");
+        assert_eq!(items(&harness), [false; 4], "back in the grid");
+    }
+
+    /// A zoom item of the menu bar zooms exactly as its key does, one
+    /// change after another.
+    #[test]
+    fn a_zoom_menu_item_zooms_as_its_key_does() {
+        let (mut keyed, _dir, _) = zoom_harness(1.0);
+        let (mut chosen, _other_dir, _) = zoom_harness(1.0);
+        let changes = [
+            (Zooming::In, Modifiers::COMMAND, Key::Equals),
+            (Zooming::In, Modifiers::COMMAND, Key::Equals),
+            (Zooming::Out, Modifiers::COMMAND, Key::Minus),
+            (
+                Zooming::Full,
+                Modifiers::COMMAND | Modifiers::ALT,
+                Key::Num0,
+            ),
+            (Zooming::In, Modifiers::COMMAND, Key::Equals),
+            (Zooming::Fit, Modifiers::COMMAND, Key::Num0),
+        ];
+        for (zooming, modifiers, key) in changes {
+            press(&mut keyed, modifiers, key);
+            let ctx = chosen.ctx.clone();
+            chosen
+                .state_mut()
+                .perform_from_menu(&ctx, vec![Action::Zoom(zooming)]);
+            chosen.run();
+            let framing =
+                |harness: &Harness<'_, PhotographyWorkbenchApp>| harness.state().viewer.framing();
+            assert_eq!(framing(&chosen), framing(&keyed), "{zooming:?}");
+            assert_eq!(zoom_shown(&chosen), zoom_shown(&keyed), "{zooming:?}");
+            assert_eq!(viewer_texture(&chosen).1, viewer_texture(&keyed).1);
+        }
+        assert_eq!(zoom_shown(&chosen), fitted_shown(&chosen));
     }
 
     /// The zoom controls are the viewer's: the grid has none.

@@ -223,6 +223,21 @@ pub fn zoom(
     state.framing = framing;
 }
 
+/// Whether `zooming` can be asked for of the zoom `shown`: the framing the
+/// viewer draws its photo with and the stage it zooms it on, `None` while
+/// nothing can be zoomed, outside the viewer or before the photo's 100 %
+/// is known, when nothing can. Zooming in and out can only where they
+/// would change something. The toolbar's zoom controls and the menu bar's
+/// zoom items are enabled by it, so the two never disagree.
+pub fn can_zoom(shown: Option<(Framing, Stage)>, zooming: Zooming) -> bool {
+    match zooming {
+        Zooming::In | Zooming::Out => {
+            shown.is_some_and(|(framing, stage)| stage.zoomed(framing, zooming) != framing)
+        }
+        Zooming::Toggle | Zooming::Fit | Zooming::Full => shown.is_some(),
+    }
+}
+
 /// What the toolbar says of the zoom shown at `percent` of 100 %, as
 /// [`Stage::percent`] reads it, fitted or not: "200 %". Nothing while
 /// there is no percent to read, before the photo's 100 % is known.
