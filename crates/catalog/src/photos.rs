@@ -61,6 +61,20 @@ impl Photo {
     pub fn name(&self) -> Cow<'_, str> {
         self.path.file_name().unwrap_or_default().to_string_lossy()
     }
+
+    /// The photo's format, for showing: for a RAW file its own extension
+    /// in capitals, as the cameras name it, "NRW" for an `.nrw` file and
+    /// "NEF" for a `.nef` one; "JPEG" for a JPEG file, whether its
+    /// extension is `.jpg` or `.jpeg`.
+    pub fn format(&self) -> String {
+        match self.kind {
+            Kind::Jpeg => "JPEG".to_owned(),
+            Kind::Raw(format) => self.path.extension().map_or_else(
+                || format.name().to_owned(),
+                |extension| extension.to_string_lossy().to_uppercase(),
+            ),
+        }
+    }
 }
 
 /// A folder's photos, in natural order of their names (`DSC_2` before
@@ -221,6 +235,37 @@ mod tests {
                         Some(Kind::Raw(format)),
                         "{name}"
                     );
+                }
+            }
+        }
+    }
+
+    /// A photo whose file is named `name`, of the kind its extension
+    /// tells.
+    fn photo(name: &str) -> Photo {
+        let path = PathBuf::from(name);
+        let kind = Kind::of(&path).unwrap();
+        Photo { path, kind }
+    }
+
+    /// A RAW file's format is its own extension in capitals, a JPEG
+    /// file's is "JPEG" whichever of its two extensions it has.
+    #[test]
+    fn a_photo_s_format_is_named_by_its_extension() {
+        let format = |name: &str| photo(name).format();
+        assert_eq!(format("DSC_0001.NEF"), "NEF");
+        assert_eq!(format("DSCN0001.nrw"), "NRW");
+        assert_eq!(format("DSC00001.ARW"), "ARW");
+        assert_eq!(format("DSC00001.sr2"), "SR2");
+        assert_eq!(format("DSC00001.srf"), "SRF");
+        assert_eq!(format("DSC00001.arq"), "ARQ");
+        assert_eq!(format("IMG_0001.jpg"), "JPEG");
+        assert_eq!(format("IMG_0001.JPEG"), "JPEG");
+        for &format in Format::all() {
+            for extension in format.extensions() {
+                let upper = extension.to_uppercase();
+                for name in [format!("x.{extension}"), format!("x.{upper}")] {
+                    assert_eq!(photo(&name).format(), upper, "{name}");
                 }
             }
         }

@@ -72,8 +72,9 @@ Nothing has been released yet.
   under Zoom. Elsewhere those keys do nothing; none of them changes the
   size of the whole window.
 - In Library, with the viewer, the filmstrip under it shows the
-  folder's photos in a row, each with its name and its format (NEF, ARW
-  or JPEG) above its thumbnail, the current one outlined; a long name
+  folder's photos in a row, each with its name and its format, the
+  file's extension in capitals (NEF, NRW, ARW) and JPEG for a JPEG file,
+  above its thumbnail, the current one outlined; a long name
   is cut short, and the format stays in sight. A photo that cannot be
   shown says why when the pointer rests on it. A click makes a photo
   the current one. A mouse wheel scrolls it
