@@ -727,8 +727,8 @@ mod tests {
         })
     }
 
-    /// A button with a chord names it in its tooltip, and keeps its label
-    /// as its name.
+    /// A button with a key combination names it in its tooltip, and keeps
+    /// its label as its name.
     #[test]
     fn a_button_s_tooltip_names_its_combination() {
         let palette = Theme::Paper.palette();
@@ -756,8 +756,8 @@ mod tests {
         }
     }
 
-    /// A selectable button's word says what it is, so without a chord it
-    /// has no tooltip to repeat it.
+    /// A selectable button's word says what it is, so without a key
+    /// combination it has no tooltip to repeat it.
     #[test]
     fn a_selectable_button_without_a_combination_has_no_tooltip() {
         let mut harness = harness(vec2(400.0, TITLE_BAR_HEIGHT), false, |ui| {

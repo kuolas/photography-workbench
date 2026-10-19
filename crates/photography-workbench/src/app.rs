@@ -272,10 +272,10 @@ impl PhotographyWorkbenchApp {
         }
     }
 
-    /// Do what the keyboard shortcuts pressed in this frame ask. They
-    /// stand down while a dialog is open, all but the reference's own
-    /// chord, which closes it, and while a text field has the keyboard,
-    /// as what is typed there is the field's.
+    /// Do what the keyboard shortcuts pressed in this frame ask. They stand
+    /// down while a dialog is open, all but the reference's own key
+    /// combination, which closes it, and while a text field has the
+    /// keyboard, as what is typed there is the field's.
     ///
     /// The keys of the shortcuts that apply here are taken out of the
     /// frame's input before anything is drawn, held down as well as
@@ -1344,8 +1344,8 @@ mod tests {
         })
     }
 
-    /// The title bar's and the toolbar's buttons name in their tooltips
-    /// the chord that does what they do, as this system spells it.
+    /// The title bar's and the toolbar's buttons name in their tooltips the
+    /// key combination that does what they do, as this system spells it.
     #[test]
     fn a_button_s_tooltip_names_its_combination() {
         let mut harness = viewer_harness();
@@ -4595,8 +4595,8 @@ mod tests {
         }
     }
 
-    /// The zoom buttons name in their tooltips the chord that does what
-    /// they do, as this system spells it.
+    /// The zoom buttons name in their tooltips the key combination that does
+    /// what they do, as this system spells it.
     #[test]
     fn a_zoom_button_s_tooltip_names_its_combination() {
         let (mut harness, _dir, _) = zoom_harness(1.0);

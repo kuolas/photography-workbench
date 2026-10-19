@@ -1,29 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! Keyboard shortcuts: a key and the modifiers held with it
-//! ([`KeyCombination`]), how a chord is spelled on each system, whether it
-//! was pressed, and taking it out of the frame's input, so nothing else acts
-//! on its key; and the reference that lists an app's shortcuts
-//! ([`reference()`]).
+//! ([`KeyCombination`]), how a key combination is spelled on each system,
+//! whether it was pressed, and taking it out of the frame's input, so
+//! nothing else acts on its key; and the reference that lists an app's
+//! shortcuts ([`reference()`]).
 //!
-//! What a chord does is the app's business: an app keeps its own table of
-//! actions and their chords, asks a chord whether it was pressed, and
-//! builds its reference from the same table, so the two cannot disagree.
+//! What a key combination does is the app's business: an app keeps its own
+//! table of actions and their combinations, asks a combination whether it
+//! was pressed, and builds its reference from the same table, so the two
+//! cannot disagree.
 
 use egui::{Event, FontFamily, FontId, Grid, Key, Label, Modifiers, RichText};
 
 use crate::fonts;
 
-/// The gap between a reference's chords and their descriptions.
+/// The gap between a reference's key combinations and their descriptions.
 const COLUMN_GAP: f32 = 18.0;
 
-/// The narrowest a reference's descriptions are, however little room the
-/// chords leave them.
+/// The narrowest a reference's descriptions are, however little room the key
+/// combinations leave them.
 const MIN_DESCRIPTION_WIDTH: f32 = 160.0;
 
 /// A key pressed with a set of modifiers, such as Ctrl+Q. Its
-/// [`Modifiers::COMMAND`] is Cmd on macOS and Ctrl elsewhere, so one chord
-/// serves both, spelled the way each system spells it.
+/// [`Modifiers::COMMAND`] is Cmd on macOS and Ctrl elsewhere, so one key
+/// combination serves both, spelled the way each system spells it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyCombination {
     /// The modifiers held with the key.
@@ -38,47 +39,48 @@ impl KeyCombination {
         Self { modifiers, key }
     }
 
-    /// Whether the chord was pressed in this frame: its key went down
-    /// with exactly its modifiers held, so G is not pressed by Shift+G,
+    /// Whether the key combination was pressed in this frame: its key went
+    /// down with exactly its modifiers held, so G is not pressed by Shift+G,
     /// but for a punctuation character the keyboard types with Shift on
     /// another key, as a German one types `/` with Shift+7: that Shift is
-    /// the keyboard's, not the chord's. A key held down repeats, but only
-    /// its first press counts, so a chord that shows or hides something
-    /// does it once.
+    /// the keyboard's, not the combination's. A key held down repeats, but
+    /// only its first press counts, so a combination that shows or hides
+    /// something does it once.
     pub fn pressed(self, ctx: &egui::Context) -> bool {
         self.went_down(ctx, false)
     }
 
-    /// Whether the chord was pressed in this frame, as for
+    /// Whether the key combination was pressed in this frame, as for
     /// [`pressed`](Self::pressed), or its key, held down since, repeated:
-    /// for a chord that moves through something, as to the next photo,
-    /// which keeps moving while the key is held. A held key repeats as
-    /// the system repeats it in a text field, after the system's delay
-    /// and at its pace, so a press moves once and a short hold no more.
+    /// for a combination that moves through something, as to the next photo,
+    /// which keeps moving while the key is held. A held key repeats as the
+    /// system repeats it in a text field, after the system's delay and at
+    /// its pace, so a press moves once and a short hold no more.
     pub fn pressed_or_repeated(self, ctx: &egui::Context) -> bool {
         self.went_down(ctx, true)
     }
 
-    /// Take the chord out of this frame's input, so nothing that reads
-    /// the input after it, such as a widget drawn later in the frame, sees
-    /// its key go down too: each time the key went down with the chord's
-    /// modifiers held, as [`pressed`](Self::pressed) counts it, or, held
-    /// down, repeated. egui takes Enter and Space for a click on the
-    /// widget that has the keyboard focus, so a chord that does something
-    /// is taken before any widget is drawn, or one press would do two
-    /// things. Its repeats go too, even for a chord that does nothing
-    /// with them, as the held key is still the chord's. The key coming
-    /// back up is left, as no widget does anything with that. egui's own
-    /// `consume_key` would take a key held with more modifiers than the
-    /// chord's, Shift+G for G, which is another chord or none.
+    /// Take the key combination out of this frame's input, so nothing that
+    /// reads the input after it, such as a widget drawn later in the frame,
+    /// sees its key go down too: each time the key went down with the
+    /// combination's modifiers held, as [`pressed`](Self::pressed) counts
+    /// it, or, held down, repeated. egui takes Enter and Space for a click
+    /// on the widget that has the keyboard focus, so a combination that does
+    /// something is taken before any widget is drawn, or one press would do
+    /// two things. Its repeats go too, even for a combination that does
+    /// nothing with them, as the held key is still the combination's. The
+    /// key coming back up is left, as no widget does anything with that.
+    /// egui's own `consume_key` would take a key held with more modifiers
+    /// than the combination's, Shift+G for G, which is another combination
+    /// or none.
     pub fn take(self, ctx: &egui::Context) {
         ctx.input_mut(|input| {
             input.events.retain(|event| !self.goes_down_in(event, true));
         });
     }
 
-    /// Whether the chord's key went down in this frame with its
-    /// modifiers held, counting a held key's repeats when `repeats`.
+    /// Whether its key went down in this frame with its modifiers held,
+    /// counting a held key's repeats when `repeats`.
     fn went_down(self, ctx: &egui::Context, repeats: bool) -> bool {
         ctx.input(|input| {
             input
@@ -88,8 +90,8 @@ impl KeyCombination {
         })
     }
 
-    /// Whether `event` is the chord's key going down with its modifiers
-    /// held, or, when `repeats`, repeating.
+    /// Whether `event` is its key going down with its modifiers held, or,
+    /// when `repeats`, repeating.
     fn goes_down_in(self, event: &Event, repeats: bool) -> bool {
         matches!(event, Event::Key { key, physical_key, pressed: true, repeat, modifiers }
             if *key == self.key
@@ -97,13 +99,13 @@ impl KeyCombination {
                 && self.held_with(*modifiers, *physical_key))
     }
 
-    /// Whether `held` are the chord's modifiers, for its key typed on the
-    /// keyboard's key `physical`. Shift is left out when the chord has
-    /// none and its punctuation character came from another key, which
-    /// takes Shift to type it. A character typed on its own key with
-    /// Shift held is another character (`?` from `/`) or, where egui has
-    /// no key for it (`<` from `,` on a US keyboard), comes as that key
-    /// with Shift, which is another chord.
+    /// Whether `held` are its modifiers, for its key typed on the keyboard's
+    /// key `physical`. Shift is left out when the combination has none and
+    /// its punctuation character came from another key, which takes Shift
+    /// to type it. A character typed on its own key with Shift held is
+    /// another character (`?` from `/`) or, where egui has no key for it
+    /// (`<` from `,` on a US keyboard), comes as that key with Shift, which
+    /// is another combination.
     fn held_with(self, held: Modifiers, physical: Option<Key>) -> bool {
         let shifted_elsewhere = physical.is_some_and(|physical| physical != self.key);
         if !self.modifiers.shift && is_punctuation(self.key) && shifted_elsewhere {
@@ -113,14 +115,14 @@ impl KeyCombination {
         }
     }
 
-    /// The chord as this system spells it: "⌥⌘1" on macOS, "Ctrl+Alt+1"
-    /// elsewhere.
+    /// The key combination as this system spells it: "⌥⌘1" on macOS,
+    /// "Ctrl+Alt+1" elsewhere.
     pub fn label(self) -> String {
         self.label_for(cfg!(target_os = "macos"))
     }
 
-    /// The chord as macOS spells it, when `mac`, or as Windows and Linux
-    /// do: on macOS the modifiers' symbols in the order its menus give
+    /// The key combination as macOS spells it, when `mac`, or as Windows and
+    /// Linux do: on macOS the modifiers' symbols in the order its menus give
     /// them, ⌃⌥⇧⌘, run into the key; elsewhere their names in the order
     /// Ctrl, Alt, Shift, each followed by a plus.
     pub fn label_for(self, mac: bool) -> String {
@@ -173,9 +175,9 @@ fn is_punctuation(key: Key) -> bool {
     )
 }
 
-/// What the tooltip of a control with a chord says: its `label`, then, when
-/// it has one, the `key_combination` that does what a click on it does, in
-/// brackets: "Thumbnail grid (G)".
+/// What the tooltip of a control with a key combination says: its `label`,
+/// then, when it has one, the `key_combination` that does what a click on it
+/// does, in brackets: "Thumbnail grid (G)".
 pub fn tooltip(label: &str, key_combination: Option<KeyCombination>) -> String {
     match key_combination {
         Some(key_combination) => format!("{label} ({})", key_combination.label()),
@@ -183,8 +185,8 @@ pub fn tooltip(label: &str, key_combination: Option<KeyCombination>) -> String {
     }
 }
 
-/// One section of a shortcut reference: its title, and its rows, each a
-/// chord's label and what the chord does.
+/// One section of a shortcut reference: its title, and its rows, each a key
+/// combination's label and what the combination does.
 pub struct Section<'a> {
     /// The section's title.
     pub title: &'a str,
@@ -193,12 +195,12 @@ pub struct Section<'a> {
 }
 
 /// A reference of keyboard shortcuts: each section's title over its rows,
-/// the chord at the left and what it does at the right, with a line
-/// between sections. A section with no rows is left out.
+/// the key combination at the left and what it does at the right, with a
+/// line between sections. A section with no rows is left out.
 ///
-/// The chords' column is as wide as the widest chord in any section, so
-/// the descriptions line up from one section to the next. A description
-/// longer than the room left beside the chords wraps.
+/// The key combinations' column is as wide as the widest combination in any
+/// section, so the descriptions line up from one section to the next. A
+/// description longer than the room left beside the combinations wraps.
 pub fn reference(ui: &mut egui::Ui, sections: &[Section<'_>]) {
     let body = egui::TextStyle::Body.resolve(ui.style());
     let combinations_width = sections
@@ -276,8 +278,8 @@ mod tests {
         assert_eq!(label(all, Key::Q), "⌃⌥⇧⌘Q");
     }
 
-    /// The window's typeface draws the modifiers' symbols that macOS's
-    /// chords are spelled with.
+    /// The window's typeface draws the modifiers' symbols that macOS's key
+    /// combinations are spelled with.
     #[test]
     fn the_typeface_draws_the_modifier_symbols() {
         let ctx = egui::Context::default();
@@ -373,8 +375,8 @@ mod tests {
         pressed
     }
 
-    /// A punctuation character the keyboard types with Shift on another
-    /// key presses its chord with Shift held; one typed on its own key
+    /// A punctuation character the keyboard types with Shift on another key
+    /// presses its key combination with Shift held; one typed on its own key
     /// with Shift held does not, nor does a letter.
     #[test]
     fn shift_counts_only_where_the_combination_s_character_needs_it() {
@@ -406,7 +408,7 @@ mod tests {
             !typed(ctrl_comma, (Key::Comma, Key::Comma), ctrl_shift),
             "Ctrl+Shift+,"
         );
-        // A chord with Shift of its own needs it.
+        // A key combination with Shift of its own needs it.
         let ctrl_shift_comma = KeyCombination::new(ctrl_shift, Key::Comma);
         assert!(!typed(
             ctrl_shift_comma,
@@ -425,7 +427,7 @@ mod tests {
             (Key::Plus, Key::CloseBracket),
             Modifiers::COMMAND
         ));
-        // The `=` key alone types `=`, which is another chord.
+        // The `=` key alone types `=`, which is another key combination.
         let ctrl_equals = KeyCombination::new(Modifiers::COMMAND, Key::Equals);
         assert!(!typed(
             ctrl_plus,
@@ -449,8 +451,8 @@ mod tests {
         assert_eq!(presses, [true, false, false]);
     }
 
-    /// A key held down repeats a chord that asks for its repeats, with
-    /// exactly its modifiers held, as when it was first pressed.
+    /// A key held down repeats a key combination that asks for its repeats,
+    /// with exactly its modifiers held, as when it was first pressed.
     #[test]
     fn a_key_held_down_repeats_a_combination_that_counts_its_repeats() {
         let right = KeyCombination::new(Modifiers::NONE, Key::ArrowRight);
@@ -516,9 +518,9 @@ mod tests {
             .collect()
     }
 
-    /// Taking a chord takes its key going down, and repeating, out of the
-    /// frame's input, and leaves every other key, the same key with other
-    /// modifiers held, and its key coming back up.
+    /// Taking a key combination takes its key going down, and repeating, out
+    /// of the frame's input, and leaves every other key, the same key with
+    /// other modifiers held, and its key coming back up.
     #[test]
     fn taking_a_combination_takes_only_its_key_going_down() {
         let enter = KeyCombination::new(Modifiers::NONE, Key::Enter);
@@ -540,9 +542,10 @@ mod tests {
         assert_eq!(left_by_taking(enter, events), left);
     }
 
-    /// Taking a chord takes a punctuation character typed with Shift on
-    /// another key, which presses the chord, as well as one typed on its
-    /// own key, and leaves one typed with modifiers that do not.
+    /// Taking a key combination takes a punctuation character typed with
+    /// Shift on another key, which presses the combination, as well as one
+    /// typed on its own key, and leaves one typed with modifiers that do
+    /// not.
     #[test]
     fn taking_a_combination_takes_it_however_the_keyboard_types_it() {
         let ctrl_slash = KeyCombination::new(Modifiers::COMMAND, Key::Slash);

@@ -111,10 +111,10 @@ mod tests {
     use crate::icons;
     use crate::theme::Theme;
 
-    /// A toolbar with "Grid" and "Viewer" at its start, "Grid" selected
-    /// when `selected` and with G as its chord, and "Zoom" at its end. The
-    /// bar's rectangle goes into `bar`; the first frame installs the icon
-    /// font, which egui uses from the next frame on, and draws nothing.
+    /// A toolbar with "Grid" and "Viewer" at its start, "Grid" selected when
+    /// `selected` and with G as its key combination, and "Zoom" at its end.
+    /// The bar's rectangle goes into `bar`; the first frame installs the
+    /// icon font, which egui uses from the next frame on, and draws nothing.
     fn toolbar(selected: bool, bar: Rc<Cell<Rect>>) -> Harness<'static> {
         let palette = Theme::Paper.palette();
         let mut fonts_installed = false;
