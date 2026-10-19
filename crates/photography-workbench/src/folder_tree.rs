@@ -40,15 +40,17 @@ const CORNER_RADIUS: f32 = 4.0;
 const ICON_SIZE: f32 = 16.0;
 
 /// Where the arrow's square is centred, from the row's left edge before
-/// indenting.
-const ARROW_CENTRE: f32 = 10.0;
+/// indenting: its square starts where the rounded rectangle behind the
+/// row does, so the arrow lies inside it, as far from the dock's edge as
+/// that rectangle is.
+const ARROW_CENTRE: f32 = INSET + ICON_SIZE / 2.0;
 
 /// Where the icon's square starts, from the row's left edge before
-/// indenting.
-const ICON_LEFT: f32 = 18.0;
+/// indenting: where the arrow's ends.
+const ICON_LEFT: f32 = INSET + ICON_SIZE;
 
 /// Where the name starts, from the row's left edge before indenting.
-const NAME_LEFT: f32 = 42.0;
+const NAME_LEFT: f32 = 48.0;
 
 /// The size of a folder's name.
 const NAME_SIZE: f32 = 13.5;

@@ -2340,8 +2340,30 @@ mod tests {
         let arrow = |label| harness.get_by_label(label).rect();
         let (home_arrow, dcim_arrow) = (arrow("Collapse Home"), arrow("Expand DCIM"));
         assert_eq!(home_arrow.size(), egui::vec2(16.0, 16.0));
-        assert_eq!(home_arrow.center().x, dock.left() + 10.0);
+        assert_eq!(home_arrow.center().x, dock.left() + 16.0);
         assert_eq!(dcim_arrow.center().x - home_arrow.center().x, 16.0);
+    }
+
+    /// An arrow lies whole inside the left dock, as far from its edge as
+    /// the fill behind its row, whatever the folder's depth.
+    #[test]
+    fn the_tree_s_arrows_lie_inside_the_left_dock() {
+        let dir = photos_folder();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Expand Home");
+        let dock = panel(&harness, "left_dock");
+        let fill = harness
+            .get_by_label("Home")
+            .rect()
+            .shrink2(egui::vec2(8.0, 0.0));
+        for label in ["Collapse Home", "Expand DCIM"] {
+            let arrow = harness.get_by_label(label).rect();
+            assert!(dock.contains_rect(arrow), "{label}: {arrow:?} in {dock:?}");
+            assert!(
+                arrow.left() >= fill.left(),
+                "{label}: {arrow:?}, fill {fill:?}"
+            );
+        }
     }
 
     /// A click on a folder selects it, and its row says so.
