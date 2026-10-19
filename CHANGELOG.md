@@ -102,10 +102,11 @@ Nothing has been released yet.
   moved to, the filmstrip brings it into view, and the reference of
   keyboard shortcuts lists the keys under Photos.
 - On macOS, a menu bar at the top of the screen: About, Settings and
-  Quit in the app menu, the views and the docks in View, the modes in
-  Window, and the reference of keyboard shortcuts in Help. The view, the
-  mode and the docks shown are checked. Its items stand down while a
-  dialog is open, as the shortcuts do.
+  Quit in the app menu, the views, the viewer's zoom and the docks in
+  View, the modes in Window, and the reference of keyboard shortcuts in
+  Help. The view, the mode and the docks shown are checked, and the
+  zoom's items can be chosen when the toolbar's zoom controls can. Its
+  items stand down while a dialog is open, as the shortcuts do.
 - The window opens at 1280 × 800 points the first time and cannot be made
   smaller, so every part of it fits on a handheld's screen.
 - Dragging the title bar moves the window, and double-clicking it maximizes
