@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! The keyboard shortcuts: one table, [`BINDINGS`], of what each chord
-//! does, where it does it, and how the reference describes it. The
-//! handlers ask the table whether an action's chord was pressed
-//! ([`take_pressed`]), and the reference is built from it ([`sections`]),
-//! so neither can say something the table does not (ADR011). Asking takes
-//! the chord's key out of the frame's input, so a key that does something
+//! The keyboard shortcuts: one table, [`BINDINGS`], of what each key
+//! combination does, where it does it, and how the reference describes it.
+//! The handlers ask the table whether an action's combination was pressed
+//! ([`take_pressed`]), and the reference is built from it ([`sections`]), so
+//! neither can say something the table does not (ADR011). Asking takes the
+//! combination's key out of the frame's input, so a key that does something
 //! here does nothing else too.
 //!
 //! The keys are the ones established photography tools use for the same
@@ -112,8 +112,8 @@ impl Group {
     }
 }
 
-/// One shortcut: the chord that does an action on some surfaces, and the
-/// group and description the reference shows it under.
+/// One shortcut: the key combination that does an action on some surfaces,
+/// and the group and description the reference shows it under.
 struct Binding {
     action: Action,
     key_combination: KeyCombination,
@@ -370,8 +370,8 @@ const BINDINGS: &[Binding] = &[
 ];
 
 impl Binding {
-    /// Whether the binding's chord was pressed in this frame, or, for one
-    /// that repeats, its key held down repeated.
+    /// Whether the binding's key combination was pressed in this frame, or,
+    /// for one that repeats, its key held down repeated.
     fn went_down(&self, ctx: &egui::Context) -> bool {
         if self.repeats {
             self.key_combination.pressed_or_repeated(ctx)
@@ -390,10 +390,10 @@ impl Binding {
     }
 }
 
-/// Whether a chord that does `action` on `surface` was pressed in this
-/// frame. The chords that do it there are taken out of the frame's input,
-/// pressed or held down, so no widget drawn after sees their keys too
-/// ([`KeyCombination::take`]).
+/// Whether a key combination that does `action` on `surface` was pressed in
+/// this frame. The combinations that do it there are taken out of the
+/// frame's input, pressed or held down, so no widget drawn after sees their
+/// keys too ([`KeyCombination::take`]).
 pub fn take_pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bool {
     let bindings = || {
         BINDINGS
@@ -405,11 +405,11 @@ pub fn take_pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bo
     pressed
 }
 
-/// The actions whose chords were pressed in this frame on `surface`, in
-/// the table's order, each once, however many of its chords were pressed.
-/// Every chord on `surface` is taken out of the frame's input, pressed or
-/// held down, so no widget drawn after sees its key too
-/// ([`KeyCombination::take`]).
+/// The actions whose key combinations were pressed in this frame on
+/// `surface`, in the table's order, each once, however many of its
+/// combinations were pressed. Every combination on `surface` is taken out of
+/// the frame's input, pressed or held down, so no widget drawn after sees
+/// its key too ([`KeyCombination::take`]).
 pub fn take_pressed_actions(ctx: &egui::Context, surface: Surface) -> Vec<Action> {
     let bindings = || {
         BINDINGS
@@ -426,10 +426,10 @@ pub fn take_pressed_actions(ctx: &egui::Context, surface: Surface) -> Vec<Action
     actions
 }
 
-/// The chord that does `action` on `surface`, for a control that does the
-/// same to name in its tooltip: the first in the table, when more than
-/// one does. `None` when no chord does it there, or the action does
-/// nothing yet.
+/// The key combination that does `action` on `surface`, for a control that
+/// does the same to name in its tooltip: the first in the table, when more
+/// than one does. `None` when no combination does it there, or the action
+/// does nothing yet.
 pub fn key_combination_for(surface: Surface, action: Action) -> Option<KeyCombination> {
     BINDINGS
         .iter()
@@ -439,9 +439,9 @@ pub fn key_combination_for(surface: Surface, action: Action) -> Option<KeyCombin
         .map(|binding| binding.key_combination)
 }
 
-/// The chord that does `action` wherever the keys apply, for a menu item,
-/// which is there whatever the centre shows. `None` when none does, or the
-/// action does nothing yet.
+/// The key combination that does `action` wherever the keys apply, for a
+/// menu item, which is there whatever the centre shows. `None` when none
+/// does, or the action does nothing yet.
 pub fn key_combination_everywhere(action: Action) -> Option<KeyCombination> {
     BINDINGS
         .iter()
@@ -453,9 +453,9 @@ pub fn key_combination_everywhere(action: Action) -> Option<KeyCombination> {
         .map(|binding| binding.key_combination)
 }
 
-/// The reference's sections: a section per group, each listing the
-/// shortcuts that do something, with their chords spelled as this
-/// system spells them.
+/// The reference's sections: a section per group, each listing the shortcuts
+/// that do something, with their key combinations spelled as this system
+/// spells them.
 pub fn sections() -> Vec<keys::Section<'static>> {
     Group::ALL
         .into_iter()
@@ -498,8 +498,8 @@ mod tests {
         }
     }
 
-    /// An action pressed by two of its chords in one frame is done once,
-    /// as a toggle done twice would undo itself.
+    /// An action pressed by two of its key combinations in one frame is done
+    /// once, as a toggle done twice would undo itself.
     #[test]
     fn an_action_pressed_twice_in_a_frame_is_done_once() {
         let press = |key| egui::Event::Key {
@@ -638,8 +638,8 @@ mod tests {
         );
     }
 
-    /// Asking whether one action's chord was pressed takes that chord
-    /// alone out of the frame's input.
+    /// Asking whether one action's key combination was pressed takes that
+    /// combination alone out of the frame's input.
     #[test]
     fn asking_for_one_action_takes_its_combination_alone() {
         let press = |key, modifiers| egui::Event::Key {
@@ -673,8 +673,9 @@ mod tests {
         }
     }
 
-    /// A control is named the chord that does what it does where it is,
-    /// and none where no chord does, or where it does nothing yet.
+    /// A control is named the key combination that does what it does where
+    /// it is, and none where no combination does, or where it does nothing
+    /// yet.
     #[test]
     fn a_control_s_combination_is_the_first_that_does_its_action_there() {
         let label =
@@ -856,8 +857,8 @@ mod tests {
         }
     }
 
-    /// The toolbar's zoom controls are named the chords that do what they
-    /// do in the viewer, and none in the grid.
+    /// The toolbar's zoom controls are named the key combinations that do
+    /// what they do in the viewer, and none in the grid.
     #[test]
     fn the_zoom_controls_combinations_are_the_viewer_s() {
         let label = |surface, zooming| {
@@ -885,8 +886,8 @@ mod tests {
         assert_eq!(key_combination_everywhere(Action::Zoom(Zooming::In)), None);
     }
 
-    /// The window's typeface draws every chord the reference spells,
-    /// the arrow keys' symbols among them.
+    /// The window's typeface draws every key combination the reference
+    /// spells, the arrow keys' symbols among them.
     #[test]
     fn the_typeface_draws_every_combination() {
         let ctx = egui::Context::default();

@@ -121,10 +121,10 @@ impl Docks {
 }
 
 /// The title bar's toggles for the docks `layout` has, in a right-to-left
-/// layout, so they read left, bottom, right, as the docks lie, each
-/// showing whether its dock is shown in `docks`. Each names in its
-/// tooltip the chord that shows or hides its dock on `surface`. The side
-/// of the dock whose toggle was clicked, if any.
+/// layout, so they read left, bottom, right, as the docks lie, each showing
+/// whether its dock is shown in `docks`. Each names in its tooltip the key
+/// combination that shows or hides its dock on `surface`. The side of the
+/// dock whose toggle was clicked, if any.
 pub fn dock_toggles(
     ui: &mut egui::Ui,
     palette: &Palette,

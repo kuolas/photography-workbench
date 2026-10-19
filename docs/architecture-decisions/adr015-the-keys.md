@@ -25,9 +25,9 @@ else here, rules both out.
 ## Decision
 
 We will take each key from the established photography tools where they
-have one for the same action, from other photo editors where they do
-not, and choose our own only where neither has one. Cmd stands for
-Ctrl and Option for Alt on macOS, and a chord is spelled the way each
+have one for the same action, from other photo editors where they do not,
+and choose our own only where neither has one. Cmd stands for Ctrl and
+Option for Alt on macOS, and a key combination is spelled the way each
 system spells it: ⌥⌘1 on macOS, Ctrl+Alt+1 elsewhere. The keys today:
 
 | Action | Keys | Where |

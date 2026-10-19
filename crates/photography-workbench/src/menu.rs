@@ -14,24 +14,23 @@
 //! to the system, is macOS's. Elsewhere it is a stand-in that is never
 //! made.
 //!
-//! An item carries its action's chord as its key equivalent only when the
-//! chord holds Cmd. The system can hand a key equivalent to the menu
-//! before the window sees it, and the keys without Cmd belong to the
-//! window, which leaves them to an open dialog, or to a text field that
+//! An item carries its action's key combination as its key equivalent only
+//! when the combination holds Cmd. The system can hand a key equivalent to
+//! the menu before the window sees it, and the keys without Cmd belong to
+//! the window, which leaves them to an open dialog, or to a text field that
 //! has the keyboard. Nor does an item that shows or hides something carry
-//! one: the system repeats a key equivalent while its keys are held, and
-//! a toggle done again undoes itself, where the window's keys act on a
-//! key's first press only.
+//! one: the system repeats a key equivalent while its keys are held, and a
+//! toggle done again undoes itself, where the window's keys act on a key's
+//! first press only.
 //!
-//! The system gives a key equivalent to its item before the window sees
-//! the key, so a chord an item carries is done once, by the item, and
-//! never by the window's keys too. It does so even while the item cannot
-//! be chosen, when the key does nothing. The zoom's items carry the
-//! viewer's chords, as they can be chosen only there; in the grid, and
-//! wherever else they cannot be chosen, the window's keys would zoom
-//! nothing either. Held down, zooming in or out goes on by a step as the
-//! system repeats the key, until it can go no further, where the window's
-//! keys zoom once.
+//! The system gives a key equivalent to its item before the window sees the
+//! key, so a key combination an item carries is done once, by the item, and
+//! never by the window's keys too. It does so even while the item cannot be
+//! chosen, when the key does nothing. The zoom's items carry the viewer's
+//! combinations, as they can be chosen only there; in the grid, and wherever
+//! else they cannot be chosen, the window's keys would zoom nothing either.
+//! Held down, zooming in or out goes on by a step as the system repeats the
+//! key, until it can go no further, where the window's keys zoom once.
 //!
 //! Quit closes the window, as closing it any other way does. The menu bar
 //! winit, the windowing library, makes by default has a Quit that would
@@ -124,7 +123,7 @@ impl Zooms {
 }
 
 /// The key equivalent of the item that asks for `action`, as the menu
-/// library spells it ("Cmd+Alt+1"): the chord that does `action`
+/// library spells it ("Cmd+Alt+1"): the key combination that does `action`
 /// wherever its item can be chosen, everywhere or, for the zoom, in the
 /// viewer, when it holds Cmd and the action is no toggle. `None` for any
 /// other.
@@ -552,8 +551,9 @@ mod tests {
         assert!(!reference.enabled(Action::Settings));
     }
 
-    /// An item carries its action's chord only when the chord holds Cmd
-    /// and the action is no toggle, spelled for the menu library.
+    /// An item carries its action's key combination only when the
+    /// combination holds Cmd and the action is no toggle, spelled for the
+    /// menu library.
     #[test]
     fn only_the_cmd_combinations_are_key_equivalents() {
         let spelled = |action| key_equivalent(action);
@@ -575,7 +575,7 @@ mod tests {
         assert_eq!(zoom(Zooming::Toggle), None, "a toggle");
     }
 
-    /// The zoom's items carry the chords the viewer's keys and the
+    /// The zoom's items carry the key combinations the viewer's keys and the
     /// toolbar's controls name, which hold Cmd.
     #[test]
     fn the_zoom_s_items_carry_the_viewer_s_combinations() {
@@ -590,7 +590,8 @@ mod tests {
         }
     }
 
-    /// The menu library reads every key equivalent as the chord it is.
+    /// The menu library reads every key equivalent as the key combination it
+    /// is.
     #[cfg(target_os = "macos")]
     #[test]
     fn the_menu_library_reads_the_key_equivalents() {
