@@ -235,13 +235,13 @@ impl PhotographyWorkbenchApp {
                     self.perform(ui.ctx(), Action::Dock(side));
                 }
                 let [gear, shortcuts] = TITLE_BAR_ICONS;
-                let chord = keymap::chord_for(surface, Action::Settings);
-                if chrome::icon_button(ui, palette, gear, "Settings", chord).clicked() {
+                let combination = keymap::key_combination_for(surface, Action::Settings);
+                if chrome::icon_button(ui, palette, gear, "Settings", combination).clicked() {
                     self.perform(ui.ctx(), Action::Settings);
                 }
                 let label = "Keyboard shortcuts";
-                let chord = keymap::chord_for(surface, Action::Shortcuts);
-                if chrome::icon_button(ui, palette, shortcuts, label, chord).clicked() {
+                let combination = keymap::key_combination_for(surface, Action::Shortcuts);
+                if chrome::icon_button(ui, palette, shortcuts, label, combination).clicked() {
                     self.perform(ui.ctx(), Action::Shortcuts);
                 }
             },
@@ -467,8 +467,9 @@ impl PhotographyWorkbenchApp {
             Mode::Library => {
                 for view in View::ALL {
                     let selected = self.view == view;
-                    let chord = keymap::chord_for(self.surface(), Action::View(view));
-                    if toolbar::button(ui, palette, view.icon(), view.name(), selected, chord)
+                    let combination =
+                        keymap::key_combination_for(self.surface(), Action::View(view));
+                    if toolbar::button(ui, palette, view.icon(), view.name(), selected, combination)
                         .clicked()
                     {
                         self.perform(ui.ctx(), Action::View(view));
@@ -533,7 +534,7 @@ impl PhotographyWorkbenchApp {
     /// is shown disabled.
     fn mode_switcher(&mut self, ui: &mut egui::Ui) {
         for mode in Mode::ALL {
-            let chord = keymap::chord_for(self.surface(), Action::Mode(mode));
+            let combination = keymap::key_combination_for(self.surface(), Action::Mode(mode));
             let response = ui
                 .add_enabled_ui(mode.is_available(), |ui| {
                     chrome::selectable_button(
@@ -541,7 +542,7 @@ impl PhotographyWorkbenchApp {
                         mode.icon(),
                         mode.name(),
                         self.mode == mode,
-                        chord,
+                        combination,
                     )
                 })
                 .inner
@@ -601,10 +602,10 @@ fn zoom_controls(
             Zooming::Full => percent == Some(100),
             _ => false,
         };
-        let chord = keymap::chord_for(Surface::Viewer, Action::Zoom(zooming));
+        let combination = keymap::key_combination_for(Surface::Viewer, Action::Zoom(zooming));
         let response = ui
             .add_enabled_ui(enabled, |ui| {
-                toolbar::button(ui, palette, icon, name, selected, chord)
+                toolbar::button(ui, palette, icon, name, selected, combination)
             })
             .inner;
         if response.clicked() {
@@ -871,7 +872,7 @@ mod tests {
     use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
     use desktop_ui::chrome::{MAC_WINDOW_BUTTONS_WIDTH, TITLE_BAR_HEIGHT};
-    use desktop_ui::keys::Chord;
+    use desktop_ui::keys::KeyCombination;
     use desktop_ui::{icons, theme};
 
     use catalog::folders::{Place, Root};
@@ -1346,22 +1347,25 @@ mod tests {
     /// The title bar's and the toolbar's buttons name in their tooltips
     /// the chord that does what they do, as this system spells it.
     #[test]
-    fn a_button_s_tooltip_names_its_chord() {
+    fn a_button_s_tooltip_names_its_combination() {
         let mut harness = viewer_harness();
-        let chord = |modifiers, key| Chord::new(modifiers, key).label();
+        let combination = |modifiers, key| KeyCombination::new(modifiers, key).label();
         let ctrl_alt = Modifiers::COMMAND | Modifiers::ALT;
         let tips = [
-            ("Library", chord(ctrl_alt, Key::Num1)),
-            ("Keyboard shortcuts", chord(Modifiers::COMMAND, Key::Slash)),
-            ("Settings", chord(Modifiers::COMMAND, Key::Comma)),
-            (LEFT_TOGGLE, chord(Modifiers::NONE, Key::F7)),
-            (BOTTOM_TOGGLE, chord(Modifiers::NONE, Key::F6)),
-            (RIGHT_TOGGLE, chord(Modifiers::NONE, Key::F8)),
-            ("Thumbnail grid", chord(Modifiers::NONE, Key::G)),
-            ("Image viewer", chord(Modifiers::NONE, Key::E)),
+            ("Library", combination(ctrl_alt, Key::Num1)),
+            (
+                "Keyboard shortcuts",
+                combination(Modifiers::COMMAND, Key::Slash),
+            ),
+            ("Settings", combination(Modifiers::COMMAND, Key::Comma)),
+            (LEFT_TOGGLE, combination(Modifiers::NONE, Key::F7)),
+            (BOTTOM_TOGGLE, combination(Modifiers::NONE, Key::F6)),
+            (RIGHT_TOGGLE, combination(Modifiers::NONE, Key::F8)),
+            ("Thumbnail grid", combination(Modifiers::NONE, Key::G)),
+            ("Image viewer", combination(Modifiers::NONE, Key::E)),
         ];
-        for (label, chord) in tips {
-            let tip = format!("{label} ({chord})");
+        for (label, combination) in tips {
+            let tip = format!("{label} ({combination})");
             assert!(tooltip_shows(&mut harness, label, &tip), "{tip}");
         }
     }
@@ -4594,19 +4598,19 @@ mod tests {
     /// The zoom buttons name in their tooltips the chord that does what
     /// they do, as this system spells it.
     #[test]
-    fn a_zoom_button_s_tooltip_names_its_chord() {
+    fn a_zoom_button_s_tooltip_names_its_combination() {
         let (mut harness, _dir, _) = zoom_harness(1.0);
-        let chord = |modifiers, key| Chord::new(modifiers, key).label();
+        let combination = |modifiers, key| KeyCombination::new(modifiers, key).label();
         let ctrl_alt = Modifiers::COMMAND | Modifiers::ALT;
         press(&mut harness, Modifiers::COMMAND, Key::Equals);
         let tips = [
-            ("Zoom out", chord(Modifiers::COMMAND, Key::Minus)),
-            ("Zoom in", chord(Modifiers::COMMAND, Key::Equals)),
-            ("Zoom to fit", chord(Modifiers::COMMAND, Key::Num0)),
-            ("Zoom to 100 %", chord(ctrl_alt, Key::Num0)),
+            ("Zoom out", combination(Modifiers::COMMAND, Key::Minus)),
+            ("Zoom in", combination(Modifiers::COMMAND, Key::Equals)),
+            ("Zoom to fit", combination(Modifiers::COMMAND, Key::Num0)),
+            ("Zoom to 100 %", combination(ctrl_alt, Key::Num0)),
         ];
-        for (label, chord) in tips {
-            let tip = format!("{label} ({chord})");
+        for (label, combination) in tips {
+            let tip = format!("{label} ({combination})");
             assert!(tooltip_shows(&mut harness, label, &tip), "{tip}");
         }
     }

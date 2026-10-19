@@ -13,7 +13,7 @@
 //! on macOS (ADR015).
 
 use desktop_ui::dock::Side;
-use desktop_ui::keys::{self, Chord};
+use desktop_ui::keys::{self, KeyCombination};
 use egui::{Key, Modifiers};
 
 use crate::mode::Mode;
@@ -116,7 +116,7 @@ impl Group {
 /// group and description the reference shows it under.
 struct Binding {
     action: Action,
-    chord: Chord,
+    key_combination: KeyCombination,
     surfaces: &'static [Surface],
     group: Group,
     description: &'static str,
@@ -150,7 +150,7 @@ const fn bind(
 ) -> Binding {
     Binding {
         action,
-        chord: Chord::new(modifiers, key),
+        key_combination: KeyCombination::new(modifiers, key),
         surfaces,
         group,
         description,
@@ -374,9 +374,9 @@ impl Binding {
     /// that repeats, its key held down repeated.
     fn went_down(&self, ctx: &egui::Context) -> bool {
         if self.repeats {
-            self.chord.pressed_or_repeated(ctx)
+            self.key_combination.pressed_or_repeated(ctx)
         } else {
-            self.chord.pressed(ctx)
+            self.key_combination.pressed(ctx)
         }
     }
 
@@ -393,7 +393,7 @@ impl Binding {
 /// Whether a chord that does `action` on `surface` was pressed in this
 /// frame. The chords that do it there are taken out of the frame's input,
 /// pressed or held down, so no widget drawn after sees their keys too
-/// ([`Chord::take`]).
+/// ([`KeyCombination::take`]).
 pub fn take_pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bool {
     let bindings = || {
         BINDINGS
@@ -401,7 +401,7 @@ pub fn take_pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bo
             .filter(|binding| binding.action == action && binding.surfaces.contains(&surface))
     };
     let pressed = bindings().any(|binding| binding.went_down(ctx));
-    bindings().for_each(|binding| binding.chord.take(ctx));
+    bindings().for_each(|binding| binding.key_combination.take(ctx));
     pressed
 }
 
@@ -409,7 +409,7 @@ pub fn take_pressed(ctx: &egui::Context, surface: Surface, action: Action) -> bo
 /// the table's order, each once, however many of its chords were pressed.
 /// Every chord on `surface` is taken out of the frame's input, pressed or
 /// held down, so no widget drawn after sees its key too
-/// ([`Chord::take`]).
+/// ([`KeyCombination::take`]).
 pub fn take_pressed_actions(ctx: &egui::Context, surface: Surface) -> Vec<Action> {
     let bindings = || {
         BINDINGS
@@ -422,7 +422,7 @@ pub fn take_pressed_actions(ctx: &egui::Context, surface: Surface) -> Vec<Action
             actions.push(binding.action);
         }
     }
-    bindings().for_each(|binding| binding.chord.take(ctx));
+    bindings().for_each(|binding| binding.key_combination.take(ctx));
     actions
 }
 
@@ -430,19 +430,19 @@ pub fn take_pressed_actions(ctx: &egui::Context, surface: Surface) -> Vec<Action
 /// same to name in its tooltip: the first in the table, when more than
 /// one does. `None` when no chord does it there, or the action does
 /// nothing yet.
-pub fn chord_for(surface: Surface, action: Action) -> Option<Chord> {
+pub fn key_combination_for(surface: Surface, action: Action) -> Option<KeyCombination> {
     BINDINGS
         .iter()
         .find(|binding| {
             binding.action == action && binding.surfaces.contains(&surface) && binding.is_live()
         })
-        .map(|binding| binding.chord)
+        .map(|binding| binding.key_combination)
 }
 
 /// The chord that does `action` wherever the keys apply, for a menu item,
 /// which is there whatever the centre shows. `None` when none does, or the
 /// action does nothing yet.
-pub fn chord_everywhere(action: Action) -> Option<Chord> {
+pub fn key_combination_everywhere(action: Action) -> Option<KeyCombination> {
     BINDINGS
         .iter()
         .find(|binding| {
@@ -450,7 +450,7 @@ pub fn chord_everywhere(action: Action) -> Option<Chord> {
                 && EVERYWHERE.iter().all(|s| binding.surfaces.contains(s))
                 && binding.is_live()
         })
-        .map(|binding| binding.chord)
+        .map(|binding| binding.key_combination)
 }
 
 /// The reference's sections: a section per group, each listing the
@@ -464,7 +464,7 @@ pub fn sections() -> Vec<keys::Section<'static>> {
             rows: BINDINGS
                 .iter()
                 .filter(|binding| binding.group == group && binding.is_live())
-                .map(|binding| (binding.chord.label(), binding.description))
+                .map(|binding| (binding.key_combination.label(), binding.description))
                 .collect(),
         })
         .collect()
@@ -475,16 +475,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn no_two_shortcuts_share_a_chord_where_both_apply() {
+    fn no_two_shortcuts_share_a_combination_where_both_apply() {
         for (i, a) in BINDINGS.iter().enumerate() {
             for b in &BINDINGS[i + 1..] {
                 let shared = a.surfaces.iter().any(|s| b.surfaces.contains(s));
                 assert!(
-                    !(shared && a.chord == b.chord),
+                    !(shared && a.key_combination == b.key_combination),
                     "{:?} and {:?} share {}",
                     a.action,
                     b.action,
-                    a.chord.label()
+                    a.key_combination.label()
                 );
             }
         }
@@ -641,7 +641,7 @@ mod tests {
     /// Asking whether one action's chord was pressed takes that chord
     /// alone out of the frame's input.
     #[test]
-    fn asking_for_one_action_takes_its_chord_alone() {
+    fn asking_for_one_action_takes_its_combination_alone() {
         let press = |key, modifiers| egui::Event::Key {
             key,
             physical_key: None,
@@ -676,8 +676,9 @@ mod tests {
     /// A control is named the chord that does what it does where it is,
     /// and none where no chord does, or where it does nothing yet.
     #[test]
-    fn a_control_s_chord_is_the_first_that_does_its_action_there() {
-        let label = |surface, action| chord_for(surface, action).map(|c| c.label_for(false));
+    fn a_control_s_combination_is_the_first_that_does_its_action_there() {
+        let label =
+            |surface, action| key_combination_for(surface, action).map(|c| c.label_for(false));
         let grid = Action::View(View::Grid);
         assert_eq!(label(Surface::Viewer, grid).as_deref(), Some("G"));
         assert_eq!(label(Surface::Grid, grid).as_deref(), Some("G"));
@@ -689,9 +690,9 @@ mod tests {
         assert_eq!(label(Surface::Grid, filmstrip), None);
         assert_eq!(label(Surface::Grid, Action::Mode(Mode::Organizer)), None);
         let below = Action::Photo(Step::Below);
-        let down = Chord::new(NONE, Key::ArrowDown);
-        assert_eq!(chord_for(Surface::Grid, below), Some(down));
-        assert_eq!(chord_for(Surface::Viewer, below), None);
+        let down = KeyCombination::new(NONE, Key::ArrowDown);
+        assert_eq!(key_combination_for(Surface::Grid, below), Some(down));
+        assert_eq!(key_combination_for(Surface::Viewer, below), None);
     }
 
     /// The reference lists the keys that move between photos under
@@ -702,7 +703,7 @@ mod tests {
         let sections = sections();
         let titles: Vec<_> = sections.iter().map(|section| section.title).collect();
         assert_eq!(titles, ["Views", "Photos", "Zoom", "Docks", "General"]);
-        let label = |key: Key| Chord::new(NONE, key).label();
+        let label = |key: Key| KeyCombination::new(NONE, key).label();
         let rows = [
             (label(Key::ArrowLeft), "Previous photo"),
             (label(Key::ArrowRight), "Next photo"),
@@ -721,7 +722,7 @@ mod tests {
     fn the_reference_lists_the_zoom_keys_after_the_photos() {
         let sections = sections();
         assert_eq!(sections[2].title, "Zoom");
-        let label = |modifiers, key| Chord::new(modifiers, key).label();
+        let label = |modifiers, key| KeyCombination::new(modifiers, key).label();
         let toggle = "Switch between fitted and 100 %";
         let rows = [
             (label(NONE, Key::Z), toggle),
@@ -802,8 +803,13 @@ mod tests {
             .iter()
             .filter(|binding| matches!(binding.action, Action::Zoom(_)));
         for binding in zoom_keys {
-            let Chord { modifiers, key } = binding.chord;
-            assert_eq!(binding.surfaces, VIEWER, "{}", binding.chord.label());
+            let KeyCombination { modifiers, key } = binding.key_combination;
+            assert_eq!(
+                binding.surfaces,
+                VIEWER,
+                "{}",
+                binding.key_combination.label()
+            );
             let ctx = egui::Context::default();
             let input = egui::RawInput {
                 events: vec![typed(key, key, modifiers)],
@@ -815,8 +821,8 @@ mod tests {
                 left = keys_left(ui.ctx());
             });
             output.textures_delta.clear();
-            assert_eq!(actions, [], "{}", binding.chord.label());
-            assert_eq!(left, [key], "{}", binding.chord.label());
+            assert_eq!(actions, [], "{}", binding.key_combination.label());
+            assert_eq!(left, [key], "{}", binding.key_combination.label());
         }
     }
 
@@ -853,9 +859,9 @@ mod tests {
     /// The toolbar's zoom controls are named the chords that do what they
     /// do in the viewer, and none in the grid.
     #[test]
-    fn the_zoom_controls_chords_are_the_viewer_s() {
+    fn the_zoom_controls_combinations_are_the_viewer_s() {
         let label = |surface, zooming| {
-            chord_for(surface, Action::Zoom(zooming)).map(|c| c.label_for(false))
+            key_combination_for(surface, Action::Zoom(zooming)).map(|c| c.label_for(false))
         };
         assert_eq!(
             label(Surface::Viewer, Zooming::Toggle).as_deref(),
@@ -876,13 +882,13 @@ mod tests {
         let full = label(Surface::Viewer, Zooming::Full);
         assert_eq!(full.as_deref(), Some("Ctrl+Alt+0"));
         assert_eq!(label(Surface::Grid, Zooming::In), None);
-        assert_eq!(chord_everywhere(Action::Zoom(Zooming::In)), None);
+        assert_eq!(key_combination_everywhere(Action::Zoom(Zooming::In)), None);
     }
 
     /// The window's typeface draws every chord the reference spells,
     /// the arrow keys' symbols among them.
     #[test]
-    fn the_typeface_draws_every_chord() {
+    fn the_typeface_draws_every_combination() {
         let ctx = egui::Context::default();
         desktop_ui::fonts::install(&ctx);
         // egui takes the fonts up at the start of a pass.
@@ -890,7 +896,7 @@ mod tests {
         output.textures_delta.clear();
         let font = egui::FontId::proportional(13.0);
         for binding in BINDINGS {
-            let label = binding.chord.label();
+            let label = binding.key_combination.label();
             let drawn = ctx.fonts_mut(|fonts| fonts.has_glyphs(&font, &label));
             assert!(drawn, "{label} for {:?}", binding.action);
         }
@@ -902,7 +908,7 @@ mod tests {
     fn the_reference_lists_every_shortcut_that_does_something() {
         let sections = sections();
         for binding in BINDINGS {
-            let row = (binding.chord.label(), binding.description);
+            let row = (binding.key_combination.label(), binding.description);
             let section = sections
                 .iter()
                 .find(|section| section.title == binding.group.title())

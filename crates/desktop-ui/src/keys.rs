@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-//! Keyboard shortcuts: a key and the modifiers held with it ([`Chord`]),
-//! how a chord is spelled on each system, whether it was pressed, and
-//! taking it out of the frame's input, so nothing else acts on its key;
-//! and the reference that lists an app's shortcuts ([`reference()`]).
+//! Keyboard shortcuts: a key and the modifiers held with it
+//! ([`KeyCombination`]), how a chord is spelled on each system, whether it
+//! was pressed, and taking it out of the frame's input, so nothing else acts
+//! on its key; and the reference that lists an app's shortcuts
+//! ([`reference()`]).
 //!
 //! What a chord does is the app's business: an app keeps its own table of
 //! actions and their chords, asks a chord whether it was pressed, and
@@ -24,14 +25,14 @@ const MIN_DESCRIPTION_WIDTH: f32 = 160.0;
 /// [`Modifiers::COMMAND`] is Cmd on macOS and Ctrl elsewhere, so one chord
 /// serves both, spelled the way each system spells it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Chord {
+pub struct KeyCombination {
     /// The modifiers held with the key.
     pub modifiers: Modifiers,
     /// The key.
     pub key: Key,
 }
 
-impl Chord {
+impl KeyCombination {
     /// `key` pressed with `modifiers`.
     pub const fn new(modifiers: Modifiers, key: Key) -> Self {
         Self { modifiers, key }
@@ -172,12 +173,12 @@ fn is_punctuation(key: Key) -> bool {
     )
 }
 
-/// What the tooltip of a control with a chord says: its `label`, then,
-/// when it has one, the `chord` that does what a click on it does, in
+/// What the tooltip of a control with a chord says: its `label`, then, when
+/// it has one, the `key_combination` that does what a click on it does, in
 /// brackets: "Thumbnail grid (G)".
-pub fn tooltip(label: &str, chord: Option<Chord>) -> String {
-    match chord {
-        Some(chord) => format!("{label} ({})", chord.label()),
+pub fn tooltip(label: &str, key_combination: Option<KeyCombination>) -> String {
+    match key_combination {
+        Some(key_combination) => format!("{label} ({})", key_combination.label()),
         None => label.to_owned(),
     }
 }
@@ -200,18 +201,19 @@ pub struct Section<'a> {
 /// longer than the room left beside the chords wraps.
 pub fn reference(ui: &mut egui::Ui, sections: &[Section<'_>]) {
     let body = egui::TextStyle::Body.resolve(ui.style());
-    let chords_width = sections
+    let combinations_width = sections
         .iter()
         .flat_map(|section| &section.rows)
-        .map(|(chord, _)| {
+        .map(|(combination, _)| {
             ui.fonts_mut(|fonts| {
-                let layout = fonts.layout_no_wrap(chord.clone(), body.clone(), Default::default());
+                let layout =
+                    fonts.layout_no_wrap(combination.clone(), body.clone(), Default::default());
                 layout.size().x
             })
         })
         .fold(0.0, f32::max);
     let descriptions_width =
-        (ui.available_width() - chords_width - COLUMN_GAP).max(MIN_DESCRIPTION_WIDTH);
+        (ui.available_width() - combinations_width - COLUMN_GAP).max(MIN_DESCRIPTION_WIDTH);
     let title_font = FontId::new(body.size, FontFamily::Name(fonts::SEMIBOLD.into()));
     let shown = sections.iter().filter(|section| !section.rows.is_empty());
     for (index, section) in shown.enumerate() {
@@ -225,12 +227,12 @@ pub fn reference(ui: &mut egui::Ui, sections: &[Section<'_>]) {
         ui.add_space(2.0);
         Grid::new(("shortcuts", section.title))
             .num_columns(2)
-            .min_col_width(chords_width)
+            .min_col_width(combinations_width)
             .max_col_width(descriptions_width)
             .spacing([COLUMN_GAP, 4.0])
             .show(ui, |ui| {
-                for (chord, description) in &section.rows {
-                    ui.add(Label::new(chord.as_str()).selectable(false));
+                for (combination, description) in &section.rows {
+                    ui.add(Label::new(combination.as_str()).selectable(false));
                     ui.add(Label::new(*description).wrap().selectable(false));
                     ui.end_row();
                 }
@@ -249,8 +251,8 @@ mod tests {
     const CTRL_ALT: Modifiers = Modifiers::COMMAND.plus(Modifiers::ALT);
 
     #[test]
-    fn a_chord_is_spelled_as_windows_and_linux_spell_it() {
-        let label = |modifiers, key| Chord::new(modifiers, key).label_for(false);
+    fn a_combination_is_spelled_as_windows_and_linux_spell_it() {
+        let label = |modifiers, key| KeyCombination::new(modifiers, key).label_for(false);
         assert_eq!(label(Modifiers::NONE, Key::G), "G");
         assert_eq!(label(Modifiers::NONE, Key::F7), "F7");
         assert_eq!(label(Modifiers::NONE, Key::Escape), "Esc");
@@ -263,8 +265,8 @@ mod tests {
     }
 
     #[test]
-    fn a_chord_is_spelled_as_macos_spells_it() {
-        let label = |modifiers, key| Chord::new(modifiers, key).label_for(true);
+    fn a_combination_is_spelled_as_macos_spells_it() {
+        let label = |modifiers, key| KeyCombination::new(modifiers, key).label_for(true);
         assert_eq!(label(Modifiers::NONE, Key::G), "G");
         assert_eq!(label(Modifiers::NONE, Key::Escape), "Esc");
         assert_eq!(label(Modifiers::SHIFT, Key::Tab), "⇧Tab");
@@ -288,21 +290,26 @@ mod tests {
         assert!(drawn, "a modifier symbol has no glyph");
     }
 
-    /// Whether `chord` is pressed in each of a run of frames, in each of
-    /// which `key` goes down with `modifiers` held: egui counts every
+    /// Whether `combination` is pressed in each of a run of frames, in each
+    /// of which `key` goes down with `modifiers` held: egui counts every
     /// frame after the first as the key repeating.
-    fn pressed_by(chord: Chord, key: Key, modifiers: Modifiers, frames: usize) -> Vec<bool> {
-        went_down_by(chord, key, modifiers, frames, Chord::pressed)
-    }
-
-    /// Whether `went_down` says `chord` went down in each of a run of
-    /// frames, as for [`pressed_by`].
-    fn went_down_by(
-        chord: Chord,
+    fn pressed_by(
+        combination: KeyCombination,
         key: Key,
         modifiers: Modifiers,
         frames: usize,
-        went_down: fn(Chord, &egui::Context) -> bool,
+    ) -> Vec<bool> {
+        went_down_by(combination, key, modifiers, frames, KeyCombination::pressed)
+    }
+
+    /// Whether `went_down` says `combination` went down in each of a run of
+    /// frames, as for [`pressed_by`].
+    fn went_down_by(
+        combination: KeyCombination,
+        key: Key,
+        modifiers: Modifiers,
+        frames: usize,
+        went_down: fn(KeyCombination, &egui::Context) -> bool,
     ) -> Vec<bool> {
         let ctx = egui::Context::default();
         let press = Event::Key {
@@ -319,7 +326,7 @@ mod tests {
                     ..RawInput::default()
                 };
                 let mut pressed = false;
-                let mut output = ctx.run_ui(input, |ui| pressed = went_down(chord, ui.ctx()));
+                let mut output = ctx.run_ui(input, |ui| pressed = went_down(combination, ui.ctx()));
                 // A headless frame has no renderer to hand the font atlas to.
                 output.textures_delta.clear();
                 pressed
@@ -328,22 +335,27 @@ mod tests {
     }
 
     #[test]
-    fn a_chord_is_pressed_by_its_key_with_exactly_its_modifiers() {
-        let once = |chord, key, modifiers| pressed_by(chord, key, modifiers, 1) == [true];
-        let g = Chord::new(Modifiers::NONE, Key::G);
+    fn a_combination_is_pressed_by_its_key_with_exactly_its_modifiers() {
+        let once =
+            |combination, key, modifiers| pressed_by(combination, key, modifiers, 1) == [true];
+        let g = KeyCombination::new(Modifiers::NONE, Key::G);
         assert!(once(g, Key::G, Modifiers::NONE));
         assert!(!once(g, Key::G, Modifiers::SHIFT), "Shift+G");
         assert!(!once(g, Key::E, Modifiers::NONE), "E");
-        let ctrl_alt_1 = Chord::new(CTRL_ALT, Key::Num1);
+        let ctrl_alt_1 = KeyCombination::new(CTRL_ALT, Key::Num1);
         assert!(once(ctrl_alt_1, Key::Num1, CTRL_ALT));
         assert!(!once(ctrl_alt_1, Key::Num1, Modifiers::ALT), "Alt+1");
         assert!(!once(ctrl_alt_1, Key::Num1, Modifiers::COMMAND), "Ctrl+1");
     }
 
-    /// Whether `chord` is pressed in a frame whose only event is `key`
+    /// Whether `combination` is pressed in a frame whose only event is `key`
     /// going down, typed on the keyboard's key `physical`, with
     /// `modifiers` held.
-    fn typed(chord: Chord, (key, physical): (Key, Key), modifiers: Modifiers) -> bool {
+    fn typed(
+        combination: KeyCombination,
+        (key, physical): (Key, Key),
+        modifiers: Modifiers,
+    ) -> bool {
         let ctx = egui::Context::default();
         let input = RawInput {
             events: vec![Event::Key {
@@ -356,7 +368,7 @@ mod tests {
             ..RawInput::default()
         };
         let mut pressed = false;
-        let mut output = ctx.run_ui(input, |ui| pressed = chord.pressed(ui.ctx()));
+        let mut output = ctx.run_ui(input, |ui| pressed = combination.pressed(ui.ctx()));
         output.textures_delta.clear();
         pressed
     }
@@ -365,8 +377,8 @@ mod tests {
     /// key presses its chord with Shift held; one typed on its own key
     /// with Shift held does not, nor does a letter.
     #[test]
-    fn shift_counts_only_where_the_chord_s_character_needs_it() {
-        let ctrl_slash = Chord::new(Modifiers::COMMAND, Key::Slash);
+    fn shift_counts_only_where_the_combination_s_character_needs_it() {
+        let ctrl_slash = KeyCombination::new(Modifiers::COMMAND, Key::Slash);
         let ctrl_shift = Modifiers::COMMAND.plus(Modifiers::SHIFT);
         // US: `/` on its own key.
         assert!(typed(
@@ -389,13 +401,13 @@ mod tests {
             "no Ctrl"
         );
         // US: Shift+, types `<`, which comes as the comma's own key.
-        let ctrl_comma = Chord::new(Modifiers::COMMAND, Key::Comma);
+        let ctrl_comma = KeyCombination::new(Modifiers::COMMAND, Key::Comma);
         assert!(
             !typed(ctrl_comma, (Key::Comma, Key::Comma), ctrl_shift),
             "Ctrl+Shift+,"
         );
         // A chord with Shift of its own needs it.
-        let ctrl_shift_comma = Chord::new(ctrl_shift, Key::Comma);
+        let ctrl_shift_comma = KeyCombination::new(ctrl_shift, Key::Comma);
         assert!(!typed(
             ctrl_shift_comma,
             (Key::Comma, Key::M),
@@ -403,7 +415,7 @@ mod tests {
         ));
         // US: `+` is Shift+=, typed on the `=` key; German: it has a key
         // of its own, which egui names by where it is on a US one.
-        let ctrl_plus = Chord::new(Modifiers::COMMAND, Key::Plus);
+        let ctrl_plus = KeyCombination::new(Modifiers::COMMAND, Key::Plus);
         assert!(
             typed(ctrl_plus, (Key::Plus, Key::Equals), ctrl_shift),
             "Ctrl+Shift+="
@@ -414,7 +426,7 @@ mod tests {
             Modifiers::COMMAND
         ));
         // The `=` key alone types `=`, which is another chord.
-        let ctrl_equals = Chord::new(Modifiers::COMMAND, Key::Equals);
+        let ctrl_equals = KeyCombination::new(Modifiers::COMMAND, Key::Equals);
         assert!(!typed(
             ctrl_plus,
             (Key::Equals, Key::Equals),
@@ -426,13 +438,13 @@ mod tests {
             Modifiers::COMMAND
         ));
         // A letter typed on another key, as on a Dvorak keyboard.
-        let ctrl_g = Chord::new(Modifiers::COMMAND, Key::G);
+        let ctrl_g = KeyCombination::new(Modifiers::COMMAND, Key::G);
         assert!(!typed(ctrl_g, (Key::G, Key::I), ctrl_shift), "Ctrl+Shift+G");
     }
 
     #[test]
-    fn a_key_held_down_presses_its_chord_once() {
-        let tab = Chord::new(Modifiers::NONE, Key::Tab);
+    fn a_key_held_down_presses_its_combination_once() {
+        let tab = KeyCombination::new(Modifiers::NONE, Key::Tab);
         let presses = pressed_by(tab, Key::Tab, Modifiers::NONE, 3);
         assert_eq!(presses, [true, false, false]);
     }
@@ -440,10 +452,17 @@ mod tests {
     /// A key held down repeats a chord that asks for its repeats, with
     /// exactly its modifiers held, as when it was first pressed.
     #[test]
-    fn a_key_held_down_repeats_a_chord_that_counts_its_repeats() {
-        let right = Chord::new(Modifiers::NONE, Key::ArrowRight);
-        let held =
-            |key, modifiers| went_down_by(right, key, modifiers, 3, Chord::pressed_or_repeated);
+    fn a_key_held_down_repeats_a_combination_that_counts_its_repeats() {
+        let right = KeyCombination::new(Modifiers::NONE, Key::ArrowRight);
+        let held = |key, modifiers| {
+            went_down_by(
+                right,
+                key,
+                modifiers,
+                3,
+                KeyCombination::pressed_or_repeated,
+            )
+        };
         assert_eq!(held(Key::ArrowRight, Modifiers::NONE), [true, true, true]);
         assert_eq!(
             held(Key::ArrowRight, Modifiers::SHIFT),
@@ -464,12 +483,12 @@ mod tests {
         }
     }
 
-    /// What is left of a frame's input of `events` once `chord` is taken
-    /// out of it, each key event as its key, the keyboard's key, whether
-    /// it went down, and the modifiers held. egui counts a key that goes
-    /// down again while it is down as repeating.
+    /// What is left of a frame's input of `events` once `combination` is
+    /// taken out of it, each key event as its key, the keyboard's key,
+    /// whether it went down, and the modifiers held. egui counts a key that
+    /// goes down again while it is down as repeating.
     fn left_by_taking(
-        chord: Chord,
+        combination: KeyCombination,
         events: Vec<Event>,
     ) -> Vec<(Key, Option<Key>, bool, Modifiers)> {
         let ctx = egui::Context::default();
@@ -479,7 +498,7 @@ mod tests {
         };
         let mut left = Vec::new();
         let mut output = ctx.run_ui(input, |ui| {
-            chord.take(ui.ctx());
+            combination.take(ui.ctx());
             left = ui.input(|input| input.events.clone());
         });
         output.textures_delta.clear();
@@ -501,8 +520,8 @@ mod tests {
     /// frame's input, and leaves every other key, the same key with other
     /// modifiers held, and its key coming back up.
     #[test]
-    fn taking_a_chord_takes_only_its_key_going_down() {
-        let enter = Chord::new(Modifiers::NONE, Key::Enter);
+    fn taking_a_combination_takes_only_its_key_going_down() {
+        let enter = KeyCombination::new(Modifiers::NONE, Key::Enter);
         let event = |key, pressed, modifiers| key_event(key, None, pressed, modifiers);
         let events = vec![
             event(Key::Enter, true, Modifiers::NONE),
@@ -525,8 +544,8 @@ mod tests {
     /// another key, which presses the chord, as well as one typed on its
     /// own key, and leaves one typed with modifiers that do not.
     #[test]
-    fn taking_a_chord_takes_it_however_the_keyboard_types_it() {
-        let ctrl_slash = Chord::new(Modifiers::COMMAND, Key::Slash);
+    fn taking_a_combination_takes_it_however_the_keyboard_types_it() {
+        let ctrl_slash = KeyCombination::new(Modifiers::COMMAND, Key::Slash);
         let slash = |physical, modifiers| key_event(Key::Slash, Some(physical), true, modifiers);
         let ctrl_alt_shift = CTRL_ALT.plus(Modifiers::SHIFT);
         let events = vec![
@@ -540,8 +559,8 @@ mod tests {
     }
 
     #[test]
-    fn a_tooltip_names_the_chord_in_brackets() {
-        let g = Chord::new(Modifiers::NONE, Key::G);
+    fn a_tooltip_names_the_combination_in_brackets() {
+        let g = KeyCombination::new(Modifiers::NONE, Key::G);
         assert_eq!(tooltip("Thumbnail grid", Some(g)), "Thumbnail grid (G)");
         assert_eq!(tooltip("About", None), "About");
     }
@@ -588,8 +607,11 @@ mod tests {
         let grid = harness.get_by_label("Thumbnail grid").rect();
         let quit = harness.get_by_label("Quit").rect();
         assert_eq!(grid.left(), quit.left(), "{grid:?} {quit:?}");
-        let chord = harness.get_by_label("Ctrl+Alt+Shift+Q").rect();
-        assert!(chord.right() < quit.left(), "{chord:?} {quit:?}");
+        let combination = harness.get_by_label("Ctrl+Alt+Shift+Q").rect();
+        assert!(
+            combination.right() < quit.left(),
+            "{combination:?} {quit:?}"
+        );
     }
 
     #[test]
@@ -600,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn a_long_description_wraps_in_the_room_beside_the_chords() {
+    fn a_long_description_wraps_in_the_room_beside_the_combinations() {
         fn long() -> Vec<Section<'static>> {
             let description = "Show or hide every dock the mode has, the side docks and \
                 the filmstrip together, as one";
@@ -612,7 +634,7 @@ mod tests {
         let harness = shown(300.0, long);
         let row = harness.get_by_label_contains("Show or hide").rect();
         assert!(row.right() <= 300.0, "{row:?}");
-        let chord = harness.get_by_label("Shift+Tab").rect();
-        assert!(row.height() > 2.0 * chord.height(), "{row:?}");
+        let combination = harness.get_by_label("Shift+Tab").rect();
+        assert!(row.height() > 2.0 * combination.height(), "{row:?}");
     }
 }

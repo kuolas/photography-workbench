@@ -12,7 +12,7 @@
 use egui::{Align, Frame, Layout, Margin, UiBuilder, vec2};
 
 use crate::action_bar;
-use crate::keys::Chord;
+use crate::keys::KeyCombination;
 use crate::theme::Palette;
 
 /// The height of the toolbar.
@@ -79,22 +79,22 @@ pub fn show(
         .response
 }
 
-/// A button for the toolbar, 32 points square, showing only the Lucide
-/// icon `icon.0` (or the character `icon.1` if the name does not
-/// resolve). While `selected` it has a rounded square behind its icon, as
-/// an action bar's button has. `label` is the name screen readers and the
-/// tests know it by, and its tooltip, with the `chord` that does the same,
-/// if any ([`crate::keys::tooltip`]).
+/// A button for the toolbar, 32 points square, showing only the Lucide icon
+/// `icon.0` (or the character `icon.1` if the name does not resolve). While
+/// `selected` it has a rounded square behind its icon, as an action bar's
+/// button has. `label` is the name screen readers and the tests know it by,
+/// and its tooltip, with the `key_combination` that does the same, if any
+/// ([`crate::keys::tooltip`]).
 pub fn button(
     ui: &mut egui::Ui,
     palette: &Palette,
     icon: (&str, char),
     label: &str,
     selected: bool,
-    chord: Option<Chord>,
+    key_combination: Option<KeyCombination>,
 ) -> egui::Response {
     let size = (egui::Vec2::splat(BUTTON_SIZE), ICON_SIZE);
-    action_bar::icon_button(ui, palette, size, (icon, label), selected, chord)
+    action_bar::icon_button(ui, palette, size, (icon, label), selected, key_combination)
 }
 
 #[cfg(test)]
@@ -127,7 +127,7 @@ mod tests {
                     return;
                 }
                 let start = |ui: &mut egui::Ui| {
-                    let g = Chord::new(egui::Modifiers::NONE, egui::Key::G);
+                    let g = KeyCombination::new(egui::Modifiers::NONE, egui::Key::G);
                     button(
                         ui,
                         &palette,
@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn a_button_s_tooltip_names_its_chord() {
+    fn a_button_s_tooltip_names_its_combination() {
         let mut harness = toolbar(false, Rc::new(Cell::new(Rect::NOTHING)));
         harness.get_by_label("Grid").hover();
         // egui shows a tooltip once the pointer has rested a moment.
@@ -182,7 +182,7 @@ mod tests {
             harness.step();
             harness.query_by_label("Grid (G)").is_some()
         });
-        assert!(shown, "no tooltip naming the chord");
+        assert!(shown, "no tooltip naming the key combination");
     }
 
     #[test]
