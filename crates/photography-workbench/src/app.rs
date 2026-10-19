@@ -16,7 +16,7 @@ use crate::dialogs;
 use crate::filmstrip;
 use crate::folder_tree;
 use crate::grid;
-use crate::info;
+use crate::info::{self, SizeUnits, TimeForm};
 use crate::keymap::{self, Action, Step, Surface};
 use crate::layout::{self, Docks};
 use crate::menu::{self, MacMenu};
@@ -36,6 +36,14 @@ const TITLE_BAR_ICONS: [(&str, char); 2] = [("settings", '⚙'), ("circle-questi
 /// saved value, so renaming a theme resets users who chose it to System.
 const THEME_KEY: &str = "theme";
 
+/// The [`eframe::Storage`] key how capture times are written is saved
+/// under, as its [`TimeForm::name`].
+const CAPTURE_TIME_KEY: &str = "capture_time";
+
+/// The [`eframe::Storage`] key how file sizes are counted is saved under,
+/// as its [`SizeUnits::name`].
+const FILE_SIZES_KEY: &str = "file_sizes";
+
 /// The [`eframe::Storage`] key the mode is saved under, as its
 /// [`Mode::name`].
 const MODE_KEY: &str = "mode";
@@ -52,6 +60,12 @@ pub struct PhotographyWorkbenchApp {
     /// The concrete theme last installed on the context: [`Self::theme`]
     /// resolved against the OS preference. `None` until the first install.
     resolved_theme: Option<Theme>,
+    /// How the Info dock writes a capture time, chosen in Settings and
+    /// saved between runs.
+    capture_times: TimeForm,
+    /// How the Info dock counts a file's size, chosen in Settings and
+    /// saved between runs.
+    file_sizes: SizeUnits,
     /// The mode the window shows, saved between runs.
     mode: Mode,
     /// Which docks are shown, saved between runs.
@@ -116,9 +130,10 @@ impl PhotographyWorkbenchApp {
     pub const MIN_WINDOW: egui::Vec2 = egui::vec2(1280.0, 800.0);
 
     /// Called once, before the first frame. Installs the fonts and the
-    /// style, and restores the saved theme choice, mode, docks and view,
-    /// and what is expanded and selected in the folder tree; with none
-    /// saved, or an unreadable one, takes the default.
+    /// style, and restores the saved theme choice, how capture times are
+    /// written and file sizes counted, mode, docks and view, and what is
+    /// expanded and selected in the folder tree; with none saved, or an
+    /// unreadable one, takes the default.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         fonts::install(&cc.egui_ctx);
         style::install(&cc.egui_ctx);
@@ -134,6 +149,12 @@ impl PhotographyWorkbenchApp {
         let saved = |key| cc.storage.and_then(|storage| storage.get_string(key));
         let theme =
             saved(THEME_KEY).and_then(|name| Theme::ALL.into_iter().find(|t| t.name() == name));
+        let capture_times = saved(CAPTURE_TIME_KEY)
+            .and_then(|name| TimeForm::from_saved(&name))
+            .unwrap_or_default();
+        let file_sizes = saved(FILE_SIZES_KEY)
+            .and_then(|name| SizeUnits::from_saved(&name))
+            .unwrap_or_default();
         let mode = saved(MODE_KEY)
             .and_then(|name| Mode::from_saved(&name))
             .unwrap_or_default();
@@ -142,6 +163,8 @@ impl PhotographyWorkbenchApp {
             .unwrap_or_default();
         let mut app = Self {
             theme,
+            capture_times,
+            file_sizes,
             mode,
             docks: Docks::restore(cc.storage),
             view,
@@ -771,7 +794,10 @@ impl eframe::App for PhotographyWorkbenchApp {
         let current = self.current_photo().cloned();
         let folders = |ui: &mut egui::Ui| folder_tree::show(ui, &palette, &mut self.browser);
         let textures = &mut self.textures;
-        let photo_info = |ui: &mut egui::Ui| info::show(ui, &palette, textures, current.as_ref());
+        let (times, sizes) = (self.capture_times, self.file_sizes);
+        let photo_info = |ui: &mut egui::Ui| {
+            info::show(ui, &palette, textures, current.as_ref(), times, sizes);
+        };
         layout::side_docks(ui, parts, &mut self.docks, folders, photo_info);
         if parts.toolbar {
             let position = position(self.browser.photos());
@@ -839,9 +865,17 @@ impl eframe::App for PhotographyWorkbenchApp {
         chrome::window_resize_handles(ui.ctx());
 
         // The dialogs come last, above everything else. A theme picked in
-        // Settings is installed at the top of the next frame, which the
-        // click itself makes egui run.
-        if self.show_settings && dialogs::settings(ui.ctx(), &mut self.theme) {
+        // Settings is installed at the top of the next frame, and the Info
+        // dock writes its values as picked there in the next frame, which
+        // the click itself makes egui run.
+        if self.show_settings
+            && dialogs::settings(
+                ui.ctx(),
+                &mut self.theme,
+                &mut self.capture_times,
+                &mut self.file_sizes,
+            )
+        {
             self.show_settings = false;
         }
         if self.show_about {
@@ -863,6 +897,8 @@ impl eframe::App for PhotographyWorkbenchApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         storage.set_string(THEME_KEY, theme::choice_name(self.theme).to_owned());
+        storage.set_string(CAPTURE_TIME_KEY, self.capture_times.name().to_owned());
+        storage.set_string(FILE_SIZES_KEY, self.file_sizes.name().to_owned());
         storage.set_string(MODE_KEY, self.mode.name().to_owned());
         self.docks.save(storage);
         storage.set_string(VIEW_KEY, self.view.name().to_owned());
@@ -892,8 +928,9 @@ mod tests {
     use crate::disk::Disk;
 
     use super::{
-        Action, Docks, Framing, MODE_KEY, Mode, PhotographyWorkbenchApp, Side, THEME_KEY,
-        TITLE_BAR_ICONS, Textures, Theme, VIEW_KEY, View, ZOOM_BUTTONS, Zooming,
+        Action, CAPTURE_TIME_KEY, Docks, FILE_SIZES_KEY, Framing, MODE_KEY, Mode,
+        PhotographyWorkbenchApp, Side, SizeUnits, THEME_KEY, TITLE_BAR_ICONS, Textures, Theme,
+        TimeForm, VIEW_KEY, View, ZOOM_BUTTONS, Zooming,
     };
 
     /// Settings kept in memory, in place of eframe's file.
@@ -1483,7 +1520,9 @@ mod tests {
         let mut harness = harness();
         harness.get_by_label("Settings").click();
         harness.run();
-        harness.get_by_role(Role::ComboBox).click();
+        harness
+            .get_by_role_and_label(Role::ComboBox, "Theme")
+            .click();
         harness.run();
         harness.get_by_label("Nexus").click();
         harness.run();
@@ -1492,6 +1531,34 @@ mod tests {
         let mut storage = MemoryStorage::default();
         harness.state_mut().save(&mut storage);
         assert_eq!(storage.get_string(THEME_KEY).as_deref(), Some("Nexus"));
+    }
+
+    /// How capture times are written and file sizes counted is saved, and
+    /// restored on the next run; with none saved, or an unreadable one,
+    /// each takes its default.
+    #[test]
+    fn the_capture_time_form_and_the_file_size_units_are_saved_and_restored() {
+        let mut storage = MemoryStorage::default();
+        let mut harness = harness();
+        assert_eq!(harness.state().capture_times, TimeForm::Numeric);
+        assert_eq!(harness.state().file_sizes, SizeUnits::Decimal);
+        harness.state_mut().capture_times = TimeForm::Long;
+        harness.state_mut().file_sizes = SizeUnits::Binary;
+        harness.state_mut().save(&mut storage);
+        let saved = |key| storage.get_string(key);
+        assert_eq!(saved(CAPTURE_TIME_KEY).as_deref(), Some("Long"));
+        assert_eq!(saved(FILE_SIZES_KEY).as_deref(), Some("Binary"));
+        {
+            let restored = harness_from(&storage);
+            assert_eq!(restored.state().capture_times, TimeForm::Long);
+            assert_eq!(restored.state().file_sizes, SizeUnits::Binary);
+        }
+
+        storage.set_string(CAPTURE_TIME_KEY, "Short".to_owned());
+        storage.set_string(FILE_SIZES_KEY, "Metric".to_owned());
+        let restored = harness_from(&storage);
+        assert_eq!(restored.state().capture_times, TimeForm::Numeric);
+        assert_eq!(restored.state().file_sizes, SizeUnits::Decimal);
     }
 
     /// The icon on the title bar opens About, except on macOS, where About
@@ -1831,9 +1898,10 @@ mod tests {
             .any(|node| dock.contains_rect(node.rect()))
     }
 
-    /// The size on disk of the file at `path`, as the Info dock writes it.
-    fn on_disk(path: &Path) -> String {
-        crate::info::file_size(std::fs::metadata(path).unwrap().len())
+    /// The size on disk of the file at `path`, as the Info dock writes it
+    /// in `units`.
+    fn on_disk(path: &Path, units: SizeUnits) -> String {
+        crate::info::file_size(std::fs::metadata(path).unwrap().len(), units)
     }
 
     /// Info shows a JPEG file's name, size on disk and format, when it was
@@ -1847,7 +1915,7 @@ mod tests {
         std::fs::write(&photo, crate::textures::jpeg(300, 200)).unwrap();
         let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
         click(&mut harness, "Home");
-        let size_on_disk = format!("Size on disk: {}", on_disk(&photo));
+        let size_on_disk = format!("Size on disk: {}", on_disk(&photo, SizeUnits::Decimal));
         let shown = [
             "File Information",
             "File name: DSC_0001.jpg",
@@ -1913,35 +1981,54 @@ mod tests {
 
     /// The bytes of a NEF file as small as raw-files reads one: a TIFF
     /// header and IFD0, holding the Make a Nikon camera writes, `model`,
-    /// and `preview`, a JPEG file's bytes, as the file's one preview.
+    /// and `preview`, a JPEG file's bytes, as the file's one preview, and
+    /// pointing at an Exif IFD, which says the photo was taken at
+    /// 10:20:30.85 on 1 May 2024 by a clock two hours ahead of UTC.
     fn nef(model: &str, preview: &[u8]) -> Vec<u8> {
         let make = b"NIKON CORPORATION\0".to_vec();
         let model = [model.as_bytes(), b"\0"].concat();
-        // The header, then IFD0's count, its 4 entries of 12 bytes and
-        // the offset of the next IFD, none; then the values.
-        let make_at = 8 + 2 + 4 * 12 + 4;
+        let taken = b"2024:05:01 10:20:30\0".to_vec();
+        let offset = b"+02:00\0".to_vec();
+        // The header, then IFD0's count, its 5 entries of 12 bytes and
+        // the offset of the next IFD, none; then the Exif IFD, with 3
+        // entries; then the values.
+        let exif_at = 8 + 2 + 5 * 12 + 4;
+        let make_at = exif_at + 2 + 3 * 12 + 4;
         let model_at = make_at + make.len();
-        let preview_at = model_at + model.len();
+        let taken_at = model_at + model.len();
+        let offset_at = taken_at + taken.len();
+        let preview_at = offset_at + offset.len();
         let long = |n: usize| u32::try_from(n).unwrap().to_le_bytes();
         let mut bytes = b"II*\0".to_vec();
         bytes.extend(long(8));
-        bytes.extend(4_u16.to_le_bytes());
         // Each entry's tag, in rising order, its type (2 for text, 4 for
-        // a 32-bit number), how many values, and the value or where it is.
-        let entries = [
-            (0x010F_u16, 2_u16, make.len(), make_at),
-            (0x0110, 2, model.len(), model_at),
-            (0x0201, 4, 1, preview_at),
-            (0x0202, 4, 1, preview.len()),
+        // a 32-bit number), how many values, and the value, where it fits
+        // in 4 bytes, or else where it is.
+        let ifd0 = [
+            (0x010F_u16, 2_u16, make.len(), long(make_at)),
+            (0x0110, 2, model.len(), long(model_at)),
+            (0x0201, 4, 1, long(preview_at)),
+            (0x0202, 4, 1, long(preview.len())),
+            (0x8769, 4, 1, long(exif_at)),
         ];
-        for (tag, kind, count, value) in entries {
-            bytes.extend(tag.to_le_bytes());
-            bytes.extend(kind.to_le_bytes());
-            bytes.extend(long(count));
-            bytes.extend(long(value));
+        // DateTimeOriginal, OffsetTimeOriginal and SubSecTimeOriginal,
+        // the hundredths of a second.
+        let exif = [
+            (0x9003, 2, taken.len(), long(taken_at)),
+            (0x9011, 2, offset.len(), long(offset_at)),
+            (0x9291, 2, 3, *b"85\0\0"),
+        ];
+        for ifd in [&ifd0[..], &exif] {
+            bytes.extend(u16::try_from(ifd.len()).unwrap().to_le_bytes());
+            for &(tag, kind, count, value) in ifd {
+                bytes.extend(tag.to_le_bytes());
+                bytes.extend(kind.to_le_bytes());
+                bytes.extend(long(count));
+                bytes.extend(value);
+            }
+            bytes.extend(long(0));
         }
-        bytes.extend(long(0));
-        for value in [&make[..], &model, preview] {
+        for value in [&make[..], &model, &taken, &offset, preview] {
             bytes.extend(value);
         }
         bytes
@@ -1960,12 +2047,12 @@ mod tests {
         std::fs::write(&photo, nef("NIKON Z 9", &preview)).unwrap();
         let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
         click(&mut harness, "Home");
-        let size_on_disk = format!("Size on disk: {}", on_disk(&photo));
+        let size_on_disk = format!("Size on disk: {}", on_disk(&photo, SizeUnits::Decimal));
         let shown = [
             "File name: DSC_0001.NEF",
             &size_on_disk,
             "Format: NEF",
-            "Capture time: —",
+            "Capture time: 2024-05-01 10:20:30.85 UTC+02:00",
             "Image size: 640 × 480",
             "Preview size: 640 × 480 (100 %)",
             "Previews: 1",
@@ -1984,6 +2071,56 @@ mod tests {
         }
         let jpeg_only = "Camera data is read from RAW files only.";
         assert!(!in_right_dock(&harness, jpeg_only));
+    }
+
+    /// Opens Settings and picks `choice` in its drop-down labelled
+    /// `setting`.
+    fn pick_in_settings(
+        harness: &mut Harness<'_, PhotographyWorkbenchApp>,
+        setting: &str,
+        choice: &str,
+    ) {
+        click(harness, "Settings");
+        harness
+            .get_by_role_and_label(Role::ComboBox, setting)
+            .click();
+        harness.run();
+        click(harness, choice);
+    }
+
+    /// File sizes picked in Settings are how Info counts the size on disk
+    /// at once.
+    #[test]
+    fn info_counts_sizes_as_picked_in_settings_at_once() {
+        let dir = photos_folder();
+        let photo = dir.path().join("DSC_0001.jpg");
+        std::fs::write(&photo, crate::textures::jpeg(300, 200)).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let row = |units| format!("Size on disk: {}", on_disk(&photo, units));
+        assert!(in_right_dock(&harness, &row(SizeUnits::Decimal)));
+        pick_in_settings(&mut harness, "File sizes", "Binary");
+        assert_eq!(harness.state().file_sizes, SizeUnits::Binary);
+        assert!(in_right_dock(&harness, &row(SizeUnits::Binary)));
+        assert!(!in_right_dock(&harness, &row(SizeUnits::Decimal)));
+    }
+
+    /// The form of capture time picked in Settings is how Info writes a
+    /// RAW file's at once.
+    #[test]
+    fn info_writes_capture_times_as_picked_in_settings_at_once() {
+        let dir = photos_folder();
+        let preview = crate::textures::jpeg(640, 480);
+        std::fs::write(dir.path().join("DSC_0001.NEF"), nef("NIKON Z 9", &preview)).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let numeric = "Capture time: 2024-05-01 10:20:30.85 UTC+02:00";
+        let long = "Capture time: 1 May 2024 at 10:20:30.85 (UTC+02:00)";
+        assert!(in_right_dock(&harness, numeric));
+        pick_in_settings(&mut harness, "Capture time", "Long");
+        assert_eq!(harness.state().capture_times, TimeForm::Long);
+        assert!(in_right_dock(&harness, long));
+        assert!(!in_right_dock(&harness, numeric));
     }
 
     /// Info names a RAW file's format by the file's own extension, and a

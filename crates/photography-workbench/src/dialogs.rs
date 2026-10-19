@@ -4,18 +4,25 @@
 //! frame every dialog shares ([`desktop_ui::dialog`]).
 
 use desktop_ui::about::{self, AboutInfo};
-use desktop_ui::dialog;
 use desktop_ui::keys;
 use desktop_ui::theme::{self, Theme};
+use desktop_ui::{dialog, drop_down};
 
 use crate::PhotographyWorkbenchApp as App;
+use crate::info::{SizeUnits, TimeForm};
 
 /// The smallest a dialog of settings is wide, in points.
 const SETTINGS_WIDTH: f32 = 600.0;
 
-/// The Settings dialog: the theme choice, `theme`, which takes effect as it
-/// is picked. Returns whether the dialog is to close.
-pub fn settings(ctx: &egui::Context, theme: &mut Option<Theme>) -> bool {
+/// The Settings dialog: the theme choice, `theme`, how capture times are
+/// written, `times`, and how file sizes are counted, `sizes`, each taking
+/// effect as it is picked. Returns whether the dialog is to close.
+pub fn settings(
+    ctx: &egui::Context,
+    theme: &mut Option<Theme>,
+    times: &mut TimeForm,
+    sizes: &mut SizeUnits,
+) -> bool {
     dialog::show(ctx, "settings", |ui| {
         ui.set_min_width(SETTINGS_WIDTH);
         ui.heading("Settings");
@@ -24,6 +31,12 @@ pub fn settings(ctx: &egui::Context, theme: &mut Option<Theme>) -> bool {
         ui.add_space(2.0);
         let label = ui.label("Theme");
         theme::picker(ui, "theme", theme).labelled_by(label.id);
+        let label = ui.label("Capture time");
+        drop_down::show(ui, "capture_time", times, TimeForm::ALL, TimeForm::name)
+            .labelled_by(label.id);
+        let label = ui.label("File sizes");
+        drop_down::show(ui, "file_sizes", sizes, SizeUnits::ALL, SizeUnits::name)
+            .labelled_by(label.id);
     })
     .should_close()
 }

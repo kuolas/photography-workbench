@@ -9,6 +9,7 @@ pub mod action_bar;
 pub mod chrome;
 pub mod dialog;
 pub mod dock;
+pub mod drop_down;
 pub mod fonts;
 pub mod icons;
 pub mod keys;

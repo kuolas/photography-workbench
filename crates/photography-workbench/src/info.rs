@@ -33,8 +33,10 @@
 //! why the photo cannot be shown.
 //!
 //! Each value is put in words by a function of its own, with no egui in
-//! it, so a later choice of units or of how times are written is a
-//! parameter of that one function.
+//! it. How capture times are written ([`TimeForm`]) and how file sizes are
+//! counted ([`SizeUnits`]) are chosen in Settings and saved between runs;
+//! each is a parameter of its one function, passed in every frame, so a
+//! change shows at once.
 
 use std::fmt::Write as _;
 
@@ -93,11 +95,101 @@ const VALUE_GAP: f32 = 12.0;
 /// What stands for a value the file does not record.
 const NONE: &str = "—";
 
+/// How a capture time is written, as chosen in Settings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TimeForm {
+    /// The date first and year first, as ISO 8601 orders them, then the
+    /// time of day and the offset from UTC: "2026-08-15 10:20:30.85
+    /// UTC+02:00".
+    #[default]
+    Numeric,
+    /// The date in words, then the time: "15 August 2026 at 10:20:30.85
+    /// (UTC+02:00)".
+    Long,
+}
+
+impl TimeForm {
+    /// Every form, in the order Settings lists them.
+    pub const ALL: [Self; 2] = [Self::Numeric, Self::Long];
+
+    /// The form's name, as Settings lists it, which is also the saved
+    /// value.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Numeric => "Numeric",
+            Self::Long => "Long",
+        }
+    }
+
+    /// The form saved as `name`, its [`Self::name`]; `None` when `name` is
+    /// no form.
+    pub fn from_saved(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|form| form.name() == name)
+    }
+}
+
+/// How a file's size is counted, as chosen in Settings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SizeUnits {
+    /// In thousands: a kilobyte is 1,000 bytes, "52.3 MB".
+    #[default]
+    Decimal,
+    /// In powers of 1,024: a kibibyte is 1,024 bytes, "49.9 MiB".
+    Binary,
+}
+
+impl SizeUnits {
+    /// Every kind of unit, in the order Settings lists them.
+    pub const ALL: [Self; 2] = [Self::Decimal, Self::Binary];
+
+    /// The units' name, as Settings lists it, which is also the saved
+    /// value.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Decimal => "Decimal",
+            Self::Binary => "Binary",
+        }
+    }
+
+    /// The units saved as `name`, their [`Self::name`]; `None` when `name`
+    /// is none.
+    pub fn from_saved(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|units| units.name() == name)
+    }
+
+    /// Each unit's symbol, how many bytes it holds, and how many decimals
+    /// a size in it is written with, smallest first.
+    fn table(self) -> [(&'static str, f64, usize); 4] {
+        match self {
+            Self::Decimal => [
+                ("B", 1.0, 0),
+                ("KB", 1e3, 0),
+                ("MB", 1e6, 1),
+                ("GB", 1e9, 1),
+            ],
+            Self::Binary => [
+                ("B", 1.0, 0),
+                ("KiB", 1024.0, 0),
+                ("MiB", 1_048_576.0, 1),
+                ("GiB", 1_073_741_824.0, 1),
+            ],
+        }
+    }
+}
+
 /// The Info dock, filling `ui`: what is known of `photo`, the current
-/// photo, as the decodes in `textures` told it, or a message saying no
-/// photo is selected. It wants nothing decoded: [`want`] does, once the
-/// views have wanted what they draw.
-pub fn show(ui: &mut egui::Ui, palette: &Palette, textures: &mut Textures, photo: Option<&Photo>) {
+/// photo, as the decodes in `textures` told it, its capture time written
+/// in `times` and its size on disk counted in `sizes`, or a message saying
+/// no photo is selected. It wants nothing decoded: [`want`] does, once
+/// the views have wanted what they draw.
+pub fn show(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    textures: &mut Textures,
+    photo: Option<&Photo>,
+    times: TimeForm,
+    sizes: SizeUnits,
+) {
     let Some(photo) = photo else {
         dock::empty_message(
             ui,
@@ -124,7 +216,7 @@ pub fn show(ui: &mut egui::Ui, palette: &Palette, textures: &mut Textures, photo
     Frame::NONE.inner_margin(PADDING).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         group(ui, palette, "File Information", |ui| {
-            file_rows(ui, palette, photo, details);
+            file_rows(ui, palette, photo, details, sizes);
         });
         let Some(details) = details else {
             ui.add_space(BOX_GAP);
@@ -135,7 +227,7 @@ pub fn show(ui: &mut egui::Ui, palette: &Palette, textures: &mut Textures, photo
         };
         ui.add_space(BOX_GAP);
         group(ui, palette, "Image Information", |ui| {
-            image_rows(ui, palette, details);
+            image_rows(ui, palette, details, times);
         });
         ui.add_space(BOX_GAP);
         group(ui, palette, "Shooting Information", |ui| {
@@ -168,22 +260,31 @@ pub fn want(textures: &mut Textures, photo: Option<&Photo>) {
     }
 }
 
-/// File Information's rows: the file's name, its size on disk, "—" while
-/// `details` are not known, and its format.
-fn file_rows(ui: &mut egui::Ui, palette: &Palette, photo: &Photo, details: Option<&Details>) {
-    let bytes = details.map_or_else(|| NONE.to_owned(), |details| file_size(details.bytes));
+/// File Information's rows: the file's name, its size on disk in `units`,
+/// "—" while `details` are not known, and its format.
+fn file_rows(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    photo: &Photo,
+    details: Option<&Details>,
+    units: SizeUnits,
+) {
+    let bytes = details.map_or_else(
+        || NONE.to_owned(),
+        |details| file_size(details.bytes, units),
+    );
     row(ui, palette, "File name", &photo.name());
     row(ui, palette, "Size on disk", &bytes);
     row(ui, palette, "Format", &photo.format());
 }
 
-/// Image Information's rows: when the photo was taken, the size of its
-/// image, for a RAW file the size of its largest preview and how many it
-/// holds, and which way it is laid out.
-fn image_rows(ui: &mut egui::Ui, palette: &Palette, details: &Details) {
+/// Image Information's rows: when the photo was taken, written in `form`,
+/// the size of its image, for a RAW file the size of its largest preview
+/// and how many it holds, and which way it is laid out.
+fn image_rows(ui: &mut egui::Ui, palette: &Palette, details: &Details, form: TimeForm) {
     let metadata = details.metadata.as_ref();
     let captured = metadata.and_then(Metadata::capture_time);
-    let captured = captured.map_or_else(|| NONE.to_owned(), capture_time);
+    let captured = captured.map_or_else(|| NONE.to_owned(), |time| capture_time(time, form));
     row(ui, palette, "Capture time", &captured);
     row(ui, palette, "Image size", &pixel_size(image_size(details)));
     if metadata.is_some() {
@@ -320,32 +421,29 @@ fn upright(size: raw_files::Size, swaps: bool) -> Size {
     Size { width, height }
 }
 
-/// A file's size on disk in decimal units, a kilobyte being 1,000 bytes:
-/// "812 KB" in whole kilobytes, "52.3 MB" and "1.2 GB" to a tenth, "512
-/// B" in bytes. A size that would round to 1,000 of one unit is written
-/// in the next.
-pub fn file_size(bytes: u64) -> String {
-    // The unit, how many bytes it holds, and how many decimals it is
-    // written with.
-    const UNITS: [(&str, f64, usize); 4] = [
-        ("B", 1.0, 0),
-        ("KB", 1e3, 0),
-        ("MB", 1e6, 1),
-        ("GB", 1e9, 1),
-    ];
+/// A file's size on disk in `units`: in decimal units, a kilobyte being
+/// 1,000 bytes, "812 KB" in whole kilobytes, "52.3 MB" and "1.2 GB" to a
+/// tenth, "512 B" in bytes; in binary units, a kibibyte being 1,024 bytes,
+/// "812 KiB", "49.9 MiB" and "1.2 GiB" alike. A size is written in the
+/// next unit up once, rounded in its own, it would read as one of the
+/// next: from 1,000 of a decimal unit, from 1,024 of a binary one.
+pub fn file_size(bytes: u64, units: SizeUnits) -> String {
+    let table = units.table();
     let bytes = bytes as f64;
     let rounded = |(_, scale, decimals): (&str, f64, usize)| {
         let step = 10_f64.powi(decimals as i32);
         (bytes / scale * step).round() / step
     };
-    let mut unit = UNITS
+    let mut unit = table
         .iter()
         .rposition(|&(_, scale, _)| bytes >= scale)
         .unwrap_or(0);
-    if unit + 1 < UNITS.len() && rounded(UNITS[unit]) >= 1000.0 {
+    if let Some(&(_, next, _)) = table.get(unit + 1)
+        && rounded(table[unit]) >= next / table[unit].1
+    {
         unit += 1;
     }
-    let (name, scale, decimals) = UNITS[unit];
+    let (name, scale, decimals) = table[unit];
     format!("{:.*} {name}", decimals, bytes / scale)
 }
 
@@ -450,13 +548,31 @@ pub fn compensation(bias: SignedRational) -> String {
     format!("{sign}{magnitude} EV")
 }
 
-/// When a photo was taken, as its camera's clock said: the date, the
-/// time, the fraction of a second only when the camera recorded one,
-/// with the digits it recorded, and the clock's offset from UTC only
-/// when it recorded one: "2026-08-15 10:20:30.85 UTC+02:00".
-pub fn capture_time(time: DateTime) -> String {
-    clock(&Clock::from(time))
+/// When a photo was taken, as its camera's clock said, written in `form`:
+/// the date, the time, the fraction of a second only when the camera
+/// recorded one, with the digits it recorded, and the clock's offset from
+/// UTC only when it recorded one, "2026-08-15 10:20:30.85 UTC+02:00" in
+/// the numeric form, "15 August 2026 at 10:20:30.85 (UTC+02:00)" in the
+/// long one.
+pub fn capture_time(time: DateTime, form: TimeForm) -> String {
+    clock(&Clock::from(time), form)
 }
+
+/// The months' names in English, January first.
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
 
 /// A capture time's parts, as [`DateTime`] tells them.
 #[derive(Clone, Copy, Debug)]
@@ -488,21 +604,35 @@ impl From<DateTime> for Clock {
     }
 }
 
-/// `time` in words, as [`capture_time`] writes it.
-fn clock(time: &Clock) -> String {
-    let mut text = format!(
-        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
-        time.year, time.month, time.day, time.hour, time.minute, time.second
-    );
+/// `time` in words, written in `form`, as [`capture_time`] writes it.
+fn clock(time: &Clock, form: TimeForm) -> String {
+    let mut of_day = format!("{:02}:{:02}:{:02}", time.hour, time.minute, time.second);
     if time.subsecond_digits > 0 {
         let digits = u32::from(time.subsecond_digits.min(9));
         let fraction = time.nanosecond / 10_u32.pow(9 - digits);
-        let _ = write!(text, ".{fraction:0width$}", width = digits as usize);
+        let _ = write!(of_day, ".{fraction:0width$}", width = digits as usize);
     }
-    if let Some(offset) = time.offset_minutes {
+    let offset = time.offset_minutes.map(|offset| {
         let sign = if offset < 0 { '\u{2212}' } else { '+' };
         let minutes = offset.unsigned_abs();
-        let _ = write!(text, " UTC{sign}{:02}:{:02}", minutes / 60, minutes % 60);
+        format!("UTC{sign}{:02}:{:02}", minutes / 60, minutes % 60)
+    });
+    let mut text = match form {
+        TimeForm::Numeric => format!(
+            "{:04}-{:02}-{:02} {of_day}",
+            time.year, time.month, time.day
+        ),
+        TimeForm::Long => {
+            // A capture time's month is 1 to 12, as raw-files reads it.
+            let month = MONTHS[usize::from(time.month) - 1];
+            format!("{} {month} {} at {of_day}", time.day, time.year)
+        }
+    };
+    if let Some(offset) = offset {
+        let _ = match form {
+            TimeForm::Numeric => write!(text, " {offset}"),
+            TimeForm::Long => write!(text, " ({offset})"),
+        };
     }
     text
 }
@@ -576,8 +706,8 @@ mod tests {
     use raw_files::{Rational, SignedRational};
 
     use super::{
-        Clock, aperture, clock, compensation, exposure, file_size, focal_length, iso, lens_text,
-        orientation, pixel_size, show, shutter_speed, upright, want,
+        Clock, SizeUnits, TimeForm, aperture, clock, compensation, exposure, file_size,
+        focal_length, iso, lens_text, orientation, pixel_size, show, shutter_speed, upright, want,
     };
     use crate::textures::{self, Textures};
 
@@ -603,13 +733,15 @@ mod tests {
                 return;
             }
             store.begin_frame(ui.ctx());
-            show(ui, &palette, &mut store, Some(&photo));
+            let (times, sizes) = (TimeForm::default(), SizeUnits::default());
+            show(ui, &palette, &mut store, Some(&photo), times, sizes);
             want(&mut store, Some(&photo));
             store.end_frame(ui.ctx());
         });
         harness.run();
         let bytes = std::fs::metadata(&path).unwrap().len();
-        harness.get_by_label(&format!("Size on disk: {}", file_size(bytes)));
+        let size = file_size(bytes, SizeUnits::Decimal);
+        harness.get_by_label(&format!("Size on disk: {size}"));
         harness.get_by_label("Image size: 300 × 200");
         assert!(harness.query_by_label("Reading…").is_none());
     }
@@ -649,7 +781,8 @@ mod tests {
                 }
                 dock.store.begin_frame(ui.ctx());
                 if dock.shown {
-                    show(ui, &palette, &mut dock.store, Some(&photo));
+                    let (times, sizes) = (TimeForm::default(), SizeUnits::default());
+                    show(ui, &palette, &mut dock.store, Some(&photo), times, sizes);
                     want(&mut dock.store, Some(&photo));
                 } else {
                     dock.store.want(photo.path(), 512, textures::ON_SCREEN);
@@ -687,6 +820,7 @@ mod tests {
     /// round to a thousand of one.
     #[test]
     fn a_file_size_is_in_decimal_units() {
+        let file_size = |bytes| file_size(bytes, SizeUnits::Decimal);
         assert_eq!(file_size(0), "0 B");
         assert_eq!(file_size(999), "999 B");
         assert_eq!(file_size(1_000), "1 KB");
@@ -698,6 +832,50 @@ mod tests {
         assert_eq!(file_size(52_349_999), "52.3 MB");
         assert_eq!(file_size(999_960_000), "1.0 GB");
         assert_eq!(file_size(1_200_000_000), "1.2 GB");
+    }
+
+    /// Sizes in binary units count in 1,024s, rounded as decimal ones
+    /// are: whole kibibytes, mebibytes and gibibytes to a tenth, and the
+    /// next unit up only once a size would round to 1,024 of one, so
+    /// "1000 KiB" is written as it is, under a mebibyte.
+    #[test]
+    fn a_file_size_in_binary_units_counts_in_1024s() {
+        let file_size = |bytes| file_size(bytes, SizeUnits::Binary);
+        const KIB: u64 = 1024;
+        const MIB: u64 = 1024 * KIB;
+        const GIB: u64 = 1024 * MIB;
+        assert_eq!(file_size(0), "0 B");
+        assert_eq!(file_size(999), "999 B");
+        assert_eq!(file_size(1_000), "1000 B");
+        assert_eq!(file_size(1_023), "1023 B");
+        assert_eq!(file_size(KIB), "1 KiB");
+        assert_eq!(file_size(812 * KIB), "812 KiB");
+        assert_eq!(file_size(812 * KIB + 600), "813 KiB");
+        assert_eq!(file_size(999 * KIB + 400), "999 KiB");
+        assert_eq!(file_size(1_023_999), "1000 KiB");
+        assert_eq!(file_size(MIB - 1), "1.0 MiB");
+        assert_eq!(file_size(MIB), "1.0 MiB");
+        assert_eq!(file_size(52_300_000), "49.9 MiB");
+        assert_eq!(file_size(MIB * 499 / 10), "49.9 MiB");
+        assert_eq!(file_size(999 * MIB + 990 * KIB), "1000.0 MiB");
+        assert_eq!(file_size(GIB - 1), "1.0 GiB");
+        assert_eq!(file_size(GIB * 12 / 10), "1.2 GiB");
+    }
+
+    /// Each choice is saved by its name and restored from it; no other
+    /// name is one.
+    #[test]
+    fn a_saved_form_restores_by_its_name() {
+        for form in TimeForm::ALL {
+            assert_eq!(TimeForm::from_saved(form.name()), Some(form));
+        }
+        for units in SizeUnits::ALL {
+            assert_eq!(SizeUnits::from_saved(units.name()), Some(units));
+        }
+        assert_eq!(TimeForm::from_saved("ISO 8601"), None);
+        assert_eq!(SizeUnits::from_saved("decimal"), None);
+        assert_eq!(TimeForm::default(), TimeForm::Numeric);
+        assert_eq!(SizeUnits::default(), SizeUnits::Decimal);
     }
 
     #[test]
@@ -837,6 +1015,7 @@ mod tests {
     /// only when the camera recorded one, a minus sign for one behind.
     #[test]
     fn a_capture_time_says_what_the_camera_recorded() {
+        let clock = |time: &Clock| clock(time, TimeForm::Numeric);
         assert_eq!(clock(&time()), "2026-08-15 10:20:30");
         let early = Clock {
             month: 1,
@@ -868,6 +1047,57 @@ mod tests {
             "2026-08-15 10:20:30.85 UTC\u{2212}05:30"
         );
         assert_eq!(clock(&offset(0)), "2026-08-15 10:20:30.85 UTC+00:00");
+    }
+
+    /// The long form writes the day, the month's name and the year, then
+    /// the time, with its fraction of a second and its offset from UTC,
+    /// in parentheses, only when the camera recorded them.
+    #[test]
+    fn a_long_capture_time_names_the_month() {
+        let clock = |time: &Clock| clock(time, TimeForm::Long);
+        assert_eq!(clock(&time()), "15 August 2026 at 10:20:30");
+        let early = Clock {
+            month: 1,
+            day: 2,
+            hour: 3,
+            minute: 4,
+            second: 5,
+            ..time()
+        };
+        assert_eq!(clock(&early), "2 January 2026 at 03:04:05");
+        let december = Clock {
+            month: 12,
+            day: 31,
+            ..time()
+        };
+        assert_eq!(clock(&december), "31 December 2026 at 10:20:30");
+        let fraction = |nanosecond, subsecond_digits| Clock {
+            nanosecond,
+            subsecond_digits,
+            ..time()
+        };
+        assert_eq!(
+            clock(&fraction(850_000_000, 2)),
+            "15 August 2026 at 10:20:30.85"
+        );
+        assert_eq!(
+            clock(&fraction(500_000_000, 1)),
+            "15 August 2026 at 10:20:30.5"
+        );
+        let offset = |minutes, subsecond_digits| Clock {
+            nanosecond: 850_000_000,
+            subsecond_digits,
+            offset_minutes: Some(minutes),
+            ..time()
+        };
+        assert_eq!(
+            clock(&offset(120, 2)),
+            "15 August 2026 at 10:20:30.85 (UTC+02:00)"
+        );
+        assert_eq!(
+            clock(&offset(-330, 0)),
+            "15 August 2026 at 10:20:30 (UTC\u{2212}05:30)"
+        );
     }
 
     /// A lens is named by its model; with none, by its range, an end
