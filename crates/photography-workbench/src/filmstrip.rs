@@ -30,7 +30,7 @@ use std::cmp::Reverse;
 use std::ops::Range;
 use std::path::Path;
 
-use catalog::photos::{Kind, Photo};
+use catalog::photos::Photo;
 use desktop_ui::fonts;
 use desktop_ui::theme::Palette;
 use egui::style::ScrollAnimation;
@@ -243,7 +243,7 @@ fn photo_cell(
     let format = painter.text(
         pos2(rect.right() - LABEL_SIDE, middle),
         Align2::RIGHT_CENTER,
-        format_of(photo.kind()),
+        photo.format(),
         FontId::new(FORMAT_SIZE, semibold),
         colour,
     );
@@ -263,19 +263,6 @@ fn photo_cell(
     response.clicked()
 }
 
-/// The photo's format as a photographer names it, whatever the file's
-/// extension: "JPEG", or a RAW format's main extension in capitals,
-/// "NEF" for an `.nrw` file as for a `.nef` one.
-fn format_of(kind: Kind) -> String {
-    match kind {
-        Kind::Jpeg => "JPEG".to_owned(),
-        Kind::Raw(format) => format
-            .extensions()
-            .first()
-            .map_or_else(|| format.name().to_owned(), |main| main.to_uppercase()),
-    }
-}
-
 /// `name` without its extension: what is before its last dot, if there
 /// is anything before it.
 fn stem(name: &str) -> &str {
@@ -287,13 +274,9 @@ fn stem(name: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
-    use catalog::photos::Kind;
-
     use egui::{Rect, pos2};
 
-    use super::{format_of, in_view, stem, want_order};
+    use super::{in_view, stem, want_order};
     use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN};
 
     /// A cell is in view however little of it is, and not when it only
@@ -340,19 +323,6 @@ mod tests {
             .map(|(index, _)| index)
             .collect();
         assert_eq!(indices, [1, 2, 0, 3]);
-    }
-
-    /// A photo's format is named the way photographers name it, whatever
-    /// its file's extension.
-    #[test]
-    fn a_photo_s_format_is_named_by_its_kind() {
-        let format = |name: &str| format_of(Kind::of(Path::new(name)).unwrap());
-        assert_eq!(format("DSC_0001.NEF"), "NEF");
-        assert_eq!(format("DSCN0001.nrw"), "NEF");
-        assert_eq!(format("DSC00001.ARW"), "ARW");
-        assert_eq!(format("DSC00001.sr2"), "ARW");
-        assert_eq!(format("IMG_0001.jpg"), "JPEG");
-        assert_eq!(format("IMG_0001.JPEG"), "JPEG");
     }
 
     /// A name loses its extension, but a name that is all extension, or
