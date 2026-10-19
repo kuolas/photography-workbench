@@ -348,10 +348,10 @@ fn painted_button(
     response.on_hover_text(label)
 }
 
-/// Strips along the window's edges and corners that resize it, above
-/// everything else in the window. They add nothing while the window is
-/// maximized or full screen, nor on macOS, where the system's frame resizes
-/// it.
+/// Strips along the window's edges and corners that resize it, above the
+/// window's panels and under its dialogs, popups and tooltips. They add
+/// nothing while the window is maximized or full screen, nor on macOS,
+/// where the system's frame resizes it.
 pub fn window_resize_handles(ctx: &egui::Context) {
     if !SYSTEM_FRAME {
         draw_resize_handles(ctx);
@@ -370,11 +370,15 @@ fn draw_resize_handles(ctx: &egui::Context) {
     let window = ctx.input(egui::InputState::viewport_rect);
     // The resize starts on the press, not once a drag is under way: from
     // there the system follows the pointer, so the edge moves with it from
-    // the first pixel. The strips are above everything else, so nothing
-    // under them needs the press.
+    // the first pixel. The strips are above the window's panels, so no
+    // panel under them needs the press; a dialog or a popup over a strip
+    // is above it and takes the press itself.
     let pressed = ctx.input(|i| i.pointer.primary_pressed());
+    // In egui's middle order, with the dialogs: above the window's panels,
+    // in the background order, and under a dialog, which egui brings to
+    // the top as it opens.
     egui::Area::new(egui::Id::new("window_resize_handles"))
-        .order(egui::Order::Foreground)
+        .order(egui::Order::Middle)
         .fixed_pos(window.min)
         .show(ctx, |ui| {
             ui.set_clip_rect(window);
@@ -890,6 +894,20 @@ mod tests {
             .entry(ViewportId::ROOT)
             .or_default()
             .fullscreen = Some(true);
+        harness.run();
+        let sent = frame_with(&mut harness, press_at(pos2(2.0, 150.0), false));
+        assert!(sent.is_empty(), "the left edge sent {sent:?}");
+    }
+
+    /// A dialog is above the resize strips, as above everything else in
+    /// the window: a press on an edge while it is open does not resize the
+    /// window.
+    #[test]
+    fn a_dialog_is_above_the_resize_strips() {
+        let mut harness = harness(vec2(400.0, 300.0), false, |ui| {
+            draw_resize_handles(ui.ctx());
+            crate::dialog::show(ui.ctx(), "dialog", |ui| ui.label("Inside"));
+        });
         harness.run();
         let sent = frame_with(&mut harness, press_at(pos2(2.0, 150.0), false));
         assert!(sent.is_empty(), "the left edge sent {sent:?}");
