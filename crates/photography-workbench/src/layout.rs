@@ -154,8 +154,8 @@ pub fn dock_toggles(
     ];
     let mut clicked = None;
     for (has, side, shown, label) in toggles {
-        let chord = keymap::chord_for(surface, Action::Dock(side));
-        if has && chrome::dock_toggle(ui, palette, side, shown, label, chord).clicked() {
+        let combination = keymap::key_combination_for(surface, Action::Dock(side));
+        if has && chrome::dock_toggle(ui, palette, side, shown, label, combination).clicked() {
             clicked = Some(side);
         }
     }

@@ -21,7 +21,7 @@ use egui::{
 
 use crate::dock::Side;
 use crate::icons;
-use crate::keys::{self, Chord};
+use crate::keys::{self, KeyCombination};
 use crate::theme::Palette;
 
 /// The height of the title bar, and of the window controls, which fill it.
@@ -137,16 +137,16 @@ pub fn title_bar_drag_region(ui: &mut egui::Ui, bar: Rect) {
 }
 
 /// A title-bar button showing only the Lucide icon `icon.0`, or the
-/// character `icon.1` if the name does not resolve. The icon brightens
-/// under the pointer, with nothing drawn behind it. `label` is the name
-/// screen readers and the tests know it by, and its tooltip, with the
-/// `chord` that does the same, if any ([`keys::tooltip`]).
+/// character `icon.1` if the name does not resolve. The icon brightens under
+/// the pointer, with nothing drawn behind it. `label` is the name screen
+/// readers and the tests know it by, and its tooltip, with the
+/// `key_combination` that does the same, if any ([`keys::tooltip`]).
 pub fn icon_button(
     ui: &mut egui::Ui,
     palette: &Palette,
     icon: (&str, char),
     label: &str,
-    chord: Option<Chord>,
+    key_combination: Option<KeyCombination>,
 ) -> egui::Response {
     let response = title_icon(ui, label, None);
     let colour = if response.hovered() {
@@ -158,7 +158,7 @@ pub fn icon_button(
     let centre = response.rect.center();
     ui.painter()
         .text(centre, Align2::CENTER_CENTER, glyph, font, colour);
-    response.on_hover_text(keys::tooltip(label, chord))
+    response.on_hover_text(keys::tooltip(label, key_combination))
 }
 
 /// The place of an [`icon_button`] or a [`dock_toggle`] on the bar: an
@@ -178,19 +178,19 @@ fn title_icon(ui: &mut egui::Ui, label: &str, selected: Option<bool>) -> egui::R
     response
 }
 
-/// A title-bar button that shows or hides the dock on `side`: a small
-/// window whose strip on that side is filled while the dock is `shown`,
-/// and only marked off by a line while it is hidden. It brightens while
-/// the dock is shown and under the pointer. `label` is the name screen
-/// readers and the tests know it by, and its tooltip, with the `chord`
-/// that does the same, if any ([`keys::tooltip`]).
+/// A title-bar button that shows or hides the dock on `side`: a small window
+/// whose strip on that side is filled while the dock is `shown`, and only
+/// marked off by a line while it is hidden. It brightens while the dock is
+/// shown and under the pointer. `label` is the name screen readers and the
+/// tests know it by, and its tooltip, with the `key_combination` that does
+/// the same, if any ([`keys::tooltip`]).
 pub fn dock_toggle(
     ui: &mut egui::Ui,
     palette: &Palette,
     side: Side,
     shown: bool,
     label: &str,
-    chord: Option<Chord>,
+    key_combination: Option<KeyCombination>,
 ) -> egui::Response {
     let response = title_icon(ui, label, Some(shown));
     let colour = if shown || response.hovered() {
@@ -212,7 +212,7 @@ pub fn dock_toggle(
         };
         painter.line_segment(edge, stroke);
     }
-    response.on_hover_text(keys::tooltip(label, chord))
+    response.on_hover_text(keys::tooltip(label, key_combination))
 }
 
 /// The glyph of a [`dock_toggle`] centred on `centre`: the outline of a
@@ -237,19 +237,19 @@ fn dock_glyph(centre: egui::Pos2, side: Side) -> (Rect, Rect) {
     (window, strip)
 }
 
-/// A title-bar button with the Lucide icon `icon.0` (or the text `icon.1`
-/// if the name does not resolve) before the word `label`, shown selected
-/// when `selected`: one of a row of buttons choosing one of several
-/// things. Screen readers and the tests know it by `label` alone. With a
-/// `chord` that does the same, its tooltip names it ([`keys::tooltip`]);
-/// without, it has none, as its word says what it is. Disabled when added
-/// to a disabled `ui`.
+/// A title-bar button with the Lucide icon `icon.0` (or the text `icon.1` if
+/// the name does not resolve) before the word `label`, shown selected when
+/// `selected`: one of a row of buttons choosing one of several things.
+/// Screen readers and the tests know it by `label` alone. With a
+/// `key_combination` that does the same, its tooltip names it
+/// ([`keys::tooltip`]); without, it has none, as its word says what it is.
+/// Disabled when added to a disabled `ui`.
 pub fn selectable_button(
     ui: &mut egui::Ui,
     icon: (&str, &str),
     label: &str,
     selected: bool,
-    chord: Option<Chord>,
+    key_combination: Option<KeyCombination>,
 ) -> egui::Response {
     let text = icons::labeled(ui, icon.0, icon.1, label);
     let response = ui.add(egui::Button::new(text).selected(selected));
@@ -262,8 +262,8 @@ pub fn selectable_button(
             label,
         )
     });
-    match chord {
-        Some(chord) => response.on_hover_text(keys::tooltip(label, Some(chord))),
+    match key_combination {
+        Some(_) => response.on_hover_text(keys::tooltip(label, key_combination)),
         None => response,
     }
 }
@@ -730,14 +730,20 @@ mod tests {
     /// A button with a chord names it in its tooltip, and keeps its label
     /// as its name.
     #[test]
-    fn a_button_s_tooltip_names_its_chord() {
+    fn a_button_s_tooltip_names_its_combination() {
         let palette = Theme::Paper.palette();
-        let chord = |key| Some(Chord::new(Modifiers::NONE, key));
+        let combination = |key| Some(KeyCombination::new(Modifiers::NONE, key));
         let mut harness = harness(vec2(400.0, TITLE_BAR_HEIGHT), false, move |ui| {
             ui.horizontal(|ui| {
-                icon_button(ui, &palette, ("settings", '⚙'), "Settings", chord(Key::F1));
-                dock_toggle(ui, &palette, Side::Left, true, "Left", chord(Key::F7));
-                selectable_button(ui, ("images", "▦"), "Library", true, chord(Key::G));
+                icon_button(
+                    ui,
+                    &palette,
+                    ("settings", '⚙'),
+                    "Settings",
+                    combination(Key::F1),
+                );
+                dock_toggle(ui, &palette, Side::Left, true, "Left", combination(Key::F7));
+                selectable_button(ui, ("images", "▦"), "Library", true, combination(Key::G));
             });
         });
         let tips = [
@@ -753,7 +759,7 @@ mod tests {
     /// A selectable button's word says what it is, so without a chord it
     /// has no tooltip to repeat it.
     #[test]
-    fn a_selectable_button_without_a_chord_has_no_tooltip() {
+    fn a_selectable_button_without_a_combination_has_no_tooltip() {
         let mut harness = harness(vec2(400.0, TITLE_BAR_HEIGHT), false, |ui| {
             selectable_button(ui, ("images", "▦"), "Library", true, None);
         });

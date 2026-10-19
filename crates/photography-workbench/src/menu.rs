@@ -141,11 +141,11 @@ fn key_equivalent(action: Action) -> Option<String> {
     if toggles {
         return None;
     }
-    let chord = match action {
-        Action::Zoom(_) => keymap::chord_for(Surface::Viewer, action),
-        _ => keymap::chord_everywhere(action),
+    let combination = match action {
+        Action::Zoom(_) => keymap::key_combination_for(Surface::Viewer, action),
+        _ => keymap::key_combination_everywhere(action),
     }?;
-    let held = chord.modifiers;
+    let held = combination.modifiers;
     if !held.command {
         return None;
     }
@@ -158,7 +158,7 @@ fn key_equivalent(action: Action) -> Option<String> {
     }
     spelled.push('+');
     // The menu library knows `=` as "Equal", where egui names it "Equals".
-    spelled.push_str(match chord.key {
+    spelled.push_str(match combination.key {
         egui::Key::Equals => "Equal",
         key => key.name(),
     });
@@ -555,7 +555,7 @@ mod tests {
     /// An item carries its action's chord only when the chord holds Cmd
     /// and the action is no toggle, spelled for the menu library.
     #[test]
-    fn only_the_cmd_chords_are_key_equivalents() {
+    fn only_the_cmd_combinations_are_key_equivalents() {
         let spelled = |action| key_equivalent(action);
         assert_eq!(spelled(Action::Settings).as_deref(), Some("Cmd+Comma"));
         assert_eq!(spelled(Action::Shortcuts), None, "a toggle");
@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(spelled(Action::View(View::Grid)), None, "G");
         assert_eq!(spelled(Action::Dock(Side::Left)), None, "F7");
         assert_eq!(spelled(Action::Photo(Step::Next)), None, "Right");
-        assert_eq!(spelled(Action::About), None, "no chord");
+        assert_eq!(spelled(Action::About), None, "no key combination");
         let zoom = |zooming| spelled(Action::Zoom(zooming));
         assert_eq!(zoom(Zooming::In).as_deref(), Some("Cmd+Equal"));
         assert_eq!(zoom(Zooming::Out).as_deref(), Some("Cmd+Minus"));
@@ -578,10 +578,11 @@ mod tests {
     /// The zoom's items carry the chords the viewer's keys and the
     /// toolbar's controls name, which hold Cmd.
     #[test]
-    fn the_zoom_s_items_carry_the_viewer_s_chords() {
+    fn the_zoom_s_items_carry_the_viewer_s_combinations() {
         for (zooming, _) in ZOOMS {
-            let chord = keymap::chord_for(Surface::Viewer, Action::Zoom(zooming)).unwrap();
-            assert!(chord.modifiers.command, "{zooming:?}");
+            let combination =
+                keymap::key_combination_for(Surface::Viewer, Action::Zoom(zooming)).unwrap();
+            assert!(combination.modifiers.command, "{zooming:?}");
             assert!(
                 key_equivalent(Action::Zoom(zooming)).is_some(),
                 "{zooming:?}"

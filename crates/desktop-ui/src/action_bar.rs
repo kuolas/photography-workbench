@@ -12,7 +12,7 @@
 use egui::{Align, Align2, Frame, Layout, Margin, Rect, Sense, vec2};
 
 use crate::icons;
-use crate::keys::{self, Chord};
+use crate::keys::{self, KeyCombination};
 use crate::theme::Palette;
 
 /// The width of an action bar.
@@ -107,18 +107,18 @@ pub fn button(
 }
 
 /// A button `size.0` in size showing only the Lucide icon `icon.0`, at
-/// `size.1` (or the character `icon.1` if the name does not resolve),
-/// with the action bar's button's look: a rounded square behind the icon
-/// while `selected` or under the pointer, and the icon brighter. `label`
-/// is the name screen readers and the tests know it by, and its tooltip,
-/// with the `chord` that does the same, if any ([`keys::tooltip`]).
+/// `size.1` (or the character `icon.1` if the name does not resolve), with
+/// the action bar's button's look: a rounded square behind the icon while
+/// `selected` or under the pointer, and the icon brighter. `label` is the
+/// name screen readers and the tests know it by, and its tooltip, with the
+/// `key_combination` that does the same, if any ([`keys::tooltip`]).
 pub(crate) fn icon_button(
     ui: &mut egui::Ui,
     palette: &Palette,
     size: (egui::Vec2, f32),
     (icon, label): ((&str, char), &str),
     selected: bool,
-    chord: Option<Chord>,
+    key_combination: Option<KeyCombination>,
 ) -> egui::Response {
     let (size, icon_size) = size;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
@@ -147,7 +147,7 @@ pub(crate) fn icon_button(
             label,
         )
     });
-    response.on_hover_text(keys::tooltip(label, chord))
+    response.on_hover_text(keys::tooltip(label, key_combination))
 }
 
 #[cfg(test)]
