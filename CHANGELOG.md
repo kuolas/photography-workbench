@@ -96,6 +96,12 @@ Nothing has been released yet.
   and shows whole when the pointer rests on it. Until the photo has
   been read Info says so, and for a photo that cannot be shown it says
   why.
+- Settings offers a choice of how Info writes when a photo was taken,
+  "2026-08-15 10:20:30 UTC+02:00" or "15 August 2026 at 10:20:30
+  (UTC+02:00)", and of how it counts a file's size, in decimal units,
+  "52.3 MB", or in binary ones, "49.9 MiB", where 1 KiB is 1,024
+  bytes. Info shows a new choice at once, and both are remembered
+  between runs.
 - In Library, two buttons on a toolbar under the centre choose how the
   centre shows a folder's photos: as a grid of thumbnails, or one at a
   time in a viewer. The choice is remembered between runs.

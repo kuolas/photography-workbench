@@ -27,6 +27,8 @@
 
 use egui::{Color32, CornerRadius, Shadow};
 
+use crate::drop_down;
+
 /// The corner radius of buttons, fields and the other controls, in every
 /// theme, in points; egui's own is 2 to 3.
 const CONTROL_CORNER_RADIUS: u8 = 4;
@@ -194,22 +196,11 @@ pub fn choice_name(choice: Option<Theme>) -> &'static str {
     choice.map_or("System", Theme::name)
 }
 
-/// The width of [`picker`], in points.
-const PICKER_WIDTH: f32 = 190.0;
-
 /// A drop-down list of the theme choices, System first and then every
 /// theme, lightest to darkest. Picking one sets `choice`.
 pub fn picker(ui: &mut egui::Ui, id_salt: &str, choice: &mut Option<Theme>) -> egui::Response {
-    egui::ComboBox::from_id_salt(id_salt)
-        .selected_text(choice_name(*choice))
-        .width(PICKER_WIDTH)
-        .show_ui(ui, |ui| {
-            ui.selectable_value(choice, None, choice_name(None));
-            for theme in Theme::ALL {
-                ui.selectable_value(choice, Some(theme), theme.name());
-            }
-        })
-        .response
+    let choices = std::iter::once(None).chain(Theme::ALL.map(Some));
+    drop_down::show(ui, id_salt, choice, choices, choice_name)
 }
 
 /// The egui theme preference (`egui::Options::theme_preference`) that goes
