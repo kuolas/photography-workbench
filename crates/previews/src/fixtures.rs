@@ -9,10 +9,13 @@ use image::{ExtendedColorType, ImageEncoder, Rgb, RgbImage};
 
 /// The TIFF tags the tests write.
 pub const MAKE: u16 = 0x010F;
+pub const MODEL: u16 = 0x0110;
 pub const ORIENTATION: u16 = 0x0112;
 pub const SUB_IFDS: u16 = 0x014A;
 pub const JPEG_OFFSET: u16 = 0x0201;
 pub const JPEG_LENGTH: u16 = 0x0202;
+pub const EXIF_IFD: u16 = 0x8769;
+pub const DATE_TIME_ORIGINAL: u16 = 0x9003;
 
 /// The Make a Nikon camera writes, which is what makes a TIFF file a NEF.
 pub const NIKON: &str = "NIKON CORPORATION";
@@ -140,6 +143,12 @@ impl Tiff {
     /// `child` made a SubIFD of `parent`.
     pub fn sub_ifd(&mut self, parent: usize, child: usize) {
         self.ifds[parent].push((SUB_IFDS, Value::IfdOffset(child)));
+    }
+
+    /// `exif` made the Exif IFD of `ifd0`, where a camera records how and
+    /// when the photo was taken.
+    pub fn exif_ifd(&mut self, ifd0: usize, exif: usize) {
+        self.ifds[ifd0].push((EXIF_IFD, Value::IfdOffset(exif)));
     }
 
     /// The bytes of the structure.

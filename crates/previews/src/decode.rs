@@ -2,8 +2,9 @@
 
 //! A photo's file turned into a small upright image: [`decode`], which
 //! gives a [`Decoded`] holding the [`Image`], the [`Size`] it was scaled
-//! down from and that of the largest image the file holds, or the
-//! [`Failure`] that stopped it.
+//! down from and that of the largest image the file holds, with what the
+//! file tells of itself: its size on disk, the sizes of its previews and
+//! what the camera recorded; or the [`Failure`] that stopped it.
 //!
 //! What a file holds is told by its content, never its name, as raw-files
 //! tells its formats: a file that starts as every JPEG does is decoded as
@@ -19,7 +20,7 @@ use std::path::Path;
 use image::codecs::jpeg::JpegDecoder;
 use image::metadata::Orientation;
 use image::{ColorType, DynamicImage, ImageDecoder, Limits};
-use raw_files::{Preview, PreviewFormat, RawFile};
+use raw_files::{Metadata, Preview, PreviewFormat, RawFile};
 
 use crate::failure::Failure;
 
@@ -91,12 +92,16 @@ impl fmt::Debug for Image {
 }
 
 /// A photo decoded: the image to show, the size of what it was scaled
-/// down from, and the size of the largest image the file holds.
+/// down from, and the size of the largest image the file holds; with what
+/// the file tells of itself, read with the image at no further cost.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Decoded {
     image: Image,
     full: Size,
     largest: Size,
+    bytes: u64,
+    previews: Vec<Size>,
+    metadata: Option<Metadata>,
 }
 
 impl Decoded {
@@ -123,6 +128,33 @@ impl Decoded {
     pub fn largest(&self) -> Size {
         self.largest
     }
+
+    /// How many bytes the file takes on disk, as it was when it was
+    /// opened to be decoded.
+    pub fn bytes(&self) -> u64 {
+        self.bytes
+    }
+
+    /// The sizes of the JPEG previews a RAW file holds, each upright,
+    /// smallest first, the largest being [`largest`](Self::largest);
+    /// none for a JPEG file, which is its own image.
+    ///
+    /// They are measured from each preview's own frame header, read when
+    /// the file was opened, and turned upright by the RAW file's
+    /// orientation, as the preview decoded is.
+    pub fn previews(&self) -> &[Size] {
+        &self.previews
+    }
+
+    /// What the camera recorded about the photo, as raw-files reads it
+    /// from a RAW file when it opens it: the camera, when the photo was
+    /// taken, how to turn it upright, its exposure and lens, and its
+    /// sizes, each value there only when the file records it.
+    ///
+    /// `None` for a JPEG file, whose EXIF block is not read here.
+    pub fn metadata(&self) -> Option<&Metadata> {
+        self.metadata.as_ref()
+    }
 }
 
 /// The photo in the file at `path`, upright, its longer side at most
@@ -133,9 +165,11 @@ impl Decoded {
 /// Of a RAW file's embedded previews, the smallest whose longer side is
 /// at least `longest` is decoded, or the largest when none is that long,
 /// and turned upright by the orientation the RAW file gives, which is the
-/// camera's at the moment of capture. Whichever is decoded, the size of
-/// the largest is told too, at no cost: raw-files measures every preview
-/// when it opens the file.
+/// camera's at the moment of capture. Whichever is decoded, the upright
+/// size of every preview is told too, the largest's among them, and what
+/// the camera recorded, at no cost: raw-files measures every preview and
+/// reads the metadata when it opens the file. The file's size on disk is
+/// told for either kind.
 ///
 /// This reads the file and decodes it, which takes a while, so it belongs
 /// off the UI thread.
@@ -146,36 +180,61 @@ impl Decoded {
 /// cannot be read, is not a photo the app shows, holds no preview, is
 /// damaged, or is too large.
 pub fn decode(path: &Path, longest: u32) -> Result<Decoded, Failure> {
-    let mut file = File::open(path).map_err(|error| Failure::from_io(&error))?;
-    if starts_as_jpeg(&mut file)? {
-        return decode_jpeg(jpeg_file(file)?, None, longest, MAX_PIXEL_BYTES);
-    }
-    let mut raw = RawFile::from_reader(file).map_err(|error| Failure::from_raw(&error))?;
-    let preview = choose(raw.previews(), longest).ok_or(Failure::NoPreview)?;
-    // There is one whenever there is a preview to choose.
-    let largest = largest(raw.previews()).unwrap_or(preview);
-    let bytes = raw
-        .read_preview(&preview)
-        .map_err(|error| Failure::from_raw(&error))?;
-    let orientation = upright_by(preview.orientation());
-    // The decoder copies the bytes into a buffer of its own, so a
-    // preview is held twice while it is decoded: it takes a reader, and
-    // raw-files hands out a preview's bytes, not a reader over them.
-    let mut decoded = decode_jpeg(
-        Cursor::new(bytes),
-        Some(orientation),
-        longest,
-        MAX_PIXEL_BYTES,
-    )?;
-    if preview != largest {
-        // As its frame header gives it, which raw-files read.
-        decoded.largest = upright_size(
-            largest.width(),
-            largest.height(),
-            upright_by(largest.orientation()),
-        );
-    }
-    Ok(decoded)
+    let read = |error| Failure::from_io(&error);
+    let mut file = File::open(path).map_err(read)?;
+    let length = file.metadata().map_err(read)?.len();
+    let (jpeg, largest, previews, metadata) = if starts_as_jpeg(&mut file)? {
+        let jpeg = decode_jpeg(jpeg_file(file, length)?, None, longest, MAX_PIXEL_BYTES)?;
+        // A JPEG file is its own largest image, and holds no previews.
+        let largest = jpeg.full;
+        (jpeg, largest, Vec::new(), None)
+    } else {
+        let mut raw = RawFile::from_reader(file).map_err(|error| Failure::from_raw(&error))?;
+        let preview = choose(raw.previews(), longest).ok_or(Failure::NoPreview)?;
+        // There is one whenever there is a preview to choose.
+        let largest = largest(raw.previews()).unwrap_or(preview);
+        let bytes = raw
+            .read_preview(&preview)
+            .map_err(|error| Failure::from_raw(&error))?;
+        let orientation = upright_by(preview.orientation());
+        // The decoder copies the bytes into a buffer of its own, so a
+        // preview is held twice while it is decoded: it takes a reader, and
+        // raw-files hands out a preview's bytes, not a reader over them.
+        let jpeg = decode_jpeg(
+            Cursor::new(bytes),
+            Some(orientation),
+            longest,
+            MAX_PIXEL_BYTES,
+        )?;
+        let largest = if preview == largest {
+            jpeg.full
+        } else {
+            // As its frame header gives it, which raw-files read.
+            upright_size(
+                largest.width(),
+                largest.height(),
+                upright_by(largest.orientation()),
+            )
+        };
+        let previews = jpegs(raw.previews())
+            .map(|preview| {
+                upright_size(
+                    preview.width(),
+                    preview.height(),
+                    upright_by(preview.orientation()),
+                )
+            })
+            .collect();
+        (jpeg, largest, previews, Some(raw.metadata().clone()))
+    };
+    Ok(Decoded {
+        image: jpeg.image,
+        full: jpeg.full,
+        largest,
+        bytes: length,
+        previews,
+        metadata,
+    })
 }
 
 /// Whether the file starts as every JPEG does. A file too short to hold
@@ -188,19 +247,19 @@ fn starts_as_jpeg(file: &mut File) -> Result<bool, Failure> {
     Ok(start == JPEG_START)
 }
 
-/// A JPEG file, for the decoder to read from its start, unless it is
-/// longer than [`MAX_JPEG_BYTES`].
+/// A JPEG file `length` bytes long, for the decoder to read from its
+/// start, unless it is longer than [`MAX_JPEG_BYTES`].
 ///
 /// The decoder reads it whole into a buffer of its own, so it is handed
 /// the file rather than a copy of it, and the bytes are held once. It
 /// reads no further than the cap, so a file that grew past the cap since
 /// its length was checked is decoded cut short, and is damaged.
-fn jpeg_file(mut file: File) -> Result<BufReader<Take<File>>, Failure> {
-    let read = |error| Failure::from_io(&error);
-    if file.metadata().map_err(read)?.len() > MAX_JPEG_BYTES {
+fn jpeg_file(mut file: File, length: u64) -> Result<BufReader<Take<File>>, Failure> {
+    if length > MAX_JPEG_BYTES {
         return Err(Failure::TooLarge);
     }
-    file.seek(SeekFrom::Start(0)).map_err(read)?;
+    file.seek(SeekFrom::Start(0))
+        .map_err(|error| Failure::from_io(&error))?;
     Ok(BufReader::new(file.take(MAX_JPEG_BYTES)))
 }
 
@@ -244,18 +303,26 @@ fn upright_size(width: u32, height: u32, orientation: Orientation) -> Size {
     }
 }
 
+/// A JPEG decoded by [`decode_jpeg`]: the image, upright, and the size,
+/// upright, of what it was scaled down from.
+struct Jpeg {
+    image: Image,
+    full: Size,
+}
+
 /// The JPEG that `jpeg` reads decoded, scaled down so that its longer
 /// side is at most `longest`, then turned upright by `orientation`, or by
 /// the orientation of its own EXIF block when that is `None`. Scaling
 /// first leaves fewer pixels to turn. Its pixels may take at most
-/// `budget` bytes at once, which is checked before it is decoded. It is
-/// taken for the largest image there is, as a JPEG file is.
+/// `budget` bytes at once, which is checked before it is decoded. Only
+/// the image and the size it was scaled down from: what the file holds
+/// besides is for the caller, which has the file, to tell.
 fn decode_jpeg<R: BufRead + Seek>(
     jpeg: R,
     orientation: Option<Orientation>,
     longest: u32,
     budget: u64,
-) -> Result<Decoded, Failure> {
+) -> Result<Jpeg, Failure> {
     let failed = |error| Failure::from_image(&error);
     let mut decoder = JpegDecoder::new(jpeg).map_err(failed)?;
     let orientation = match orientation {
@@ -296,14 +363,13 @@ fn decode_jpeg<R: BufRead + Seek>(
     upright.apply_orientation(orientation);
     let full = upright_size(width, height, orientation);
     let upright = upright.into_rgb8();
-    Ok(Decoded {
+    Ok(Jpeg {
         image: Image {
             width: upright.width(),
             height: upright.height(),
             pixels: upright.into_raw(),
         },
         full,
-        largest: full,
     })
 }
 
@@ -529,6 +595,17 @@ mod tests {
         );
     }
 
+    /// A JPEG file tells its size on disk; it holds no preview but itself,
+    /// and its EXIF block is not read.
+    #[test]
+    fn a_jpeg_tells_its_size_on_disk_and_no_previews_or_metadata() {
+        let jpeg = fixtures::jpeg(80, 40, RED, GREEN, Some(6));
+        let photo = decoded(&jpeg, 10).unwrap();
+        assert_eq!(photo.bytes(), u64::try_from(jpeg.len()).unwrap());
+        assert_eq!(photo.previews(), &[]);
+        assert_eq!(photo.metadata(), None);
+    }
+
     /// A NEF holding a 160 × 120 preview, left half red and right half
     /// green, and a 640 × 480 one, left half blue and right half yellow,
     /// shown upright by a quarter turn clockwise. The small one's own EXIF
@@ -626,6 +703,53 @@ mod tests {
                 width: 640,
                 height: 480
             }
+        );
+    }
+
+    /// Every preview, turned upright by the RAW file's quarter turn,
+    /// smallest first, whichever is decoded; and the file's size on disk.
+    #[test]
+    fn a_raw_file_tells_every_preview_s_upright_size_and_its_size_on_disk() {
+        let file = nef();
+        let previews = [
+            Size {
+                width: 120,
+                height: 160,
+            },
+            Size {
+                width: 480,
+                height: 640,
+            },
+        ];
+        for longest in [100, 161, 4000] {
+            let photo = decoded(&file, longest).unwrap();
+            assert_eq!(photo.previews(), &previews, "{longest}");
+            assert_eq!(photo.bytes(), u64::try_from(file.len()).unwrap());
+        }
+    }
+
+    /// What the camera recorded: its make and model and how to turn the
+    /// photo upright in IFD0, and when it was taken in the Exif IFD.
+    #[test]
+    fn a_raw_file_tells_what_the_camera_recorded() {
+        let mut tiff = Tiff::default();
+        let ifd0 = tiff.ifd();
+        tiff.ascii(ifd0, fixtures::MAKE, fixtures::NIKON);
+        tiff.ascii(ifd0, fixtures::MODEL, "Test Camera 1");
+        tiff.short(ifd0, fixtures::ORIENTATION, 8);
+        let preview = tiff.blob(fixtures::jpeg(160, 120, RED, GREEN, None));
+        tiff.jpeg(ifd0, preview);
+        let exif = tiff.ifd();
+        tiff.exif_ifd(ifd0, exif);
+        tiff.ascii(exif, fixtures::DATE_TIME_ORIGINAL, "2024:05:01 10:20:30");
+        let photo = decoded(&tiff.build(), 100).unwrap();
+        let metadata = photo.metadata().unwrap();
+        assert_eq!(metadata.make(), Some(fixtures::NIKON));
+        assert_eq!(metadata.model(), Some("Test Camera 1"));
+        assert_eq!(metadata.orientation(), raw_files::Orientation::Rotate270);
+        assert_eq!(
+            metadata.capture_time().map(|time| time.to_string()),
+            Some("2024-05-01T10:20:30".to_owned())
         );
     }
 
@@ -748,7 +872,7 @@ mod tests {
     fn every_pixel_buffer_a_decode_holds_at_once_counts() {
         let gray = |orientation, budget| {
             let jpeg = Cursor::new(fixtures::gray_jpeg(1000, 1000, orientation));
-            decode_jpeg(jpeg, None, 1000, budget).map(|photo| photo.full())
+            decode_jpeg(jpeg, None, 1000, budget).map(|jpeg| jpeg.full)
         };
         let whole = Size {
             width: 1000,
