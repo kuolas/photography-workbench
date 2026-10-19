@@ -31,8 +31,8 @@ Nothing has been released yet.
   resized by dragging its edge, and, with the viewer, one along the
   bottom for the filmstrip. Each is shown or hidden from the title bar;
   which are shown is remembered between runs. A bar of buttons along the
-  right edge picks what the right dock shows. The right dock is empty
-  so far: it says no photo is selected.
+  right edge picks what the right dock shows: so far Info, the current
+  photo's information.
 - In Library, the left dock shows a tree of the home folder and the
   mounted memory cards and drives. A folder expands from the arrow
   beside it, and a click selects it. Cards and drives appear and
@@ -80,6 +80,22 @@ Nothing has been released yet.
   the current one. A mouse wheel scrolls it
   sideways, and it brings the current photo into view when the current
   photo changes, never while it is being scrolled.
+- In Library, Info in the right dock shows the current photo's
+  information in three boxes. File Information gives the file's name,
+  its size on disk and its format, the file's extension in capitals (NEF,
+  NRW, ARW) and JPEG for a JPEG file. Image Information
+  gives when the photo was taken, its size in pixels, whether it is
+  portrait, landscape or square, and, for a RAW file, the size of the
+  largest preview the file holds, which is what the viewer shows at
+  100 %, and how many previews it holds. Shooting Information gives
+  the camera's make and model, the lens, the focal length, the
+  exposure ("1/2000 s at f/8"), the ISO and the exposure bias. For a
+  JPEG file, whose capture time shows as "—", Shooting Information says
+  that camera data is read from RAW files only. Anything the file does
+  not record shows as "—", and a value too long to fit is cut short
+  and shows whole when the pointer rests on it. Until the photo has
+  been read Info says so, and for a photo that cannot be shown it says
+  why.
 - In Library, two buttons on a toolbar under the centre choose how the
   centre shows a folder's photos: as a grid of thumbnails, or one at a
   time in a viewer. The choice is remembered between runs.

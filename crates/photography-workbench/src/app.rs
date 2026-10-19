@@ -16,6 +16,7 @@ use crate::dialogs;
 use crate::filmstrip;
 use crate::folder_tree;
 use crate::grid;
+use crate::info;
 use crate::keymap::{self, Action, Step, Surface};
 use crate::layout::{self, Docks};
 use crate::menu::{self, MacMenu};
@@ -765,8 +766,13 @@ impl eframe::App for PhotographyWorkbenchApp {
         if parts.tool_rail {
             layout::tool_rail(ui, &palette, &mut self.docks);
         }
+        // The current photo as the frame began, for the right dock: the
+        // folder tree, drawn beside it, holds the photos while it is drawn.
+        let current = self.current_photo().cloned();
         let folders = |ui: &mut egui::Ui| folder_tree::show(ui, &palette, &mut self.browser);
-        layout::side_docks(ui, parts, &mut self.docks, folders);
+        let textures = &mut self.textures;
+        let photo_info = |ui: &mut egui::Ui| info::show(ui, &palette, textures, current.as_ref());
+        layout::side_docks(ui, parts, &mut self.docks, folders, photo_info);
         if parts.toolbar {
             let position = position(self.browser.photos());
             // The mode's own controls hold the app while the toolbar is
@@ -820,8 +826,13 @@ impl eframe::App for PhotographyWorkbenchApp {
             .frame(centre)
             .show(ui, |ui| self.centre(ui, &palette));
         // Once every view of the photos is drawn, the filmstrip in the
-        // bottom dock and the grid or the viewer in the centre: the
-        // textures none of them wanted in this frame are not decoded.
+        // bottom dock and the grid or the viewer in the centre, the Info
+        // dock, if shown, wants what it needs of the photo it showed,
+        // knowing what they wanted; then the textures none of them wanted
+        // in this frame are not decoded.
+        if parts.right_dock && self.docks.right {
+            info::want(&mut self.textures, current.as_ref());
+        }
         self.textures.end_frame(ui.ctx());
 
         // Above everything but the dialogs.
@@ -1800,6 +1811,280 @@ mod tests {
         assert!(!docks.left && docks.right && !docks.bottom, "{docks:?}");
     }
 
+    /// Whether the right dock showed something named `label` in the last
+    /// frame.
+    fn in_right_dock(harness: &Harness<'_, PhotographyWorkbenchApp>, label: &str) -> bool {
+        let dock = panel(harness, "right_dock");
+        harness
+            .query_all_by_label(label)
+            .any(|node| dock.contains_rect(node.rect()))
+    }
+
+    /// The size on disk of the file at `path`, as the Info dock writes it.
+    fn on_disk(path: &Path) -> String {
+        crate::info::file_size(std::fs::metadata(path).unwrap().len())
+    }
+
+    /// Info shows a JPEG file's name, size on disk and format, when it was
+    /// taken, unknown, its size and which way it is laid out, in boxes
+    /// headed by what they hold, and says the camera's data is read from
+    /// RAW files only.
+    #[test]
+    fn info_shows_what_a_jpeg_file_holds() {
+        let dir = photos_folder();
+        let photo = dir.path().join("DSC_0001.jpg");
+        std::fs::write(&photo, crate::textures::jpeg(300, 200)).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let size_on_disk = format!("Size on disk: {}", on_disk(&photo));
+        let shown = [
+            "File Information",
+            "File name: DSC_0001.jpg",
+            &size_on_disk,
+            "Format: JPEG",
+            "Image Information",
+            "Capture time: —",
+            "Image size: 300 × 200",
+            "Orientation: Landscape",
+            "Shooting Information",
+            "Camera data is read from RAW files only.",
+        ];
+        for label in shown {
+            assert!(in_right_dock(&harness, label), "{label}");
+        }
+        let not_shown = ["No photo selected", "Reading…", "ISO: —"];
+        for label in not_shown {
+            assert!(!in_right_dock(&harness, label), "{label}");
+        }
+        let raw_only = ["Preview size: ", "Previews: "];
+        for label in raw_only {
+            let dock = panel(&harness, "right_dock");
+            let shown = harness
+                .query_all_by_label_contains(label)
+                .any(|node| dock.contains_rect(node.rect()));
+            assert!(!shown, "{label}");
+        }
+    }
+
+    /// A value too long for its row is cut short with "…", and shows whole
+    /// under the pointer.
+    #[test]
+    fn info_cuts_a_long_value_short_and_shows_it_whole_under_the_pointer() {
+        let dir = photos_folder();
+        let name = "DSC_0001_on_the_long_walk_along_the_coast_at_dawn_with_friends.jpg";
+        std::fs::write(dir.path().join(name), crate::textures::jpeg(300, 200)).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let dock = panel(&harness, "right_dock");
+        let cut_short = harness
+            .output()
+            .shapes
+            .iter()
+            .any(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => {
+                    text.galley.text() == name && dock.contains(text.pos) && text.galley.elided
+                }
+                _ => false,
+            });
+        assert!(cut_short, "not cut short");
+        // The grid's tile is named so too.
+        let named = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            harness.query_all_by_label(name).count()
+        };
+        let before = named(&harness);
+        harness.get_by_label(&format!("File name: {name}")).hover();
+        let shown = (0..20).any(|_| {
+            harness.step();
+            named(&harness) > before
+        });
+        assert!(shown, "no tooltip");
+    }
+
+    /// The bytes of a NEF file as small as raw-files reads one: a TIFF
+    /// header and IFD0, holding the Make a Nikon camera writes, `model`,
+    /// and `preview`, a JPEG file's bytes, as the file's one preview.
+    fn nef(model: &str, preview: &[u8]) -> Vec<u8> {
+        let make = b"NIKON CORPORATION\0".to_vec();
+        let model = [model.as_bytes(), b"\0"].concat();
+        // The header, then IFD0's count, its 4 entries of 12 bytes and
+        // the offset of the next IFD, none; then the values.
+        let make_at = 8 + 2 + 4 * 12 + 4;
+        let model_at = make_at + make.len();
+        let preview_at = model_at + model.len();
+        let long = |n: usize| u32::try_from(n).unwrap().to_le_bytes();
+        let mut bytes = b"II*\0".to_vec();
+        bytes.extend(long(8));
+        bytes.extend(4_u16.to_le_bytes());
+        // Each entry's tag, in rising order, its type (2 for text, 4 for
+        // a 32-bit number), how many values, and the value or where it is.
+        let entries = [
+            (0x010F_u16, 2_u16, make.len(), make_at),
+            (0x0110, 2, model.len(), model_at),
+            (0x0201, 4, 1, preview_at),
+            (0x0202, 4, 1, preview.len()),
+        ];
+        for (tag, kind, count, value) in entries {
+            bytes.extend(tag.to_le_bytes());
+            bytes.extend(kind.to_le_bytes());
+            bytes.extend(long(count));
+            bytes.extend(long(value));
+        }
+        bytes.extend(long(0));
+        for value in [&make[..], &model, preview] {
+            bytes.extend(value);
+        }
+        bytes
+    }
+
+    /// Info shows what the camera recorded of a RAW file: its make and
+    /// model, as recorded, "—" for what it does not record, and the
+    /// largest preview the file holds, which 100 % shows, and how many it
+    /// holds; with no image size recorded, the image's size is the
+    /// largest preview's.
+    #[test]
+    fn info_shows_what_a_raw_file_holds() {
+        let dir = photos_folder();
+        let photo = dir.path().join("DSC_0001.NEF");
+        let preview = crate::textures::jpeg(640, 480);
+        std::fs::write(&photo, nef("NIKON Z 9", &preview)).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let size_on_disk = format!("Size on disk: {}", on_disk(&photo));
+        let shown = [
+            "File name: DSC_0001.NEF",
+            &size_on_disk,
+            "Format: NEF",
+            "Capture time: —",
+            "Image size: 640 × 480",
+            "Preview size: 640 × 480 (100 %)",
+            "Previews: 1",
+            "Orientation: Landscape",
+            "Shooting Information",
+            "Make: NIKON CORPORATION",
+            "Model: NIKON Z 9",
+            "Lens: —",
+            "Focal length: —",
+            "Exposure: —",
+            "ISO: —",
+            "Exposure bias: —",
+        ];
+        for label in shown {
+            assert!(in_right_dock(&harness, label), "{label}");
+        }
+        let jpeg_only = "Camera data is read from RAW files only.";
+        assert!(!in_right_dock(&harness, jpeg_only));
+    }
+
+    /// Info names a RAW file's format by the file's own extension, and a
+    /// JPEG file's "JPEG" by either of its extensions.
+    #[test]
+    fn info_names_the_format_by_the_file_s_extension() {
+        for (name, format) in [("DSCN0001.nrw", "NRW"), ("IMG_0001.jpeg", "JPEG")] {
+            let dir = photos_folder();
+            std::fs::write(dir.path().join(name), b"not a photo").unwrap();
+            let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+            click(&mut harness, "Home");
+            let shown = format!("Format: {format}");
+            assert!(in_right_dock(&harness, &shown), "{name}: {shown}");
+        }
+    }
+
+    /// Until a decode of the current photo has told what its file holds,
+    /// Info says it is reading it, or, once the photo cannot be shown,
+    /// why, under File Information, which shows the file's name and
+    /// format all along; the other boxes wait for the details.
+    #[test]
+    fn info_says_it_is_reading_until_it_knows_or_why_it_cannot() {
+        let dir = photos_folder();
+        std::fs::write(dir.path().join("DSC_0001.NEF"), b"not a photo").unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        harness.state_mut().textures.stall(true);
+        click(&mut harness, "Home");
+        let why = "This is not a kind of photo the app can show";
+        let file = ["File name: DSC_0001.NEF", "Size on disk: —", "Format: NEF"];
+        for label in file.iter().chain(&["Reading…"]) {
+            assert!(in_right_dock(&harness, label), "{label}");
+        }
+        assert!(!in_right_dock(&harness, why));
+        harness.state_mut().textures.stall(false);
+        harness.run();
+        for label in file.iter().chain(&[why]) {
+            assert!(in_right_dock(&harness, label), "{label}");
+        }
+        let gone = ["Reading…", "Image Information", "Shooting Information"];
+        for label in gone {
+            assert!(!in_right_dock(&harness, label), "{label}");
+        }
+    }
+
+    /// A photo whose file can no longer be shown when it is decoded again,
+    /// as the photos are read again, has Info say why, as the grid shows,
+    /// rather than what the decode before told of it.
+    #[test]
+    fn info_says_why_once_a_photo_read_again_cannot_be_shown() {
+        let dir = photos_folder();
+        let photo = dir.path().join("DSC_0001.jpg");
+        std::fs::write(&photo, crate::textures::jpeg(300, 200)).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        assert!(in_right_dock(&harness, "Image size: 300 × 200"));
+        std::fs::write(&photo, b"not a photo").unwrap();
+        let why = previews::decode(&photo, 256).unwrap_err().to_string();
+        leave_and_come_back(&mut harness);
+        assert!(in_right_dock(&harness, &why), "{why}");
+        assert!(in_right_dock(&harness, "File name: DSC_0001.jpg"));
+        let gone = [
+            "Image size: 300 × 200",
+            "Image Information",
+            "Shooting Information",
+        ];
+        for label in gone {
+            assert!(!in_right_dock(&harness, label), "{label}");
+        }
+    }
+
+    /// On a screen of two pixels a point the grid wants the current
+    /// photo's thumbnail at 512 pixels, and Info, wanting after the grid,
+    /// has nothing more decoded: the grid's decode brings the details.
+    #[test]
+    fn info_has_nothing_decoded_of_its_own_for_a_photo_a_view_wants() {
+        let dir = photos_folder();
+        let photo = dir.path().join("DSC_0001.jpg");
+        std::fs::write(&photo, crate::textures::jpeg(600, 400)).unwrap();
+        let (mut harness, _) = harness_at(None, vec![home(dir.path())], 2.0);
+        harness.state_mut().textures.stall(true);
+        click(&mut harness, "Home");
+        assert_eq!(harness.state().textures.pending(), 1);
+        harness.state_mut().textures.stall(false);
+        harness.run();
+        assert!(in_right_dock(&harness, "Image size: 600 × 400"));
+        let textures = &harness.state().textures;
+        assert!(textures.texture(&photo, 512).is_some());
+        assert_eq!(textures.texture(&photo, 256), None);
+    }
+
+    /// Info brings the details of a photo no view draws, as the current
+    /// photo once the grid is scrolled far from it, by wanting the photo
+    /// decoded itself.
+    #[test]
+    fn info_brings_the_details_of_a_photo_no_view_draws() {
+        let dir = photos_folder();
+        for n in 1..=200 {
+            let (width, height) = if n == 1 { (300, 200) } else { (30, 20) };
+            let name = format!("DSC_{n:04}.jpg");
+            std::fs::write(dir.path().join(name), crate::textures::jpeg(width, height)).unwrap();
+        }
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        harness.state_mut().textures.stall(true);
+        click(&mut harness, "Home");
+        wheel_over_grid(&mut harness, egui::vec2(0.0, -100_000.0));
+        assert!(grid_tile(&harness, "DSC_0001.jpg").is_none());
+        harness.state_mut().textures.stall(false);
+        harness.run();
+        assert!(grid_tile(&harness, "DSC_0001.jpg").is_none());
+        assert!(in_right_dock(&harness, "Image size: 300 × 200"));
+    }
+
     #[test]
     fn the_icon_font_is_installed_at_start() {
         let harness = harness();
@@ -2420,8 +2705,10 @@ mod tests {
         // The outline's 2-point line runs outside the rect it goes round.
         let line_top = outline.top() - 2.0;
         let shapes = &harness.output().shapes;
+        // The tile's, not the one in the Info dock's File row.
+        let centre = centre(&harness);
         let name_box = shapes.iter().find_map(|clipped| match &clipped.shape {
-            egui::Shape::Text(text) if text.galley.text() == name => {
+            egui::Shape::Text(text) if text.galley.text() == name && centre.contains(text.pos) => {
                 Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
             }
             _ => None,
@@ -2688,11 +2975,13 @@ mod tests {
         assert!(!chip_filled_in(&harness, first), "a fill in {first:?}");
         assert_eq!(current_outline(&harness, 1.5), Some(tile.expand(2.0)));
         let shapes = &harness.output().shapes;
-        // The text laid out where it says, as (its left, its right, its
-        // middle), if it is there.
+        // The text laid out in the first cell where it says, as (its
+        // left, its right, its middle), if it is there.
         let text_at = |said: &str| {
             shapes.iter().find_map(|clipped| match &clipped.shape {
-                egui::Shape::Text(text) if text.galley.text() == said => {
+                egui::Shape::Text(text)
+                    if text.galley.text() == said && first.contains(text.pos) =>
+                {
                     let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
                     Some((rect.left(), rect.right(), rect.center().y))
                 }
@@ -3394,7 +3683,14 @@ mod tests {
         assert!(textures_in(&harness, room).is_empty());
         assert!(failure_icon_in(&harness, room, 48.0), "no icon");
         let why = "The file is damaged";
-        assert!(harness.query_by_label(why).is_none());
+        // The Info dock says why too, from the start.
+        let tooltip = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let dock = panel(harness, "right_dock");
+            harness
+                .query_all_by_label(why)
+                .any(|node| !dock.contains_rect(node.rect()))
+        };
+        assert!(!tooltip(&harness));
         harness
             .query_all_by_label("broken.jpg")
             .find(|node| node.accesskit_node().role() == Role::Image)
@@ -3402,7 +3698,7 @@ mod tests {
             .hover();
         let shown = (0..20).any(|_| {
             harness.step();
-            harness.query_by_label(why).is_some()
+            tooltip(&harness)
         });
         assert!(shown, "no tooltip");
     }

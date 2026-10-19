@@ -24,6 +24,9 @@ env_logger.workspace = true
 log.workspace = true
 # The photos' thumbnails, decoded off the window's thread.
 previews.workspace = true
+# The types of what the camera recorded, which a decode tells and the Info
+# dock shows.
+raw-files.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The menu bar at the top of the screen. Its default features only add
