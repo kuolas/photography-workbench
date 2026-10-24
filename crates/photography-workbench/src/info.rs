@@ -301,8 +301,8 @@ fn image_rows(ui: &mut egui::Ui, palette: &Palette, details: &Details, form: Tim
 fn shooting_rows(ui: &mut egui::Ui, palette: &Palette, metadata: &Metadata) {
     let shot = metadata.exposure();
     let rows = [
-        ("Make", metadata.make().map(str::to_owned)),
-        ("Model", metadata.model().map(str::to_owned)),
+        ("Make", metadata.make().map(makers_names)),
+        ("Model", metadata.model().map(makers_names)),
         ("Lens", metadata.lens().and_then(lens)),
         ("Focal length", shot.focal_length().map(focal_length)),
         ("Exposure", exposure(shot.exposure_time(), shot.f_number())),
@@ -638,10 +638,46 @@ fn clock(time: &Clock, form: TimeForm) -> String {
     text
 }
 
-/// A lens: its model name when the file records one; otherwise its range,
-/// the focal lengths at either end and the f-number at each, an end
-/// written once where both are the same: "24-70 mm f/2.8-4", "50 mm
-/// f/1.8". `None` when the file records neither.
+/// The makers' names many cameras record in capitals, each beside the
+/// name as its maker writes it when marketing its products. FUJIFILM,
+/// NIKKOR, PENTAX and SIGMA are not here, their makers writing those
+/// names in capitals.
+// See kuolas/raw-files#49: raw-files is to give these names itself, and
+// this table goes when it does.
+const MAKERS_NAMES: [(&str, &str); 9] = [
+    ("NIKON", "Nikon"),
+    ("CANON", "Canon"),
+    ("SONY", "Sony"),
+    ("OLYMPUS", "Olympus"),
+    ("LEICA", "Leica"),
+    ("HASSELBLAD", "Hasselblad"),
+    ("PANASONIC", "Panasonic"),
+    ("TAMRON", "Tamron"),
+    ("CORPORATION", "Corporation"),
+];
+
+/// `text` with each word that is, exactly, one of [`MAKERS_NAMES`]'
+/// recorded names written as its maker writes it: "NIKON Z 9" is "Nikon
+/// Z 9". Words are the parts between spaces, which are kept as they are;
+/// every other word, a part of a name too ("NIKONOS"), is left as
+/// recorded.
+pub fn makers_names(text: &str) -> String {
+    text.split(' ')
+        .map(|word| {
+            MAKERS_NAMES
+                .iter()
+                .find(|(recorded, _)| *recorded == word)
+                .map_or(word, |(_, written)| *written)
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A lens: its model name, as [`makers_names`] writes it, when the file
+/// records one; otherwise its range, the focal lengths at either end and
+/// the f-number at each, an end written once where both are the same:
+/// "24-70 mm f/2.8-4", "50 mm f/1.8". `None` when the file records
+/// neither.
 pub fn lens(lens: &Lens) -> Option<String> {
     lens_text(
         lens.model(),
@@ -659,7 +695,7 @@ pub fn lens(lens: &Lens) -> Option<String> {
 /// it.
 fn lens_text(model: Option<&str>, range: [Option<Rational>; 4]) -> Option<String> {
     if let Some(model) = model {
-        return Some(model.to_owned());
+        return Some(makers_names(model));
     }
     let [shortest, longest, f_shortest, f_longest] = range;
     let focal = span(shortest, longest).map(|span| format!("{span} mm"));
@@ -708,7 +744,8 @@ mod tests {
 
     use super::{
         Clock, SizeUnits, TimeForm, aperture, clock, compensation, exposure, file_size,
-        focal_length, iso, lens_text, orientation, pixel_size, show, shutter_speed, upright, want,
+        focal_length, iso, lens_text, makers_names, orientation, pixel_size, show, shutter_speed,
+        upright, want,
     };
     use crate::textures::{self, Textures};
 
@@ -1101,8 +1138,9 @@ mod tests {
         );
     }
 
-    /// A lens is named by its model; with none, by its range, an end
-    /// written once where both are the same; with neither, not at all.
+    /// A lens is named by its model, its maker's name written as the
+    /// maker writes it; with none, by its range, an end written once where
+    /// both are the same; with neither, not at all.
     #[test]
     fn a_lens_is_its_model_or_its_range() {
         let range =
@@ -1111,6 +1149,10 @@ mod tests {
         assert_eq!(
             lens_text(Some("NIKKOR Z 24-70mm f/2.8 S"), zoom).as_deref(),
             Some("NIKKOR Z 24-70mm f/2.8 S")
+        );
+        assert_eq!(
+            lens_text(Some("TAMRON 28-75mm F/2.8 Di III RXD"), zoom).as_deref(),
+            Some("Tamron 28-75mm F/2.8 Di III RXD")
         );
         assert_eq!(lens_text(None, zoom).as_deref(), Some("24-70 mm f/2.8-4"));
         let prime = range([
@@ -1127,5 +1169,31 @@ mod tests {
         let wide = range([None, None, Some((14, 10)), None]);
         assert_eq!(lens_text(None, wide).as_deref(), Some("f/1.4"));
         assert_eq!(lens_text(None, [None; 4]), None);
+    }
+
+    /// A word that is, all in capitals, a maker's name is written as the
+    /// maker writes it; every other word, and every space, is as recorded.
+    #[test]
+    fn a_makers_name_is_written_as_its_maker_writes_it() {
+        for (recorded, written) in [
+            ("NIKON Z 9", "Nikon Z 9"),
+            ("NIKON CORPORATION", "Nikon Corporation"),
+            ("NIKKOR Z 24-70mm f/2.8 S", "NIKKOR Z 24-70mm f/2.8 S"),
+            (
+                "1 NIKKOR VR 10-30mm f/3.5-5.6",
+                "1 NIKKOR VR 10-30mm f/3.5-5.6",
+            ),
+            ("SONY", "Sony"),
+            ("PENTAX K-3 Mark III", "PENTAX K-3 Mark III"),
+            ("ILCE-7M4", "ILCE-7M4"),
+            ("FE 24-70mm F2.8 GM", "FE 24-70mm F2.8 GM"),
+            ("FUJIFILM X-T5", "FUJIFILM X-T5"),
+            ("SIGMA 35mm F1.4 DG", "SIGMA 35mm F1.4 DG"),
+            ("Canon EOS R5", "Canon EOS R5"),
+            ("NIKONOS", "NIKONOS"),
+            ("NIKON  Z 9 ", "Nikon  Z 9 "),
+        ] {
+            assert_eq!(makers_names(recorded), written, "{recorded}");
+        }
     }
 }

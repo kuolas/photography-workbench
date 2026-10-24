@@ -2094,8 +2094,8 @@ mod tests {
             "Previews: 1",
             "Orientation: Landscape",
             "Shooting Information",
-            "Make: NIKON CORPORATION",
-            "Model: NIKON Z 9",
+            "Make: Nikon Corporation",
+            "Model: Nikon Z 9",
             "Lens: —",
             "Focal length: —",
             "Exposure: —",
@@ -5205,13 +5205,13 @@ mod tests {
     }
 
     /// What the panel over the viewer's photo says of the file at `path`,
-    /// of the NIKON Z 9 ([`nef_folder`]), a row to a line: when it was
+    /// of the Nikon Z 9 ([`nef_folder`]), a row to a line: when it was
     /// taken, the camera, and the image's size, its format and its size on
     /// disk.
     fn nef_information(path: &Path) -> String {
         let bytes = on_disk(path, SizeUnits::Decimal);
         format!(
-            "Taken: 2024-05-01 10:20:30.85 UTC+02:00\nCamera: NIKON Z 9\n\
+            "Taken: 2024-05-01 10:20:30.85 UTC+02:00\nCamera: Nikon Z 9\n\
              Image: 640 × 480 · NEF · {bytes}"
         )
     }
@@ -5368,9 +5368,9 @@ mod tests {
                 _ => None,
             })
             .collect();
-        let cut_short = texts
-            .iter()
-            .any(|text| text.galley.elided && text.galley.text().starts_with(&model[..20]));
+        let cut_short = texts.iter().any(|text| {
+            text.galley.elided && text.galley.text().starts_with("Nikon Z 9 Nikon Z 9 ")
+        });
         assert!(cut_short, "the camera's model not cut short");
         let label = texts
             .iter()
