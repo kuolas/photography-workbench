@@ -98,13 +98,15 @@ Nothing has been released yet.
   largest preview the file holds, which is what the viewer shows at
   100 %, and how many previews it holds. Shooting Information gives
   the camera's make and model, the lens, the focal length, the
-  exposure ("1/2000 s at f/8"), the ISO and the exposure bias. For a
+  exposure ("1/2000 s at f/8"), the ISO and the exposure bias. Makers'
+  names in the camera and the lens are written as the makers market
+  them, "Nikon" rather than the "NIKON" a file records, but "NIKKOR" as
+  Nikon writes it, here and on the panel over the viewer's photo. For a
   JPEG file, whose capture time shows as "—", Shooting Information says
   that camera data is read from RAW files only. Anything the file does
-  not record shows as "—", and a value too long to fit is cut short
-  and shows whole when the pointer rests on it. Until the photo has
-  been read Info says so, and for a photo that cannot be shown it says
-  why.
+  not record shows as "—", and a value too long to fit is cut short and
+  shows whole when the pointer rests on it. Until the photo has been
+  read Info says so, and for a photo that cannot be shown it says why.
 - Settings offers a choice of how Info writes when a photo was taken,
   "2026-08-15 10:20:30 UTC+02:00" or "15 August 2026 at 10:20:30
   (UTC+02:00)", and of how it counts a file's size, in decimal units,

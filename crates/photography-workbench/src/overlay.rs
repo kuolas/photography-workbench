@@ -87,13 +87,13 @@ const EXPOSURE: &str = "Exposure";
 /// a row apiece, each its label and its value, in this order, each left
 /// out when the file records nothing for it: [`TAKEN`], when the photo
 /// was taken, written in `times`; [`CAMERA`], the camera's model, as
-/// recorded; [`LENS`] ([`info::lens`]); always [`IMAGE`], its size in
-/// pixels, its format and its size on disk counted in `sizes`, "8256 ×
-/// 5504 · NEF · 52.3 MB"; [`FOCAL`], the focal length and the ISO, "70 mm
-/// · ISO 64", or the one recorded; and [`EXPOSURE`], the exposure and the
-/// exposure bias, "1/250 s at f/8 · −2/3 EV", or the part recorded. A JPEG
-/// file records none of what the camera did, as far as the app reads it,
-/// so it has the one row.
+/// [`info::makers_names`] writes it; [`LENS`] ([`info::lens`]); always
+/// [`IMAGE`], its size in pixels, its format and its size on disk counted
+/// in `sizes`, "8256 × 5504 · NEF · 52.3 MB"; [`FOCAL`], the focal length
+/// and the ISO, "70 mm · ISO 64", or the one recorded; and [`EXPOSURE`],
+/// the exposure and the exposure bias, "1/250 s at f/8 · −2/3 EV", or the
+/// part recorded. A JPEG file records none of what the camera did, as far
+/// as the app reads it, so it has the one row.
 pub fn rows(
     photo: &Photo,
     details: &Details,
@@ -124,7 +124,7 @@ pub fn rows(
                 .capture_time()
                 .map(|time| info::capture_time(time, times)),
         ),
-        (CAMERA, metadata.model().map(str::to_owned)),
+        (CAMERA, metadata.model().map(info::makers_names)),
         (LENS, metadata.lens().and_then(info::lens)),
         (IMAGE, Some(image)),
         (FOCAL, side_by_side(focal, iso)),
@@ -397,7 +397,7 @@ mod tests {
             said,
             [
                 ("Taken", "2026-08-15 10:20:30.85 UTC+02:00".to_owned()),
-                ("Camera", "NIKON Z 9".to_owned()),
+                ("Camera", "Nikon Z 9".to_owned()),
                 ("Lens", "NIKKOR Z 70-200mm f/2.8 VR S".to_owned()),
                 ("Image", "8256 × 5504 · NEF · 52.3 MB".to_owned()),
                 ("Focal", "70 mm · ISO 64".to_owned()),
