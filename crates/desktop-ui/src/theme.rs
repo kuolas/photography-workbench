@@ -46,6 +46,13 @@ const WINDOW_SHADOW: Shadow = shadow(8, 30);
 /// show at all.
 const SHADOW_ALPHA: [(u8, u8); 2] = [(140, 160), (50, 60)];
 
+/// The colours of the panel drawn over a photo, the same in every theme
+/// ([`Palette::overlay_fill`], [`Palette::overlay_text`] and
+/// [`Palette::overlay_border`]).
+const OVERLAY_FILL: Color32 = Color32::from_black_alpha(190);
+const OVERLAY_TEXT: Color32 = Color32::from_gray(230);
+const OVERLAY_BORDER: Color32 = Color32::from_gray(85);
+
 /// A black shadow `drop` points straight down, blurred over `blur` points;
 /// its colour is set per theme.
 const fn shadow(drop: i8, blur: u8) -> Shadow {
@@ -244,6 +251,17 @@ pub struct Palette {
     pub chip: Color32,
     /// Behind the photo in the viewer.
     pub viewer_backdrop: Color32,
+    /// The fill of the panel drawn over the photo in the viewer: black,
+    /// see-through enough for the photo to show faintly through it. The panel
+    /// lies over a photo, whose colours are not the theme's, so this colour,
+    /// and [`Self::overlay_text`] and [`Self::overlay_border`], are the same
+    /// in every theme.
+    pub overlay_fill: Color32,
+    /// The text of that panel.
+    pub overlay_text: Color32,
+    /// The 1-point border of that panel, which marks it off where it lies on
+    /// the viewer's backdrop rather than on the photo.
+    pub overlay_border: Color32,
     /// Separator, frame-border and indent-line stroke (egui
     /// `widgets.noninteractive.bg_stroke`).
     pub separator: Color32,
@@ -299,6 +317,9 @@ impl Palette {
             field: hex(0xFFFDF7),           // inputs, brightest (soft, not pure white)
             chip: hex(0xE4DFD2),            // tiles sit just below the paper
             viewer_backdrop: hex(0xCFC9BA), // medium warm grey behind the photo
+            overlay_fill: OVERLAY_FILL,     // as in every theme
+            overlay_text: OVERLAY_TEXT,     // as in every theme
+            overlay_border: OVERLAY_BORDER, // as in every theme
             separator: hex(0xC9C3B4),       // warm light rule (≈ egui light default)
             text: hex(0x2A2822),            // warm near-black
             icon_active: hex(0x2A2822),     // as the text
@@ -327,6 +348,9 @@ impl Palette {
             field: Color32::from_gray(10),
             chip: Color32::from_gray(55),
             viewer_backdrop: Color32::from_gray(28),
+            overlay_fill: OVERLAY_FILL,
+            overlay_text: OVERLAY_TEXT,
+            overlay_border: OVERLAY_BORDER,
             separator: Color32::from_gray(60), // egui dark default
             text: Color32::WHITE,
             icon_active: Color32::from_gray(235),
@@ -359,6 +383,9 @@ impl Palette {
             field: hex(0x1A1A1A),           // text inputs sunk to the content-well tone
             chip: hex(0x404040),            // the raised control grey
             viewer_backdrop: hex(0x1A1A1A), // the content-well tone
+            overlay_fill: OVERLAY_FILL,     // as in every theme
+            overlay_text: OVERLAY_TEXT,     // as in every theme
+            overlay_border: OVERLAY_BORDER, // as in every theme
             separator: hex(0x1A1A1A),       // dock edges, the content-well tone
             text: Color32::WHITE,
             icon_active: hex(0xEBEBEB),
@@ -388,6 +415,9 @@ impl Palette {
             field: Color32::from_gray(10),
             chip: Color32::from_gray(40),
             viewer_backdrop: Color32::from_gray(10),
+            overlay_fill: OVERLAY_FILL,
+            overlay_text: OVERLAY_TEXT,
+            overlay_border: OVERLAY_BORDER,
             separator: Color32::from_gray(60),
             text: Color32::from_gray(140),
             icon_active: Color32::from_gray(220),
@@ -424,6 +454,38 @@ mod tests {
                 "{}: strip / panel = {ratio:.2}, outside 0.55..=0.96",
                 theme.name()
             );
+        }
+    }
+
+    /// The text of the panel drawn over a photo reads on it: `overlay_text`
+    /// over `overlay_fill`, which lies over a white photo pixel and over a
+    /// black one, has a contrast ratio of at least 4.5 (WCAG AA), in every
+    /// theme.
+    #[test]
+    fn the_text_over_a_photo_reads_on_a_white_and_a_black_pixel_in_every_theme() {
+        fn luminance(c: Color32) -> f32 {
+            let linear = |v: u8| {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+        }
+        for theme in Theme::ALL {
+            let p = theme.palette();
+            for (name, photo) in [("white", Color32::WHITE), ("black", Color32::BLACK)] {
+                let fill = photo.blend(p.overlay_fill);
+                let (a, b) = (luminance(p.overlay_text), luminance(fill));
+                let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+                assert!(
+                    ratio >= 4.5,
+                    "{}: over a {name} pixel the contrast is {ratio:.2}, under 4.5",
+                    theme.name()
+                );
+            }
         }
     }
 
