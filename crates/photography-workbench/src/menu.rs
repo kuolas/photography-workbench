@@ -4,8 +4,9 @@
 //! has no menu bar of its own on any system, but a Mac app without one at
 //! the top of the screen is out of place there, so on macOS the app gives
 //! the system one: the app menu with About, Settings and Quit, View with
-//! the views, the viewer's zoom and the docks, Window with the modes, and
-//! Help with the reference of keyboard shortcuts.
+//! the views, the viewer's zoom, the photo's information over the viewer's
+//! photo and the docks, Window with the modes, and Help with the reference
+//! of keyboard shortcuts.
 //!
 //! Its items ask for the app's actions, which the app does just as it
 //! does them for a key or a button. Which items can be chosen and which
@@ -42,7 +43,7 @@ use desktop_ui::dock::Side;
 use crate::keymap::{self, Action, Surface};
 use crate::layout::Docks;
 use crate::mode::{Layout, Mode};
-use crate::view::View;
+use crate::view::{self, View};
 use crate::viewer;
 use crate::zoom::{Framing, Stage, Zooming};
 
@@ -59,6 +60,9 @@ pub struct State {
     pub docks: Docks,
     /// Which of the zoom's items can be chosen.
     pub zooms: Zooms,
+    /// Whether the viewer shows the photo's information over its photo,
+    /// when it is shown.
+    pub info_overlay: bool,
     /// Whether a dialog is open.
     pub dialog: bool,
     /// Whether the dialog open is the reference of keyboard shortcuts.
@@ -70,7 +74,8 @@ impl State {
     /// dialog is open none can, as the keys stand down then, but the
     /// reference's own item, which closes it. A mode not built yet cannot
     /// be chosen, nor a dock the window does not have, nor a change of the
-    /// zoom the toolbar's control for it is disabled for.
+    /// zoom the toolbar's control for it is disabled for, nor the photo's
+    /// information anywhere but in Library's viewer, which alone shows it.
     pub fn enabled(&self, action: Action) -> bool {
         if self.dialog {
             return self.shortcuts && action == Action::Shortcuts;
@@ -79,12 +84,14 @@ impl State {
             Action::Mode(mode) => mode.is_available(),
             Action::Dock(side) => self.parts.has_dock(side),
             Action::Zoom(zooming) => self.zooms.can(zooming),
+            Action::PhotoInformation => self.shows_viewer(),
             _ => true,
         }
     }
 
     /// Whether the item that asks for `action` is checked: the mode and
-    /// the view shown, and every dock shown.
+    /// the view shown, every dock shown, and the photo's information while
+    /// Library's viewer shows it.
     // Off macOS no menu shows it, but the tests check it on every system.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn checked(&self, action: Action) -> bool {
@@ -92,8 +99,14 @@ impl State {
             Action::Mode(mode) => self.mode == mode,
             Action::View(view) => self.view == view,
             Action::Dock(side) => self.parts.has_dock(side) && self.docks.shown(side),
+            Action::PhotoInformation => self.shows_viewer() && self.info_overlay,
             _ => false,
         }
+    }
+
+    /// Whether the centre shows Library's viewer.
+    fn shows_viewer(&self) -> bool {
+        view::shows_viewer(self.mode, self.view)
     }
 }
 
@@ -136,6 +149,7 @@ fn key_equivalent(action: Action) -> Option<String> {
             | Action::AllDocks
             | Action::Dock(_)
             | Action::Zoom(Zooming::Toggle)
+            | Action::PhotoInformation
     );
     if toggles {
         return None;
@@ -172,6 +186,11 @@ const ZOOMS: [(Zooming, &str); 4] = [
     (Zooming::Fit, "Zoom to fit"),
     (Zooming::Full, "Zoom to 100 %"),
 ];
+
+/// The name of the item that shows or hides the photo's information over
+/// the viewer's photo.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const PHOTO_INFORMATION: &str = "Photo information";
 
 /// The names of the items for the docks, in the View menu's order.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -244,6 +263,7 @@ impl MacMenu {
             item
         };
         let [grid, viewer] = View::ALL.map(|view| check(view.name(), Action::View(view)));
+        let information = check(PHOTO_INFORMATION, Action::PhotoInformation);
         let [left, right, bottom] = DOCKS.map(|(side, label)| check(label, Action::Dock(side)));
         let [library, organizer, develop] =
             Mode::ALL.map(|mode| check(mode.name(), Action::Mode(mode)));
@@ -281,6 +301,8 @@ impl MacMenu {
                 &zoom_out,
                 &fit,
                 &full,
+                &PredefinedMenuItem::separator(),
+                &information,
                 &PredefinedMenuItem::separator(),
                 &left,
                 &right,
@@ -403,6 +425,7 @@ mod tests {
             parts: Mode::Library.layout(),
             docks: Docks::default(),
             zooms: Zooms::default(),
+            info_overlay: false,
             dialog: false,
             shortcuts: false,
         }
@@ -508,6 +531,25 @@ mod tests {
         assert!(!state.enabled(Action::Dock(Side::Bottom)));
     }
 
+    /// The item for the photo's information can be chosen only in
+    /// Library's viewer, which alone shows it, and is checked there while
+    /// it is shown; in the grid it is neither, whether it is on or not.
+    #[test]
+    fn the_photo_information_s_item_is_the_viewer_s() {
+        let item = |state: State| {
+            let action = Action::PhotoInformation;
+            (state.enabled(action), state.checked(action))
+        };
+        let on = |state| State {
+            info_overlay: true,
+            ..state
+        };
+        assert_eq!(item(viewer(Zoom::Fit)), (true, false));
+        assert_eq!(item(on(viewer(Zoom::Fit))), (true, true));
+        assert_eq!(item(library()), (false, false));
+        assert_eq!(item(on(library())), (false, false));
+    }
+
     #[test]
     fn a_mode_not_built_yet_cannot_be_chosen() {
         let state = library();
@@ -533,6 +575,7 @@ mod tests {
             Action::Zoom(Zooming::Out),
             Action::Zoom(Zooming::Fit),
             Action::Zoom(Zooming::Full),
+            Action::PhotoInformation,
         ];
         let zoomed = viewer(Zoom::Scale(1.0));
         let settings = State {
@@ -573,6 +616,7 @@ mod tests {
         assert_eq!(zoom(Zooming::Fit).as_deref(), Some("Cmd+0"));
         assert_eq!(zoom(Zooming::Full).as_deref(), Some("Cmd+Alt+0"));
         assert_eq!(zoom(Zooming::Toggle), None, "a toggle");
+        assert_eq!(spelled(Action::PhotoInformation), None, "a toggle");
     }
 
     /// The zoom's items carry the key combinations the viewer's keys and the

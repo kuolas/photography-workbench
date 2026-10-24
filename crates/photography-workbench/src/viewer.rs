@@ -68,10 +68,12 @@
 //!
 //! The viewer draws the photos it is handed, whatever they were read
 //! from, and the textures the app holds, and names the photo to screen
-//! readers by its file name. What it keeps between frames is its
-//! [`State`], which the app holds for it: the zoom and the pan, the glide
-//! a click, a key or the toolbar began, what the wheel last was, how long
-//! it has waited, and the room it last drew the photo in.
+//! readers by its file name. It tells the app whether it drew some texture
+//! of the photo in the frame, for what the app draws over the photo. What
+//! it keeps between frames is its [`State`], which the app holds for it:
+//! the zoom and the pan, the glide a click, a key or the toolbar began,
+//! what the wheel last was, how long it has waited, and the room it last
+//! drew the photo in.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -397,6 +399,13 @@ enum Wanted {
 /// the textures in `textures`, zoomed and timed as `state` keeps; it says
 /// in `palette`'s colours when the picture takes a while. Nothing is
 /// drawn when there is no photo at `current`.
+///
+/// Whether it drew a texture of the photo in this frame: its picture, the
+/// photo at its largest, or another texture of it standing in, as its
+/// thumbnail does. Then what a decode told of the photo's file is known
+/// ([`Textures::details`]); not while nothing of the photo is decoded yet,
+/// nor while it is shown as one that cannot be shown, nor without a photo
+/// at `current`.
 pub fn show(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -404,9 +413,9 @@ pub fn show(
     state: &mut State,
     photos: &[Photo],
     current: usize,
-) {
+) -> bool {
     let Some(photo) = photos.get(current) else {
-        return;
+        return false;
     };
     let path = photo.path();
     let centre = ui.max_rect();
@@ -529,6 +538,9 @@ pub fn show(
         }
         _ => textures::paint(ui, shown.shown, room, FAILED_ICON_SIZE),
     };
+    // Drawn where the zoom puts it, or, before the photo's 100 % is
+    // known, fitted in the room.
+    let drew = matches!(shown.shown, Thumbnail::Ready { .. });
     if let Some(failure) = failure {
         response.on_hover_text(failure.to_string());
     }
@@ -548,6 +560,7 @@ pub fn show(
             ui.put(below, egui::Label::new(text).selectable(false));
         }
     }
+    drew
 }
 
 /// Frame the photo on `stage`, of the file at `path`, as the pointer asks

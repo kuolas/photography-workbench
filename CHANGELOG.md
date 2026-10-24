@@ -71,6 +71,15 @@ Nothing has been released yet.
   that do the same, and the reference of keyboard shortcuts lists the keys
   under Zoom. Elsewhere those keys do nothing; none of them changes the
   size of the whole window.
+- In Library's viewer, I shows or hides the current photo's information
+  on a dark translucent panel at the viewer's top left, in labelled
+  rows: when it was taken, the camera, the lens, the image's size in
+  pixels, its format and its size on disk, the focal length and ISO, and
+  the exposure with the exposure bias, each only where the file records
+  it, written as chosen in Settings. On macOS an item of the View menu
+  does the same, checked while the panel is turned on. The reference of
+  keyboard shortcuts lists the key under Views, and whether the panel is
+  shown is remembered between runs.
 - In Library, with the viewer, the filmstrip under it shows the
   folder's photos in a row, each with its name and its format, the
   file's extension in capitals (NEF, NRW, ARW) and JPEG for a JPEG file,
@@ -100,8 +109,8 @@ Nothing has been released yet.
   "2026-08-15 10:20:30 UTC+02:00" or "15 August 2026 at 10:20:30
   (UTC+02:00)", and of how it counts a file's size, in decimal units,
   "52.3 MB", or in binary ones, "49.9 MiB", where 1 KiB is 1,024
-  bytes. Info shows a new choice at once, and both are remembered
-  between runs.
+  bytes. Info, and the panel over the viewer's photo, show a new choice
+  at once, and both are remembered between runs.
 - In Library, two buttons on a toolbar under the centre choose how the
   centre shows a folder's photos: as a grid of thumbnails, or one at a
   time in a viewer. The choice is remembered between runs.

@@ -20,6 +20,7 @@ mod keymap;
 mod layout;
 mod menu;
 mod mode;
+mod overlay;
 mod textures;
 mod view;
 mod viewer;
