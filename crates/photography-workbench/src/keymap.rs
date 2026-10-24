@@ -40,6 +40,8 @@ pub enum Action {
     Photo(Step),
     /// Zoom the viewer's photo, once its 100 % is known.
     Zoom(Zooming),
+    /// Show or hide the photo's information over the viewer's photo.
+    PhotoInformation,
     /// Show or hide the side docks together.
     SideDocks,
     /// Show or hide every dock together.
@@ -195,6 +197,13 @@ const BINDINGS: &[Binding] = &[
         Action::View(View::Grid),
         VIEWER,
         "Back to the thumbnail grid",
+    ),
+    bind(
+        Group::Views,
+        (NONE, Key::I),
+        Action::PhotoInformation,
+        VIEWER,
+        "Show or hide the photo's information",
     ),
     repeating(bind(
         Group::Photos,
@@ -795,6 +804,33 @@ mod tests {
         // Shift+= types `+` with no Ctrl, which zooms nothing.
         let plus = typed(Key::Plus, Key::Equals, SHIFT);
         assert_eq!(pressed_in(Surface::Viewer, vec![plus]), []);
+    }
+
+    /// I shows or hides the photo's information over the viewer's photo,
+    /// and does nothing in the grid.
+    #[test]
+    fn i_shows_the_photo_s_information_in_the_viewer_only() {
+        let i = || vec![typed(Key::I, Key::I, NONE)];
+        assert_eq!(pressed_in(Surface::Viewer, i()), [Action::PhotoInformation]);
+        assert_eq!(pressed_in(Surface::Grid, i()), []);
+    }
+
+    /// The reference lists first, under Views, the keys that switch the
+    /// view and the one that shows or hides the photo's information over
+    /// the viewer's photo.
+    #[test]
+    fn the_reference_lists_the_views_keys_first() {
+        let sections = sections();
+        assert_eq!(sections[0].title, "Views");
+        let label = |key: Key| KeyCombination::new(NONE, key).label();
+        let rows = [
+            (label(Key::G), "Thumbnail grid"),
+            (label(Key::E), "Image viewer"),
+            (label(Key::Enter), "Open the photo in the viewer"),
+            (label(Key::Escape), "Back to the thumbnail grid"),
+            (label(Key::I), "Show or hide the photo's information"),
+        ];
+        assert_eq!(sections[0].rows, rows);
     }
 
     /// The zoom keys do nothing in the grid, and are left in its input.

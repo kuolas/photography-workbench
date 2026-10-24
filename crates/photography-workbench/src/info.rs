@@ -33,10 +33,11 @@
 //! why the photo cannot be shown.
 //!
 //! Each value is put in words by a function of its own, with no egui in
-//! it. How capture times are written ([`TimeForm`]) and how file sizes are
-//! counted ([`SizeUnits`]) are chosen in Settings and saved between runs;
-//! each is a parameter of its one function, passed in every frame, so a
-//! change shows at once.
+//! it, which the panel over the viewer's photo ([`crate::overlay`]) writes
+//! its values with too. How capture times are written ([`TimeForm`]) and how
+//! file sizes are counted ([`SizeUnits`]) are chosen in Settings and saved
+//! between runs; each is a parameter of its one function, passed in every
+//! frame, so a change shows at once.
 
 use std::fmt::Write as _;
 
@@ -93,7 +94,7 @@ const ROW_TEXT: f32 = 12.5;
 const VALUE_GAP: f32 = 12.0;
 
 /// What stands for a value the file does not record.
-const NONE: &str = "—";
+pub(crate) const NONE: &str = "—";
 
 /// How a capture time is written, as chosen in Settings.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -401,7 +402,7 @@ fn note(ui: &mut egui::Ui, text: &str) {
 /// The size of the photo's image, upright: for a RAW file the visible
 /// image the camera recorded, or its largest preview's where it records
 /// none; for a JPEG file its own.
-fn image_size(details: &Details) -> Size {
+pub(crate) fn image_size(details: &Details) -> Size {
     match &details.metadata {
         Some(metadata) => metadata.image_size().map_or(details.largest, |size| {
             upright(size, metadata.orientation().swaps_dimensions())

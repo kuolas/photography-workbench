@@ -4,6 +4,8 @@
 //! at a time in a grid of thumbnails, or one at a time in the viewer.
 //! Which one is chosen on the toolbar under the centre.
 
+use crate::mode::Mode;
+
 /// How Library shows a folder's photos.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum View {
@@ -12,6 +14,13 @@ pub enum View {
     Grid,
     /// One photo at a time, as large as the centre allows.
     Viewer,
+}
+
+/// Whether the centre shows Library's viewer in `mode` and `view`, which
+/// alone has the zoom controls and shows the photo's information over its
+/// photo.
+pub fn shows_viewer(mode: Mode, view: View) -> bool {
+    mode == Mode::Library && view == View::Viewer
 }
 
 impl View {

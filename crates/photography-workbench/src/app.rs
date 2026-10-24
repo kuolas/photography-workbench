@@ -21,8 +21,9 @@ use crate::keymap::{self, Action, Step, Surface};
 use crate::layout::{self, Docks};
 use crate::menu::{self, MacMenu};
 use crate::mode::{Layout, Mode};
+use crate::overlay;
 use crate::textures::Textures;
-use crate::view::View;
+use crate::view::{self, View};
 use crate::viewer;
 use crate::zoom::{Framing, Stage, Zoom, Zooming};
 
@@ -52,6 +53,10 @@ const MODE_KEY: &str = "mode";
 /// [`View::name`].
 const VIEW_KEY: &str = "view";
 
+/// The [`eframe::Storage`] key whether the viewer shows the photo's
+/// information over its photo is saved under, as `"true"` or `"false"`.
+const INFO_OVERLAY_KEY: &str = "show_info_overlay";
+
 /// The application state, owned by eframe for the life of the window.
 #[derive(Default)]
 pub struct PhotographyWorkbenchApp {
@@ -60,11 +65,11 @@ pub struct PhotographyWorkbenchApp {
     /// The concrete theme last installed on the context: [`Self::theme`]
     /// resolved against the OS preference. `None` until the first install.
     resolved_theme: Option<Theme>,
-    /// How the Info dock writes a capture time, chosen in Settings and
-    /// saved between runs.
+    /// How the Info dock, and the panel over the viewer's photo, write a
+    /// capture time, chosen in Settings and saved between runs.
     capture_times: TimeForm,
-    /// How the Info dock counts a file's size, chosen in Settings and
-    /// saved between runs.
+    /// How the Info dock, and the panel over the viewer's photo, count a
+    /// file's size, chosen in Settings and saved between runs.
     file_sizes: SizeUnits,
     /// The mode the window shows, saved between runs.
     mode: Mode,
@@ -85,6 +90,9 @@ pub struct PhotographyWorkbenchApp {
     /// the toolbar's zoom controls too, and how long it has waited for its
     /// picture, for it to say when the picture takes a while. Not saved.
     viewer: viewer::State,
+    /// Whether Library's viewer shows the current photo's information on
+    /// a panel over the photo, saved between runs.
+    info_overlay: bool,
     /// How many tiles the grid laid out in a row the last time it was
     /// drawn, which the keys that move a row up or down go by. `None`
     /// until it is drawn, and from a change of mode, view or docks shown
@@ -131,9 +139,10 @@ impl PhotographyWorkbenchApp {
 
     /// Called once, before the first frame. Installs the fonts and the
     /// style, and restores the saved theme choice, how capture times are
-    /// written and file sizes counted, mode, docks and view, and what is
+    /// written and file sizes counted, mode, docks and view, whether the
+    /// viewer shows the photo's information over its photo, and what is
     /// expanded and selected in the folder tree; with none saved, or an
-    /// unreadable one, takes the default.
+    /// unreadable one, takes the default, the photo's information hidden.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         fonts::install(&cc.egui_ctx);
         style::install(&cc.egui_ctx);
@@ -161,6 +170,7 @@ impl PhotographyWorkbenchApp {
         let view = saved(VIEW_KEY)
             .and_then(|name| View::from_saved(&name))
             .unwrap_or_default();
+        let info_overlay = saved(INFO_OVERLAY_KEY).is_some_and(|value| value == "true");
         let mut app = Self {
             theme,
             capture_times,
@@ -168,6 +178,7 @@ impl PhotographyWorkbenchApp {
             mode,
             docks: Docks::restore(cc.storage),
             view,
+            info_overlay,
             browser: Browser::restore(cc.storage),
             mac_window_buttons: measure_mac_window_buttons(cc),
             menu: MacMenu::install(cc),
@@ -362,7 +373,8 @@ impl PhotographyWorkbenchApp {
 
     /// What the menu bar shows of the app: the mode, the view and the
     /// docks shown, which changes of the zoom can be asked for, as the
-    /// toolbar's zoom controls show them, and whether a dialog is open.
+    /// toolbar's zoom controls show them, whether the viewer shows the
+    /// photo's information over its photo, and whether a dialog is open.
     fn menu_state(&self, ctx: &egui::Context) -> menu::State {
         let zoom = self.shows_viewer().then(|| self.zoom_shown(ctx)).flatten();
         menu::State {
@@ -371,15 +383,16 @@ impl PhotographyWorkbenchApp {
             parts: self.parts(),
             docks: self.docks,
             zooms: menu::Zooms::of(zoom),
+            info_overlay: self.info_overlay,
             dialog: self.show_settings || self.show_about || self.show_shortcuts,
             shortcuts: self.show_shortcuts,
         }
     }
 
     /// Whether the centre shows Library's viewer, which alone has the
-    /// zoom controls.
+    /// zoom controls and shows the photo's information over its photo.
     fn shows_viewer(&self) -> bool {
-        self.mode == Mode::Library && self.view == View::Viewer
+        view::shows_viewer(self.mode, self.view)
     }
 
     /// Do what `action` asks, whether a key, a button or a menu item asked
@@ -395,6 +408,7 @@ impl PhotographyWorkbenchApp {
             Action::View(view) => self.view = view,
             Action::Photo(step) => self.step_photo(step),
             Action::Zoom(zooming) => self.zoom(ctx, zooming),
+            Action::PhotoInformation => self.info_overlay = !self.info_overlay,
             Action::SideDocks => self.docks.toggle(parts, &[Side::Left, Side::Right]),
             Action::AllDocks => {
                 self.docks
@@ -505,8 +519,10 @@ impl PhotographyWorkbenchApp {
     }
 
     /// The centre: in Library's grid the selected folder's photos as
-    /// tiles, in its viewer the current photo, or a message where there
-    /// is none to show. Nothing while a folder just chosen is being read.
+    /// tiles, in its viewer the current photo, with its information over
+    /// it while that is on and the viewer drew some texture of it, or a
+    /// message where there is none to show. Nothing while a folder just
+    /// chosen is being read.
     fn centre(&mut self, ui: &mut egui::Ui, palette: &theme::Palette) {
         if let Some((title, body)) = empty_state(self.browser.photos()) {
             dock::empty_message(ui, title, &body);
@@ -536,7 +552,18 @@ impl PhotographyWorkbenchApp {
             View::Viewer => {
                 if let Some(current) = list.current() {
                     let (textures, state) = (&mut self.textures, &mut self.viewer);
-                    viewer::show(ui, palette, textures, state, list.photos(), current);
+                    let drew = viewer::show(ui, palette, textures, state, list.photos(), current);
+                    // Once the viewer drew some texture of the photo, what a
+                    // decode told of its file is known; the panel says only
+                    // that, and wants nothing decoded.
+                    let photo = &list.photos()[current];
+                    if drew
+                        && self.info_overlay
+                        && let Some(details) = self.textures.details(photo.path())
+                    {
+                        let (times, sizes) = (self.capture_times, self.file_sizes);
+                        overlay::show(ui, palette, photo, details, times, sizes);
+                    }
                 }
             }
         }
@@ -902,6 +929,7 @@ impl eframe::App for PhotographyWorkbenchApp {
         storage.set_string(MODE_KEY, self.mode.name().to_owned());
         self.docks.save(storage);
         storage.set_string(VIEW_KEY, self.view.name().to_owned());
+        storage.set_string(INFO_OVERLAY_KEY, self.info_overlay.to_string());
         self.browser.save(storage);
     }
 }
@@ -928,7 +956,7 @@ mod tests {
     use crate::disk::Disk;
 
     use super::{
-        Action, CAPTURE_TIME_KEY, Docks, FILE_SIZES_KEY, Framing, MODE_KEY, Mode,
+        Action, CAPTURE_TIME_KEY, Docks, FILE_SIZES_KEY, Framing, INFO_OVERLAY_KEY, MODE_KEY, Mode,
         PhotographyWorkbenchApp, Side, SizeUnits, THEME_KEY, TITLE_BAR_ICONS, Textures, Theme,
         TimeForm, VIEW_KEY, View, ZOOM_BUTTONS, Zooming,
     };
@@ -1319,6 +1347,11 @@ mod tests {
         app.perform(&ctx, Action::AllDocks);
         assert_eq!(app.docks, docks(true, true, true));
 
+        app.perform(&ctx, Action::PhotoInformation);
+        assert!(app.info_overlay, "the photo's information shows");
+        app.perform(&ctx, Action::PhotoInformation);
+        assert!(!app.info_overlay, "and hides");
+
         app.perform(&ctx, Action::View(View::Grid));
         assert_eq!(app.view, View::Grid);
         app.mode = Mode::Develop;
@@ -1343,7 +1376,10 @@ mod tests {
         assert_eq!(state.view, View::Viewer);
         assert!(state.parts.bottom_dock, "the viewer has the filmstrip");
         assert_eq!(state.docks, docks(true, false, true));
+        assert!(!state.info_overlay);
         assert!(!state.dialog && !state.shortcuts);
+        app.info_overlay = true;
+        assert!(app.menu_state(&ctx).info_overlay);
         for open in [
             |app: &mut PhotographyWorkbenchApp| app.show_settings = true,
             |app: &mut PhotographyWorkbenchApp| app.show_about = true,
@@ -5140,6 +5176,234 @@ mod tests {
         }
     }
 
+    /// The node of the panel over the viewer's photo in the last frame;
+    /// `None` while it is not shown.
+    fn info_overlay_node<'h>(
+        harness: &'h Harness<'_, PhotographyWorkbenchApp>,
+    ) -> Option<egui_kittest::Node<'h>> {
+        let id = crate::overlay::id().accesskit_id();
+        harness
+            .query_all_by_role(Role::Label)
+            .find(|node| node.accesskit_node().locate().0 == id)
+    }
+
+    /// What the panel over the viewer's photo said in the last frame, a
+    /// row of it to a line; `None` while it is not shown.
+    fn info_overlay(harness: &Harness<'_, PhotographyWorkbenchApp>) -> Option<String> {
+        info_overlay_node(harness).and_then(|node| node.accesskit_node().value())
+    }
+
+    /// [`photos_folder`], holding beside its folders `DSC_0001.NEF`, a RAW
+    /// file of the camera `model` ([`nef`]) whose one preview is 640 by
+    /// 480 pixels, and the file's path.
+    fn nef_folder(model: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = photos_folder();
+        let photo = dir.path().join("DSC_0001.NEF");
+        let preview = crate::textures::jpeg(640, 480);
+        std::fs::write(&photo, nef(model, &preview)).unwrap();
+        (dir, photo)
+    }
+
+    /// What the panel over the viewer's photo says of the file at `path`,
+    /// of the NIKON Z 9 ([`nef_folder`]), a row to a line: when it was
+    /// taken, the camera, and the image's size, its format and its size on
+    /// disk.
+    fn nef_information(path: &Path) -> String {
+        let bytes = on_disk(path, SizeUnits::Decimal);
+        format!(
+            "Taken: 2024-05-01 10:20:30.85 UTC+02:00\nCamera: NIKON Z 9\n\
+             Image: 640 × 480 · NEF · {bytes}"
+        )
+    }
+
+    /// In the viewer, I shows the current photo's information over it,
+    /// as a panel screen readers read as its rows, and I again hides it.
+    #[test]
+    fn i_shows_and_hides_the_photo_s_information_in_the_viewer() {
+        let (dir, photo) = nef_folder("NIKON Z 9");
+        let mut harness = filmstrip_harness(dir.path());
+        assert!(!harness.state().info_overlay, "on at first");
+        assert_eq!(info_overlay(&harness), None);
+        press(&mut harness, Modifiers::NONE, Key::I);
+        assert!(harness.state().info_overlay);
+        assert_eq!(info_overlay(&harness), Some(nef_information(&photo)));
+        press(&mut harness, Modifiers::NONE, Key::I);
+        assert!(!harness.state().info_overlay);
+        assert_eq!(info_overlay(&harness), None);
+    }
+
+    /// In the grid, I does nothing, and the photo's information is never
+    /// shown over the photos, even while it is on.
+    #[test]
+    fn the_grid_shows_no_photo_s_information() {
+        let (dir, _photo) = nef_folder("NIKON Z 9");
+        let mut harness = grid_harness(dir.path());
+        press(&mut harness, Modifiers::NONE, Key::I);
+        assert!(!harness.state().info_overlay);
+        assert_eq!(info_overlay(&harness), None);
+        harness.state_mut().info_overlay = true;
+        harness.run();
+        assert_eq!(info_overlay(&harness), None);
+        click(&mut harness, "Image viewer");
+        assert!(info_overlay(&harness).is_some(), "not shown in the viewer");
+    }
+
+    /// Whether the photo's information is shown is saved, and restored on
+    /// the next run; with nothing saved, as on the first run, or anything
+    /// but "true", it is hidden.
+    #[test]
+    fn whether_the_photo_s_information_is_shown_is_saved_and_restored() {
+        let mut storage = MemoryStorage::default();
+        let mut harness = harness();
+        assert!(!harness.state().info_overlay, "on at the first run");
+        harness.state_mut().info_overlay = true;
+        harness.state_mut().save(&mut storage);
+        assert_eq!(
+            storage.get_string(INFO_OVERLAY_KEY).as_deref(),
+            Some("true")
+        );
+        assert!(harness_from(&storage).state().info_overlay);
+        harness.state_mut().info_overlay = false;
+        harness.state_mut().save(&mut storage);
+        assert_eq!(
+            storage.get_string(INFO_OVERLAY_KEY).as_deref(),
+            Some("false")
+        );
+        assert!(!harness_from(&storage).state().info_overlay);
+
+        storage.set_string(INFO_OVERLAY_KEY, "yes".to_owned());
+        assert!(!harness_from(&storage).state().info_overlay);
+        storage.remove_string(INFO_OVERLAY_KEY);
+        assert!(!harness_from(&storage).state().info_overlay);
+    }
+
+    /// While nothing of the photo is decoded, the viewer draws nothing and
+    /// the photo's information waits; once some texture of it is decoded
+    /// and drawn, the information shows.
+    #[test]
+    fn the_photo_s_information_waits_for_the_photo_to_be_decoded() {
+        let (dir, photo) = nef_folder("NIKON Z 9");
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        harness.state_mut().view = View::Viewer;
+        harness.state_mut().info_overlay = true;
+        harness.state_mut().textures.stall(true);
+        click(&mut harness, "Home");
+        assert!(textures_in(&harness, viewer_room(&harness)).is_empty());
+        assert_eq!(info_overlay(&harness), None);
+        harness.state_mut().textures.stall(false);
+        harness.run();
+        assert_eq!(info_overlay(&harness), Some(nef_information(&photo)));
+    }
+
+    /// A photo that cannot be shown, which the viewer shows as an icon,
+    /// has no information over it.
+    #[test]
+    fn a_photo_that_cannot_be_shown_has_no_information_over_it() {
+        let dir = photos_folder();
+        std::fs::write(dir.path().join("broken.jpg"), [0xFF, 0xD8, 0xFF, 0xE0]).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        harness.state_mut().info_overlay = true;
+        click(&mut harness, "Home");
+        click(&mut harness, "Image viewer");
+        assert!(failure_icon_in(&harness, viewer_room(&harness), 48.0));
+        assert_eq!(info_overlay(&harness), None);
+    }
+
+    /// The panel's top-left corner stands 15 points across and 7 down from
+    /// the viewer's, filled with the panel's colour, its corners rounded,
+    /// marked off by its border and holding its rows in the panel's
+    /// colour of text; it stays there however the photo is zoomed.
+    #[test]
+    fn the_photo_s_information_sits_at_the_viewer_s_corner() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        harness.state_mut().info_overlay = true;
+        harness.run();
+        let palette = theme::resolve(harness.state().theme, &harness.ctx).palette();
+        let panel = info_overlay_node(&harness).expect("not shown").rect();
+        let corner = centre(&harness).min + egui::vec2(15.0, 7.0);
+        assert_eq!(panel.min, corner, "{panel:?}");
+        let painted = harness.output().shapes.iter().any(|clipped| {
+            matches!(&clipped.shape, egui::Shape::Rect(rect)
+                if rect.rect == panel
+                    && rect.fill == palette.overlay_fill
+                    && rect.stroke == egui::Stroke::new(1.0, palette.overlay_border)
+                    && rect.stroke_kind == egui::StrokeKind::Inside
+                    && rect.corner_radius == egui::CornerRadius::same(4))
+        });
+        assert!(painted, "no panel painted at {panel:?}");
+        let text = harness.output().shapes.iter().any(|clipped| {
+            matches!(&clipped.shape, egui::Shape::Text(text)
+                if panel.contains_rect(text.visual_bounding_rect())
+                    && text.fallback_color == palette.overlay_text)
+        });
+        assert!(text, "no text in the panel");
+        press(&mut harness, Modifiers::COMMAND | Modifiers::ALT, Key::Num0);
+        assert_eq!(zoom_shown(&harness), "100 %");
+        let zoomed = info_overlay_node(&harness).expect("not shown").rect();
+        assert_eq!(zoomed, panel);
+    }
+
+    /// A value longer than the viewer has room for, less 15 points on each
+    /// side, is cut short with "…", its label left whole, and the panel
+    /// stays inside that room.
+    #[test]
+    fn a_long_value_of_the_photo_s_information_is_cut_short() {
+        let model = "NIKON Z 9 ".repeat(20);
+        let (dir, _photo) = nef_folder(&model);
+        let mut harness = filmstrip_harness(dir.path());
+        harness.state_mut().info_overlay = true;
+        harness.run();
+        let panel = info_overlay_node(&harness).expect("not shown").rect();
+        // As far as the room goes, less what the last character cut off
+        // would have taken.
+        let room = centre(&harness).right() - 15.0;
+        assert!(panel.right() <= room, "{panel:?} past {room}");
+        assert!(panel.right() > room - 12.0, "{panel:?} short of {room}");
+        let texts: Vec<_> = harness
+            .output()
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if panel.contains(text.pos) => Some(text),
+                _ => None,
+            })
+            .collect();
+        let cut_short = texts
+            .iter()
+            .any(|text| text.galley.elided && text.galley.text().starts_with(&model[..20]));
+        assert!(cut_short, "the camera's model not cut short");
+        let label = texts
+            .iter()
+            .any(|text| !text.galley.elided && text.galley.text() == "Camera");
+        assert!(label, "the camera's label not whole");
+    }
+
+    /// The photo's information takes nothing from the photo under it: the
+    /// pointer over both shows what a click on the photo does, and the
+    /// click zooms the photo.
+    #[test]
+    fn a_click_on_the_photo_under_its_information_still_zooms() {
+        let (mut harness, _dir, _) = zoom_harness(1.0);
+        harness.state_mut().info_overlay = true;
+        // At 100 % the photo fills the room.
+        press(&mut harness, Modifiers::COMMAND | Modifiers::ALT, Key::Num0);
+        assert_eq!(zoom_shown(&harness), "100 %");
+        let panel = info_overlay_node(&harness).expect("not shown").rect();
+        let both = panel.intersect(viewer_room(&harness));
+        assert!(both.width() > 4.0 && both.height() > 4.0, "{both:?}");
+        let at = both.center();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::PointerMoved(at));
+        harness.run();
+        let cursor = harness.output().platform_output.cursor_icon;
+        assert_eq!(cursor, egui::CursorIcon::Grab);
+        click_at(&mut harness, at);
+        assert_eq!(zoom_shown(&harness), fitted_shown(&harness));
+        assert!(is_on(&harness, "Zoom to fit"));
+    }
+
     /// The reference lists the keys that move between photos, under
     /// Photos.
     #[test]
@@ -5393,9 +5657,10 @@ mod tests {
     /// Each file is named `<theme>-<scene>.png`, the theme's name in lower
     /// case. The scenes: `grid`, the grid with the home folder selected
     /// and Info showing its first photo; `viewer`, that photo in the
-    /// viewer, with the filmstrip and Info; `settings`, `about` and
-    /// `shortcuts`, each dialog open over the grid; and `empty`, a folder
-    /// with no photos selected. The home folder is the one
+    /// viewer, with the filmstrip and Info; `overlay`, that photo in the
+    /// viewer with its information over it and the side docks hidden;
+    /// `settings`, `about` and `shortcuts`, each dialog open over the grid;
+    /// and `empty`, a folder with no photos selected. The home folder is the one
     /// `PW_SCREENSHOT_PHOTOS` names, to show real photos, or else holds a
     /// few JPEGs of one colour each, made for the run.
     #[test]
@@ -5438,6 +5703,11 @@ mod tests {
             harness.state_mut().view = View::Viewer;
             settle(&mut harness);
             screenshot(&mut harness, out, theme, "viewer");
+            let ctx = harness.ctx.clone();
+            harness.state_mut().perform(&ctx, Action::SideDocks);
+            harness.state_mut().info_overlay = true;
+            settle(&mut harness);
+            screenshot(&mut harness, out, theme, "overlay");
 
             let mut harness = drawn_harness(&storage, empty.path());
             screenshot(&mut harness, out, theme, "empty");
