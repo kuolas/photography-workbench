@@ -39,7 +39,7 @@ fn is_photo(extension: &str) -> bool {
 /// Whether a file of this extension, in any case, is of a format
 /// raw-files reads.
 fn is_raw(extension: &str) -> bool {
-    raw_files::Format::from_extension(extension).is_some()
+    raw_files::Format::from_extension(extension).is_some_and(|format| format.is_raw())
 }
 
 /// The photos under `folder`, at any depth, into `photos`. A folder that

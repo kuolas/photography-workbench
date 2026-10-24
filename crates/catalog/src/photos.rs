@@ -28,7 +28,7 @@ impl Kind {
     /// The file is never read.
     pub fn of(path: &Path) -> Option<Kind> {
         let extension = path.extension()?.to_str()?;
-        if let Some(format) = Format::from_extension(extension) {
+        if let Some(format) = Format::from_extension(extension).filter(|format| format.is_raw()) {
             return Some(Kind::Raw(format));
         }
         ["jpg", "jpeg"]
@@ -223,8 +223,12 @@ mod tests {
     }
 
     #[test]
-    fn every_extension_raw_files_reads_is_a_raw_photo() {
-        for &format in Format::all() {
+    fn every_raw_extension_raw_files_reads_is_a_raw_photo() {
+        for format in Format::all()
+            .iter()
+            .copied()
+            .filter(|format| format.is_raw())
+        {
             for extension in format.extensions() {
                 for name in [
                     format!("x.{extension}"),
@@ -261,7 +265,11 @@ mod tests {
         assert_eq!(format("DSC00001.arq"), "ARQ");
         assert_eq!(format("IMG_0001.jpg"), "JPEG");
         assert_eq!(format("IMG_0001.JPEG"), "JPEG");
-        for &format in Format::all() {
+        for format in Format::all()
+            .iter()
+            .copied()
+            .filter(|format| format.is_raw())
+        {
             for extension in format.extensions() {
                 let upper = extension.to_uppercase();
                 for name in [format!("x.{extension}"), format!("x.{upper}")] {
