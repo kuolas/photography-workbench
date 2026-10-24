@@ -69,7 +69,7 @@ whose milestones unlock the ones above:
 |---|---|
 | 1 and 2, embedded previews of NEF and ARW files (released as 0.1.0) | Browse fast |
 | 3, basic metadata: capture time, camera, lens, exposure, orientation, sizes (released as 0.2.0) | The Info dock's camera data; later, Rename by EXIF and sorting by capture time |
-| 4, focus points in image coordinates | Rate sharpness |
+| 4, focus points in image coordinates (released as 0.3.0) | Rate sharpness |
 | 5, the sensor data; 6, development to a linear image with its colour model | Develop a RAW file |
 
 The cameras the app can open are the ones raw-files reads: Nikon NEF and
