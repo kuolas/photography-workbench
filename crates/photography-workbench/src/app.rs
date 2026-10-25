@@ -813,8 +813,8 @@ impl eframe::App for PhotographyWorkbenchApp {
         // the height, down to the window's bottom, then the toolbar the
         // bottom between them, and the bottom dock the room above it.
         let parts = self.parts();
-        if parts.tool_rail {
-            layout::tool_rail(ui, &palette, &mut self.docks);
+        if parts.tool_rail && layout::tool_rail(ui, &palette, self.docks) {
+            self.perform(ui.ctx(), Action::Dock(Side::Right));
         }
         // The current photo as the frame began, for the right dock: the
         // folder tree, drawn beside it, holds the photos while it is drawn.
@@ -1896,11 +1896,12 @@ mod tests {
         assert_eq!(harness.query_all_by_label("Info").count(), 1);
     }
 
-    /// A click on an action bar's button shows the dock it picks for, if
-    /// that dock is hidden. The button is shown selected while its dock
-    /// shows what it picks.
+    /// A click on an action bar's button shows the dock it picks for if
+    /// that dock is hidden, and hides it if it is shown, the other docks
+    /// as they were. The button is shown selected while its dock shows
+    /// what it picks.
     #[test]
-    fn an_action_bar_button_shows_its_dock() {
+    fn an_action_bar_button_shows_and_hides_its_dock() {
         let mut harness = harness();
         harness.state_mut().docks = Docks {
             left: false,
@@ -1923,6 +1924,32 @@ mod tests {
         assert!(selected(&harness, "Info"));
         let docks = harness.state().docks;
         assert!(!docks.left && docks.right && !docks.bottom, "{docks:?}");
+        harness.get_by_role_and_label(Role::Button, "Info").click();
+        harness.run();
+        assert!(!shown(&harness));
+        assert!(!selected(&harness, "Info"));
+        let docks = harness.state().docks;
+        assert!(!docks.left && !docks.right && !docks.bottom, "{docks:?}");
+    }
+
+    /// After Tab hides the side docks, a click on Info shows the right
+    /// dock alone: the left dock stays hidden.
+    #[test]
+    fn after_tab_the_info_button_shows_the_right_dock_only() {
+        let mut harness = harness();
+        press(&mut harness, Modifiers::NONE, Key::Tab);
+        let selected = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let button = harness.get_by_role_and_label(Role::Button, "Info");
+            button.accesskit_node().toggled() == Some(Toggled::True)
+        };
+        let docks = harness.state().docks;
+        assert!(!docks.left && !docks.right, "{docks:?}");
+        assert!(!selected(&harness));
+        harness.get_by_role_and_label(Role::Button, "Info").click();
+        harness.run();
+        let docks = harness.state().docks;
+        assert!(!docks.left && docks.right, "{docks:?}");
+        assert!(selected(&harness));
     }
 
     /// Whether the right dock showed something named `label` in the last
