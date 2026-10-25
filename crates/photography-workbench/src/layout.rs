@@ -10,11 +10,15 @@
 //! which the app draws in it. The bottom dock is the filmstrip's, which
 //! only the viewer has: the grid shows the photos as thumbnails already.
 //! The app draws the filmstrip in it, on the viewer's backdrop.
+//!
+//! The title bar holds the toggles for the side docks, and the toolbar,
+//! beside the zoom, the filmstrip's.
 
 use desktop_ui::action_bar::{self, Edge};
 use desktop_ui::chrome;
 use desktop_ui::dock::{self, Side};
 use desktop_ui::theme::Palette;
+use desktop_ui::toolbar;
 
 use crate::keymap::{self, Action, Surface};
 use crate::mode::Layout;
@@ -25,8 +29,10 @@ use crate::mode::Layout;
 const LEFT_DOCK: (f32, std::ops::RangeInclusive<f32>) = (268.0, 200.0..=380.0);
 
 /// The width the right dock opens at the first time, and the widths it can
-/// be dragged to.
-const RIGHT_DOCK: (f32, std::ops::RangeInclusive<f32>) = (270.0, 250.0..=460.0);
+/// be dragged to. With both side docks at their widest, at the smallest the
+/// window can be, the toolbar between them still holds its controls: it is
+/// about 440 points wide then.
+const RIGHT_DOCK: (f32, std::ops::RangeInclusive<f32>) = (270.0, 250.0..=410.0);
 
 /// The height of the bottom dock, which holds the filmstrip: fixed, as
 /// the filmstrip's cells are.
@@ -34,6 +40,12 @@ const FILMSTRIP_HEIGHT: f32 = 142.0;
 
 /// What the right dock can show: the tool rail's button for it.
 const INFO: ((&str, char), &str) = (("info", 'ℹ'), "Info");
+
+/// The toolbar's toggle for the filmstrip: its Lucide icon, with the
+/// character shown in its place if the name does not resolve, and its
+/// name, which screen readers and the tests know it by.
+const FILMSTRIP_TOGGLE: ((&str, char), &str) =
+    (("panel-bottom", '▁'), "Show or hide the filmstrip");
 
 /// Which docks are shown, saved between runs. A dock the mode does not
 /// have is never shown, whatever it says here.
@@ -120,11 +132,12 @@ impl Docks {
     }
 }
 
-/// The title bar's toggles for the docks `layout` has, in a right-to-left
-/// layout, so they read left, bottom, right, as the docks lie, each showing
-/// whether its dock is shown in `docks`. Each names in its tooltip the key
-/// combination that shows or hides its dock on `surface`. The side of the
-/// dock whose toggle was clicked, if any.
+/// The title bar's toggles for the side docks `layout` has, in a
+/// right-to-left layout, so they read left, right, as the docks lie, each
+/// showing whether its dock is shown in `docks`. Each names in its tooltip
+/// the key combination that shows or hides its dock on `surface`. The
+/// filmstrip's toggle is on the toolbar ([`filmstrip_toggle`]). The side of
+/// the dock whose toggle was clicked, if any.
 pub fn dock_toggles(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -138,12 +151,6 @@ pub fn dock_toggles(
             Side::Right,
             docks.right,
             "Show or hide the right dock",
-        ),
-        (
-            layout.bottom_dock,
-            Side::Bottom,
-            docks.bottom,
-            "Show or hide the filmstrip",
         ),
         (
             layout.left_dock,
@@ -160,6 +167,29 @@ pub fn dock_toggles(
         }
     }
     clicked
+}
+
+/// The toolbar's toggle for the filmstrip, in a right-to-left layout, shown
+/// selected while the filmstrip is `shown`. It names in its tooltip the key
+/// combination that shows or hides the filmstrip on `surface`. Whether it
+/// was clicked.
+pub fn filmstrip_toggle(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    surface: Surface,
+    shown: bool,
+) -> bool {
+    let combination = keymap::key_combination_for(surface, Action::Dock(Side::Bottom));
+    let (icon, label) = FILMSTRIP_TOGGLE;
+    // An id of its own, as what comes before it on the toolbar comes and
+    // goes, and the ids egui gives by position would shift with it.
+    let scope = egui::UiBuilder::new()
+        .id(egui::Id::new("filmstrip_toggle"))
+        .layout(egui::Layout::right_to_left(egui::Align::Center));
+    ui.scope_builder(scope, |ui| {
+        toolbar::button(ui, palette, icon, label, shown, combination).clicked()
+    })
+    .inner
 }
 
 /// The tool rail. A button is shown selected while the right dock shows
@@ -235,11 +265,12 @@ pub fn bottom_dock(
 
 #[cfg(test)]
 mod tests {
-    use super::INFO;
+    use super::{FILMSTRIP_TOGGLE, INFO};
 
     #[test]
     fn every_icon_resolves() {
-        let ((name, _), label) = INFO;
-        assert!(desktop_ui::icons::resolves(name), "{label}: {name}");
+        for ((name, _), label) in [INFO, FILMSTRIP_TOGGLE] {
+            assert!(desktop_ui::icons::resolves(name), "{label}: {name}");
+        }
     }
 }
