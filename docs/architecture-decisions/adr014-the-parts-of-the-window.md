@@ -1,6 +1,8 @@
 # ADR014: The parts of the window
 
-- Status: Accepted
+- Status: Accepted; amended by
+  [ADR017](adr017-showing-and-hiding-the-docks.md), which puts the
+  filmstrip's toggle on the toolbar
 - Date: 2026-10-15
 - Issue: #4
 

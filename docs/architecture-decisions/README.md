@@ -19,9 +19,10 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR011](adr011-views-navigation-and-the-keymap.md) | Views, navigation and the keymap | Accepted; its choice of keys superseded by [ADR015](adr015-the-keys.md) |
 | [ADR012](adr012-version-numbers.md) | Version numbers | Accepted |
 | [ADR013](adr013-a-workspace-of-small-crates.md) | A workspace of small crates | Accepted |
-| [ADR014](adr014-the-parts-of-the-window.md) | The parts of the window | Accepted |
+| [ADR014](adr014-the-parts-of-the-window.md) | The parts of the window | Accepted; amended by [ADR017](adr017-showing-and-hiding-the-docks.md), which puts the filmstrip's toggle on the toolbar |
 | [ADR015](adr015-the-keys.md) | The keys | Accepted |
 | [ADR016](adr016-the-viewer-s-zoom.md) | The viewer's zoom | Accepted |
+| [ADR017](adr017-showing-and-hiding-the-docks.md) | Showing and hiding the docks | Accepted |
 
 ## When to write one
 
