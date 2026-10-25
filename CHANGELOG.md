@@ -32,7 +32,8 @@ Nothing has been released yet.
   bottom for the filmstrip. Each is shown or hidden from the title bar;
   which are shown is remembered between runs. A bar of buttons along the
   right edge picks what the right dock shows: so far Info, the current
-  photo's information.
+  photo's information; a click on Info while the dock shows it hides the
+  dock.
 - In Library, the left dock shows a tree of the home folder and the
   mounted memory cards and drives. A folder expands from the arrow
   beside it, and a click selects it. Cards and drives appear and

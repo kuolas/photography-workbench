@@ -163,17 +163,20 @@ pub fn dock_toggles(
 }
 
 /// The tool rail. A button is shown selected while the right dock shows
-/// what it picks, and a click on it shows the right dock if it is hidden,
-/// as what it picks has nowhere else to show.
-pub fn tool_rail(ui: &mut egui::Ui, palette: &Palette, docks: &mut Docks) {
+/// what it picks; a click on the one that is on hides the dock, and a
+/// click on a button while the dock is hidden shows the dock with what
+/// the button picks. Whether the Info button was clicked.
+pub fn tool_rail(ui: &mut egui::Ui, palette: &Palette, docks: Docks) -> bool {
+    let mut clicked = false;
     let info = |ui: &mut egui::Ui| {
         let (icon, label) = INFO;
-        if action_bar::button(ui, palette, icon, label, docks.right).clicked() {
-            docks.right = true;
-        }
+        // No key combination in its tooltip: F8 shows or hides the right
+        // dock whatever it shows, where the button picks what it shows.
+        clicked = action_bar::button(ui, palette, icon, label, docks.right).clicked();
     };
     let bar = ("tool_rail", Edge::Right);
     action_bar::show(ui, bar, palette, info, |_| {});
+    clicked
 }
 
 /// The side docks `layout` has, each shown or hidden as `docks` says,
