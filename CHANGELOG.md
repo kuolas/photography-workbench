@@ -29,11 +29,12 @@ Nothing has been released yet.
 - In Library, docks surround the centre of the window: one on the left
   for folders and one on the right for a photo's information, each
   resized by dragging its edge, and, with the viewer, one along the
-  bottom for the filmstrip. Each is shown or hidden from the title bar;
-  which are shown is remembered between runs. A bar of buttons along the
-  right edge picks what the right dock shows: so far Info, the current
-  photo's information; a click on Info while the dock shows it hides the
-  dock.
+  bottom for the filmstrip. The side docks are shown or hidden from the
+  title bar, and the filmstrip from a button on the toolbar beside the
+  zoom; which are shown is remembered between runs. A bar of buttons
+  along the right edge picks what the right dock shows: so far Info, the
+  current photo's information; a click on Info while the dock shows it
+  hides the dock.
 - In Library, the left dock shows a tree of the home folder and the
   mounted memory cards and drives. A folder expands from the arrow
   beside it, and a click selects it. Cards and drives appear and

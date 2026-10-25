@@ -244,8 +244,8 @@ impl PhotographyWorkbenchApp {
 
     /// The title bar's contents: the app's icon (except on macOS) and the
     /// mode switcher at the left, past the space macOS's window buttons
-    /// take, and the window controls, the toggles for the mode's docks, the
-    /// settings gear and the button for the reference of keyboard
+    /// take, and the window controls, the toggles for the mode's side docks,
+    /// the settings gear and the button for the reference of keyboard
     /// shortcuts at the right.
     /// The icon opens About; on macOS, About belongs in the app menu at the
     /// top of the screen, and an icon beside the system's window buttons
@@ -624,8 +624,9 @@ const ZOOM_BUTTONS: [(Zooming, &str, (&str, char)); 4] = [
 /// changes.
 const ZOOM_LABEL_WIDTH: f32 = 52.0;
 
-/// The room between the toolbar's count and the zoom controls, on top of
-/// the toolbar's gap between two controls, so the two read apart.
+/// The room between the toolbar's count and the zoom controls, and between
+/// the zoom controls and the filmstrip's toggle, on top of the toolbar's gap
+/// between two controls, so they read apart.
 const ZOOM_GAP: f32 = 6.0;
 
 /// The zoom controls at the toolbar's end in Library's viewer, from the
@@ -830,9 +831,14 @@ impl eframe::App for PhotographyWorkbenchApp {
             let position = position(self.browser.photos());
             // The mode's own controls hold the app while the toolbar is
             // drawn, so the zoom controls read the viewer's zoom before it,
-            // and a click on one is done after it, still before the centre.
+            // and the filmstrip's toggle whether the filmstrip is shown, and
+            // a click on one is done after it, still before the bottom dock
+            // and the centre.
             let zoom_shown = self.shows_viewer().then(|| self.zoom_shown(ui.ctx()));
             let mut zoomed = None;
+            let surface = self.surface();
+            let filmstrip_shown = parts.bottom_dock.then_some(self.docks.bottom);
+            let mut filmstrip_toggled = false;
             let start = |ui: &mut egui::Ui| self.mode_controls(ui, &palette);
             let end = |ui: &mut egui::Ui| {
                 if let Some(position) = position {
@@ -845,10 +851,17 @@ impl eframe::App for PhotographyWorkbenchApp {
                     ui.add_space(ZOOM_GAP);
                     zoomed = zoom_controls(ui, &palette, shown);
                 }
+                if let Some(shown) = filmstrip_shown {
+                    ui.add_space(ZOOM_GAP);
+                    filmstrip_toggled = layout::filmstrip_toggle(ui, &palette, surface, shown);
+                }
             };
             toolbar::show(ui, "toolbar", &palette, start, end);
             if let Some(zooming) = zoomed {
                 self.perform(ui.ctx(), Action::Zoom(zooming));
+            }
+            if filmstrip_toggled {
+                self.perform(ui.ctx(), Action::Dock(Side::Bottom));
             }
         }
         // The same photos as the grid's, sharing the current one and the
@@ -958,7 +971,7 @@ mod tests {
     use super::{
         Action, CAPTURE_TIME_KEY, Docks, FILE_SIZES_KEY, Framing, INFO_OVERLAY_KEY, MODE_KEY, Mode,
         PhotographyWorkbenchApp, Side, SizeUnits, THEME_KEY, TITLE_BAR_ICONS, Textures, Theme,
-        TimeForm, VIEW_KEY, View, ZOOM_BUTTONS, Zooming,
+        TimeForm, VIEW_KEY, View, ZOOM_BUTTONS, ZOOM_GAP, Zooming,
     };
 
     /// Settings kept in memory, in place of eframe's file.
@@ -1070,7 +1083,8 @@ mod tests {
 
     /// At the window's smallest, everything on the title bar fits on it in
     /// order, clear of the system's window buttons on macOS, and of the
-    /// window controls elsewhere.
+    /// window controls elsewhere. The filmstrip's toggle is not on it, but
+    /// on the toolbar.
     #[test]
     fn the_title_bar_holds_its_buttons_and_the_window_controls() {
         let harness = viewer_harness();
@@ -1082,7 +1096,6 @@ mod tests {
             "Keyboard shortcuts",
             "Settings",
             LEFT_TOGGLE,
-            BOTTOM_TOGGLE,
             RIGHT_TOGGLE,
         ];
         for name in names {
@@ -1106,6 +1119,8 @@ mod tests {
         if let Some(minimize) = minimize {
             assert!(last.right() < minimize.rect().left(), "{last:?}");
         }
+        let filmstrip = harness.get_by_label(FILMSTRIP_TOGGLE).rect();
+        assert!(filmstrip.top() >= TITLE_BAR_HEIGHT, "{filmstrip:?}");
     }
 
     /// Library's view buttons choose how the centre shows the photos, and
@@ -1144,10 +1159,12 @@ mod tests {
         assert_eq!(harness_from(&storage).state().view, View::Grid);
     }
 
-    /// The title bar's toggle for each dock.
+    /// The title bar's toggle for each side dock.
     const LEFT_TOGGLE: &str = "Show or hide the left dock";
-    const BOTTOM_TOGGLE: &str = "Show or hide the filmstrip";
     const RIGHT_TOGGLE: &str = "Show or hide the right dock";
+
+    /// The toolbar's toggle for the bottom dock, the filmstrip's.
+    const FILMSTRIP_TOGGLE: &str = "Show or hide the filmstrip";
 
     /// A dock toggle hides its dock, and shows it again, and says which.
     #[test]
@@ -1166,7 +1183,7 @@ mod tests {
         harness.run();
         assert_eq!(info(&harness), 1);
 
-        harness.get_by_label(BOTTOM_TOGGLE).click();
+        harness.get_by_label(FILMSTRIP_TOGGLE).click();
         harness.get_by_label(LEFT_TOGGLE).click();
         harness.run();
         let docks = harness.state().docks;
@@ -1454,7 +1471,7 @@ mod tests {
             ),
             ("Settings", combination(Modifiers::COMMAND, Key::Comma)),
             (LEFT_TOGGLE, combination(Modifiers::NONE, Key::F7)),
-            (BOTTOM_TOGGLE, combination(Modifiers::NONE, Key::F6)),
+            (FILMSTRIP_TOGGLE, combination(Modifiers::NONE, Key::F6)),
             (RIGHT_TOGGLE, combination(Modifiers::NONE, Key::F8)),
             ("Thumbnail grid", combination(Modifiers::NONE, Key::G)),
             ("Image viewer", combination(Modifiers::NONE, Key::E)),
@@ -1783,16 +1800,48 @@ mod tests {
     fn the_filmstrip_comes_with_the_viewer_only() {
         let mut harness = viewer_harness();
         assert_eq!(panel(&harness, "bottom_dock").height(), 142.0);
-        harness.get_by_label(BOTTOM_TOGGLE);
+        harness.get_by_label(FILMSTRIP_TOGGLE);
         harness.get_by_label("Thumbnail grid").click();
         harness.run();
-        assert!(harness.query_by_label(BOTTOM_TOGGLE).is_none());
+        assert!(harness.query_by_label(FILMSTRIP_TOGGLE).is_none());
         let centre = centre(&harness);
         assert_eq!(
             centre.bottom(),
             panel(&harness, "toolbar").top(),
             "{centre:?}"
         );
+    }
+
+    /// In the viewer the filmstrip's toggle is on the toolbar, just left of
+    /// the zoom controls, set apart from them, and shown selected while the
+    /// filmstrip is shown. A click on it hides the filmstrip, another shows
+    /// it again, and F6 does the same.
+    #[test]
+    fn the_filmstrip_s_toggle_is_on_the_toolbar_beside_the_zoom() {
+        let mut harness = viewer_harness();
+        let toggle = harness.get_by_label(FILMSTRIP_TOGGLE).rect();
+        let out = harness.get_by_label("Zoom out").rect();
+        let toolbar = panel(&harness, "toolbar");
+        assert!(toolbar.contains_rect(toggle), "{toggle:?} {toolbar:?}");
+        // On top of the toolbar's gap between two controls, 6 points.
+        let gap = out.left() - toggle.right();
+        assert_eq!(gap, ZOOM_GAP + 6.0, "{toggle:?} {out:?}");
+        assert_eq!(toggle.center().y, out.center().y, "{toggle:?} {out:?}");
+
+        let toggled = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let node = harness.get_by_label(FILMSTRIP_TOGGLE).accesskit_node();
+            node.toggled()
+        };
+        assert_eq!(toggled(&harness), Some(Toggled::True));
+        for shown in [false, true] {
+            harness.get_by_label(FILMSTRIP_TOGGLE).click();
+            harness.run();
+            assert_eq!(harness.state().docks.bottom, shown);
+            assert_eq!(toggled(&harness), Some(Toggled::from(shown)));
+        }
+        press(&mut harness, Modifiers::NONE, Key::F6);
+        assert!(!harness.state().docks.bottom);
+        assert_eq!(toggled(&harness), Some(Toggled::False));
     }
 
     /// The viewer and its filmstrip are filled with the viewer's backdrop;
@@ -5160,12 +5209,14 @@ mod tests {
     }
 
     /// With both side docks at their widest, at the window's smallest, the
-    /// toolbar holds the view buttons, the zoom controls and a count of a
-    /// thousand photos, none over another.
+    /// toolbar holds, from the left, the view buttons, the filmstrip's
+    /// toggle, the zoom controls and the count with the last of a thousand
+    /// photos current, none over another.
     #[test]
-    fn the_zoom_controls_fit_the_narrowest_toolbar() {
+    fn the_toolbar_holds_its_controls_at_its_narrowest() {
         let dir = folder_of_numbered_photos(1000);
         let mut harness = filmstrip_harness(dir.path());
+        make_current(&mut harness, 1000);
         for id in ["left_dock", "right_dock"] {
             let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 100.0));
             let state = egui::PanelState { outer_rect: rect };
@@ -5176,10 +5227,12 @@ mod tests {
         harness.run();
         let toolbar = panel(&harness, "toolbar");
         let viewer = harness.get_by_label("Image viewer").rect();
+        let toggle = harness.get_by_label(FILMSTRIP_TOGGLE).rect();
         let out = harness.get_by_label("Zoom out").rect();
         let full = harness.get_by_label("Zoom to 100 %").rect();
-        let count = harness.get_by_label("1 of 1000").rect();
-        assert!(viewer.right() < out.left(), "{viewer:?} {out:?}");
+        let count = harness.get_by_label("1000 of 1000").rect();
+        assert!(viewer.right() < toggle.left(), "{viewer:?} {toggle:?}");
+        assert!(toggle.right() < out.left(), "{toggle:?} {out:?}");
         assert!(full.right() < count.left(), "{full:?} {count:?}");
         assert!(count.right() <= toolbar.right(), "{count:?} {toolbar:?}");
     }
@@ -5684,8 +5737,10 @@ mod tests {
     /// Each file is named `<theme>-<scene>.png`, the theme's name in lower
     /// case. The scenes: `grid`, the grid with the home folder selected
     /// and Info showing its first photo; `viewer`, that photo in the
-    /// viewer, with the filmstrip and Info; `overlay`, that photo in the
-    /// viewer with its information over it and the side docks hidden;
+    /// viewer, with the filmstrip and Info; `filmstrip-hidden`, the viewer
+    /// with the filmstrip hidden; `widest-docks`, the viewer with both side
+    /// docks dragged to their widest; `overlay`, that photo in the viewer
+    /// with its information over it and the side docks hidden;
     /// `settings`, `about` and `shortcuts`, each dialog open over the grid;
     /// and `empty`, a folder with no photos selected. The home folder is the one
     /// `PW_SCREENSHOT_PHOTOS` names, to show real photos, or else holds a
@@ -5731,6 +5786,25 @@ mod tests {
             settle(&mut harness);
             screenshot(&mut harness, out, theme, "viewer");
             let ctx = harness.ctx.clone();
+            harness
+                .state_mut()
+                .perform(&ctx, Action::Dock(Side::Bottom));
+            settle(&mut harness);
+            screenshot(&mut harness, out, theme, "filmstrip-hidden");
+            harness
+                .state_mut()
+                .perform(&ctx, Action::Dock(Side::Bottom));
+            // Wider than either can be, so each takes its widest.
+            for id in ["left_dock", "right_dock"] {
+                let size = egui::vec2(1000.0, 100.0);
+                let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+                let state = egui::PanelState { outer_rect: rect };
+                harness
+                    .ctx
+                    .data_mut(|d| d.insert_persisted(egui::Id::new(id), state));
+            }
+            settle(&mut harness);
+            screenshot(&mut harness, out, theme, "widest-docks");
             harness.state_mut().perform(&ctx, Action::SideDocks);
             harness.state_mut().info_overlay = true;
             settle(&mut harness);
