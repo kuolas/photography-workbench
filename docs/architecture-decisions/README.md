@@ -39,6 +39,33 @@ local choices belong in a code comment or the commit message instead.
 
 ## Changing a decision
 
-Records are not rewritten or deleted. A new decision that replaces an old one
-gets its own ADR; the old one's status becomes "Superseded by
-[ADRxxx](…)", linking to the new record.
+Records are not rewritten or deleted, with two exceptions: corrections,
+described next, and the extension at the end of this section.
+
+A correction leaves the decision as it was: a figure measured again, a
+term renamed in the code, a slip. It is made in the record itself, with
+no new record and no change of status, and the commit that makes it
+says why the record is corrected rather than superseded.
+
+A new decision that replaces an old one gets its own ADR; the old one's
+status becomes "Superseded by [ADRxxx](…)", linking to the new record.
+
+A new decision that changes part of an old one, and leaves the rest
+standing, gets its own ADR too. It says "Amends [ADRxxx](…)" next to its
+status and names the point it changes; the old one's status becomes
+"Accepted; amended by [ADRyyy](…)", so that a reader of the old record
+finds the change.
+
+A new decision that builds on an old one without contradicting it, by
+covering what the old one left out, also gets its own ADR. It says
+"Builds on [ADRxxx](…)" next to its status, and the old record stays as
+it is, Accepted.
+
+The other exception, the extension: a decision that extends an old one
+to more values of the same kind, by the same rule, may be added to the
+old record in place.
+The additions are sections of their own, under the old Context,
+Decision and Consequences, each with the date and the issue it was
+added in; they say which of the old sentences no longer describe the
+whole decision, and the old text stays as it was. The old record's
+status names the addition.
