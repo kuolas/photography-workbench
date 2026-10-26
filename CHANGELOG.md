@@ -96,15 +96,15 @@ Nothing has been released yet.
   sideways, and it brings the current photo into view when the current
   photo changes, never while it is being scrolled.
 - In Library, Info in the right dock shows the current photo's
-  information in three boxes. File Information gives the file's name,
-  its size on disk and its format, the file's extension in capitals (NEF,
-  NRW, ARW) and JPEG for a JPEG file. Image Information
-  gives when the photo was taken, its size in pixels, whether it is
-  portrait, landscape or square, and, for a RAW file, the size of the
-  largest preview the file holds, which is what the viewer shows at
-  100 %, and how many previews it holds. Shooting Information gives
-  the camera's make and model, the lens, the focal length, the
-  exposure ("1/2000 s at f/8"), the ISO and the exposure bias. Makers'
+  information in three boxes. Shooting Information gives the camera's
+  make and model, the lens, the focal length, the ISO, the shutter
+  speed, the aperture and the exposure bias. Image Information gives when
+  the photo was taken, its size in pixels, whether it is portrait,
+  landscape or square, and, for a RAW file, the size of the largest
+  preview the file holds, which is what the viewer shows at 100 %, and
+  how many previews it holds. File Information gives the file's name,
+  its size on disk and its format, the file's extension in capitals
+  (NEF, NRW, ARW) and JPEG for a JPEG file. Makers'
   names in the camera and the lens are written as the makers market
   them, "Nikon" rather than the "NIKON" a file records, but "NIKKOR" as
   Nikon writes it, here and on the panel over the viewer's photo. A

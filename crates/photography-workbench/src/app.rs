@@ -2045,10 +2045,10 @@ mod tests {
         crate::info::file_size(std::fs::metadata(path).unwrap().len(), units)
     }
 
-    /// Info shows a JPEG file's name, size on disk and format, when it was
-    /// taken, its size and which way it is laid out, and what took it and
-    /// how, in boxes headed by what they hold; this one has no EXIF block,
-    /// so what the camera recorded is all "—".
+    /// Info shows what took a JPEG file's photo and how, when it was taken,
+    /// its size and which way it is laid out, and the file's name, size on
+    /// disk and format, in boxes headed by what they hold, in that order;
+    /// this one has no EXIF block, so what the camera recorded is all "—".
     #[test]
     fn info_shows_what_a_jpeg_file_holds() {
         let dir = photos_folder();
@@ -2058,26 +2058,31 @@ mod tests {
         click(&mut harness, "Home");
         let size_on_disk = format!("Size on disk: {}", on_disk(&photo, SizeUnits::Decimal));
         let shown = [
-            "File Information",
-            "File name: DSC_0001.jpg",
-            &size_on_disk,
-            "Format: JPEG",
-            "Image Information",
-            "Capture time: —",
-            "Image size: 300 × 200",
-            "Orientation: Landscape",
             "Shooting Information",
             "Make: —",
             "Model: —",
             "Lens: —",
             "Focal length: —",
-            "Exposure: —",
             "ISO: —",
+            "Shutter speed: —",
+            "Aperture: —",
             "Exposure bias: —",
+            "Image Information",
+            "Capture time: —",
+            "Image size: 300 × 200",
+            "Orientation: Landscape",
+            "File Information",
+            "File name: DSC_0001.jpg",
+            &size_on_disk,
+            "Format: JPEG",
         ];
         for label in shown {
             assert!(in_right_dock(&harness, label), "{label}");
         }
+        // What took the photo comes first and the file last.
+        let top = |heading| harness.get_by_label(heading).rect().top();
+        assert!(top("Shooting Information") < top("Image Information"));
+        assert!(top("Image Information") < top("File Information"));
         let not_shown = ["No photo selected", "Reading…"];
         for label in not_shown {
             assert!(!in_right_dock(&harness, label), "{label}");
@@ -2116,8 +2121,9 @@ mod tests {
             "Model: —",
             "Lens: —",
             "Focal length: —",
-            "Exposure: —",
             "ISO: —",
+            "Shutter speed: —",
+            "Aperture: —",
             "Exposure bias: —",
         ];
         for label in shown {
@@ -2243,8 +2249,9 @@ mod tests {
             "Model: Nikon Z 9",
             "Lens: —",
             "Focal length: —",
-            "Exposure: —",
             "ISO: —",
+            "Shutter speed: —",
+            "Aperture: —",
             "Exposure bias: —",
         ];
         for label in shown {
