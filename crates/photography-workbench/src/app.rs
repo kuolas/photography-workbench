@@ -1586,6 +1586,35 @@ mod tests {
         assert_eq!(storage.get_string(THEME_KEY).as_deref(), Some("Nexus"));
     }
 
+    /// In every theme the title bar is filled with the docks' colour, so
+    /// the window's chrome reads as one surface.
+    #[test]
+    fn the_title_bar_has_the_docks_colour_in_every_theme() {
+        let mut harness = harness();
+        // The fill of the largest rectangle painted within the panel `id`.
+        let fill = |harness: &Harness<'_, PhotographyWorkbenchApp>, id| {
+            let area = panel(harness, id).expand(1.0);
+            harness
+                .output()
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Rect(rect) if area.contains_rect(rect.rect) => Some(rect),
+                    _ => None,
+                })
+                .max_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+                .unwrap_or_else(|| panic!("nothing painted in {id}"))
+                .fill
+        };
+        for theme in Theme::ALL {
+            harness.state_mut().theme = Some(theme);
+            harness.run();
+            let palette = theme.palette();
+            assert_eq!(fill(&harness, "title_bar"), palette.panel, "{theme:?}");
+            assert_eq!(fill(&harness, "left_dock"), palette.panel, "{theme:?}");
+        }
+    }
+
     /// How capture times are written and file sizes counted is saved, and
     /// restored on the next run; with none saved, or an unreadable one,
     /// each takes its default.
