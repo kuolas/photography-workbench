@@ -9,20 +9,30 @@ it stores things; the second part goes up when a release adds something a
 user can see or do, the third when it only fixes things (the record of that
 decision is
 [ADR012](docs/architecture-decisions/adr012-version-numbers.md)).
-Nothing has been released yet.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-10-26
+
+The first release: Library, the first of the app's three modes, which
+browses folders of the RAW files of Nikon and Sony cameras and of JPEG
+files, showing the previews the cameras stored in them and what the
+cameras recorded. Releases are source only for now: the app is built
+from the release's source archive with Cargo, as the README says. Every
+pull request is built and tested on macOS, Linux and Windows, but the
+app has been tried by hand on macOS only, so reports from Linux and
+Windows are welcome.
 
 ### Added
 
 - The app opens a window with a title bar of its own, the same on every
-  system, holding a settings gear. The gear opens Settings, which offers
-  Paper, Graphite, Nexus and Dark themes, plus System, which follows the OS
-  (Paper when it is light, Nexus otherwise). The app starts in Nexus; the
-  window size and theme are remembered between runs.
-- An About dialog shows the app's version, copyright and licence, and
-  links to its home page. On Windows and Linux the app's icon at the left
-  of the title bar opens it; on macOS, the app menu.
+  system. The window opens at 1280 × 800 points the first time and cannot
+  be made smaller, so every part of it fits on a handheld's screen; its
+  size is remembered between runs.
+- Dragging the title bar moves the window, and double-clicking it maximizes
+  or restores the window. On Windows and Linux the title bar has the close,
+  maximize and minimize buttons, and the window resizes from any edge or
+  corner; on macOS the system's own window buttons sit on the title bar.
 - The title bar has a mode switcher, for the app's three modes: Library,
   where photos are browsed and culled, and Organizer and Develop, which are
   shown disabled until a later release. The mode is remembered between runs.
@@ -35,6 +45,9 @@ Nothing has been released yet.
   along the right edge picks what the right dock shows: so far Info, the
   current photo's information; a click on Info while the dock shows it
   hides the dock.
+- In Library, two buttons on a toolbar under the centre choose how the
+  centre shows a folder's photos: as a grid of thumbnails, or one at a
+  time in a viewer. The choice is remembered between runs.
 - In Library, the left dock shows a tree of the home folder and the
   mounted memory cards and drives. A folder expands from the arrow
   beside it, and a click selects it. Cards and drives appear and
@@ -76,17 +89,6 @@ Nothing has been released yet.
   that do the same, and the reference of keyboard shortcuts lists the keys
   under Zoom. Elsewhere those keys do nothing; none of them changes the
   size of the whole window.
-- In Library's viewer, I shows or hides the current photo's information
-  on a dark translucent panel at the viewer's top left, in labelled
-  rows: when it was taken, the camera, the lens, the image's size in
-  pixels, its format and its size on disk, the focal length, and the
-  exposure: the ISO, the shutter speed, the aperture and the exposure
-  bias, each only where the file records it, written as chosen in
-  Settings. A button on the toolbar beside the filmstrip's does the
-  same, lit while the panel is turned on, and on macOS so does an item
-  of the View menu, checked while it is. The reference of
-  keyboard shortcuts lists the key under Views, and whether the panel is
-  shown is remembered between runs.
 - In Library, with the viewer, the filmstrip under it shows the
   folder's photos in a row, each with its name and its format, the
   file's extension in capitals (NEF, NRW, ARW) and JPEG for a JPEG file,
@@ -114,15 +116,17 @@ Nothing has been released yet.
   long to fit is cut short and shows whole when the pointer rests on
   it. Until the photo has been read Info says so, and for a photo that
   cannot be shown it says why.
-- Settings offers a choice of how Info writes when a photo was taken,
-  "2026-08-15 10:20:30 UTC+02:00" or "15 August 2026 at 10:20:30
-  (UTC+02:00)", and of how it counts a file's size, in decimal units,
-  "52.3 MB", or in binary ones, "49.9 MiB", where 1 KiB is 1,024
-  bytes. Info, and the panel over the viewer's photo, show a new choice
-  at once, and both are remembered between runs.
-- In Library, two buttons on a toolbar under the centre choose how the
-  centre shows a folder's photos: as a grid of thumbnails, or one at a
-  time in a viewer. The choice is remembered between runs.
+- In Library's viewer, I shows or hides the current photo's information
+  on a dark translucent panel at the viewer's top left, in labelled
+  rows: when it was taken, the camera, the lens, the image's size in
+  pixels, its format and its size on disk, the focal length, and the
+  exposure: the ISO, the shutter speed, the aperture and the exposure
+  bias, each only where the file records it, written as chosen in
+  Settings. A button on the toolbar beside the filmstrip's does the
+  same, lit while the panel is turned on, and on macOS so does an item
+  of the View menu, checked while it is. The reference of
+  keyboard shortcuts lists the key under Views, and whether the panel is
+  shown is remembered between runs.
 - Keyboard shortcuts, the ones established photography tools use for
   the same things: G and E for the thumbnail grid and the image viewer,
   Enter to open the current photo in the viewer from the grid, Esc from
@@ -148,14 +152,24 @@ Nothing has been released yet.
   Help. The view, the mode and the docks shown are checked, and the
   zoom's items can be chosen when the toolbar's zoom controls can. Its
   items stand down while a dialog is open, as the shortcuts do.
-- The window opens at 1280 × 800 points the first time and cannot be made
-  smaller, so every part of it fits on a handheld's screen.
-- Dragging the title bar moves the window, and double-clicking it maximizes
-  or restores the window. On Windows and Linux the title bar has the close,
-  maximize and minimize buttons, and the window resizes from any edge or
-  corner; on macOS the system's own window buttons sit on the title bar.
+- A settings gear on the title bar opens Settings, which offers Paper,
+  Graphite, Nexus and Dark themes, plus System, which follows the OS
+  (Paper when it is light, Nexus otherwise). The app starts in Nexus,
+  and the theme chosen is remembered between runs.
+- Settings offers a choice of how Info writes when a photo was taken,
+  "2026-08-15 10:20:30 UTC+02:00" or "15 August 2026 at 10:20:30
+  (UTC+02:00)", and of how it counts a file's size, in decimal units,
+  "52.3 MB", or in binary ones, "49.9 MiB", where 1 KiB is 1,024
+  bytes. Info, and the panel over the viewer's photo, show a new choice
+  at once, and both are remembered between runs.
+- An About dialog shows the app's version, copyright and licence, and
+  links to its home page. On Windows and Linux the app's icon at the left
+  of the title bar opens it; on macOS, the app menu.
 - The app has an icon, shown on its window, in the taskbar or Dock, and on
   the Windows executable. Under Wayland the desktop shows it only for an
   installed package, which provides the icon through its desktop entry.
 - The project is licensed under the GNU General Public License, version 3 or
   (at your option) any later version.
+
+[Unreleased]: https://github.com/kuolas/photography-workbench/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/kuolas/photography-workbench/releases/tag/v0.1.0

@@ -34,8 +34,8 @@ body:
   - type: input
     id: commit
     attributes:
-      label: Commit
-      description: Nothing has been released yet, so the commit you built is the version — `git rev-parse --short HEAD`.
+      label: Version or commit
+      description: The version About shows, such as 0.1.0, or for a clone of the repository, the commit you built — `git rev-parse --short HEAD`.
     validations:
       required: true
   - type: input
