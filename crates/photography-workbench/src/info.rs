@@ -41,7 +41,7 @@
 
 use std::fmt::Write as _;
 
-use catalog::photos::Photo;
+use catalog::photos::{Kind, Photo};
 use desktop_ui::theme::Palette;
 use desktop_ui::{dock, fonts};
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
@@ -228,7 +228,7 @@ pub fn show(
         };
         ui.add_space(BOX_GAP);
         group(ui, palette, "Image Information", |ui| {
-            image_rows(ui, palette, details, times);
+            image_rows(ui, palette, photo, details, times);
         });
         ui.add_space(BOX_GAP);
         group(ui, palette, "Shooting Information", |ui| {
@@ -281,14 +281,21 @@ fn file_rows(
 
 /// Image Information's rows: when the photo was taken, written in `form`,
 /// the size of its image, for a RAW file the size of its largest preview
-/// and how many it holds, and which way it is laid out.
-fn image_rows(ui: &mut egui::Ui, palette: &Palette, details: &Details, form: TimeForm) {
+/// and how many it holds, and which way it is laid out. Whether `photo` is
+/// a RAW file decides the preview rows, whatever its `details` carry.
+fn image_rows(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    photo: &Photo,
+    details: &Details,
+    form: TimeForm,
+) {
     let metadata = details.metadata.as_ref();
     let captured = metadata.and_then(Metadata::capture_time);
     let captured = captured.map_or_else(|| NONE.to_owned(), |time| capture_time(time, form));
     row(ui, palette, "Capture time", &captured);
     row(ui, palette, "Image size", &pixel_size(image_size(details)));
-    if metadata.is_some() {
+    if matches!(photo.kind(), Kind::Raw(_)) {
         let largest = format!("{} (100 %)", pixel_size(details.largest));
         row(ui, palette, "Preview size", &largest);
         row(ui, palette, "Previews", &details.previews.len().to_string());
@@ -740,14 +747,14 @@ mod tests {
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable as _;
     use previews::Size;
-    use raw_files::{Rational, SignedRational};
+    use raw_files::{Metadata, Rational, SignedRational};
 
     use super::{
         Clock, SizeUnits, TimeForm, aperture, clock, compensation, exposure, file_size,
-        focal_length, iso, lens_text, makers_names, orientation, pixel_size, show, shutter_speed,
-        upright, want,
+        focal_length, image_rows, iso, lens_text, makers_names, orientation, pixel_size, show,
+        shutter_speed, upright, want,
     };
-    use crate::textures::{self, Textures};
+    use crate::textures::{self, Details, Textures};
 
     /// The dock wants the photo it shows decoded itself, after the views
     /// have wanted what they draw, so what its file holds comes even when
@@ -837,6 +844,53 @@ mod tests {
         harness.run();
         assert_eq!(harness.state().store.texture(&path, 256), None);
         harness.get_by_label("Image size: 600 × 400");
+    }
+
+    /// The preview rows belong to RAW files: a JPEG file shows none, even
+    /// when its details carry metadata, and a RAW file shows both.
+    #[test]
+    fn only_a_raw_file_shows_its_previews() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("DSC_0001.jpg"), b"").unwrap();
+        std::fs::write(dir.path().join("DSC_0002.nef"), b"").unwrap();
+        let list = PhotoList::read(dir.path()).unwrap();
+        let size = |width, height| Size { width, height };
+        let details = Details {
+            largest: size(600, 400),
+            bytes: 1,
+            previews: vec![size(300, 200), size(600, 400)],
+            metadata: Some(Metadata::default()),
+        };
+        let palette = Theme::Paper.palette();
+        for (name, shown) in [("DSC_0001.jpg", false), ("DSC_0002.nef", true)] {
+            let photo = list
+                .photos()
+                .iter()
+                .find(|photo| photo.name() == name)
+                .unwrap()
+                .clone();
+            let details = details.clone();
+            let mut fonts_installed = false;
+            let mut harness = Harness::builder().build_ui(move |ui| {
+                if !fonts_installed {
+                    desktop_ui::fonts::install(ui.ctx());
+                    fonts_installed = true;
+                    return;
+                }
+                image_rows(ui, &palette, &photo, &details, TimeForm::default());
+            });
+            harness.run();
+            harness.get_by_label("Image size: 600 × 400");
+            let rows = (
+                harness.query_by_label("Preview size: 600 × 400 (100 %)"),
+                harness.query_by_label("Previews: 2"),
+            );
+            assert_eq!(
+                (rows.0.is_some(), rows.1.is_some()),
+                (shown, shown),
+                "{name}"
+            );
+        }
     }
 
     fn rational(numerator: u32, denominator: u32) -> Rational {
