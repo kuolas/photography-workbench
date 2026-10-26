@@ -3,31 +3,72 @@
 A fast desktop app for culling photos: open a folder of RAW or JPEG files,
 flick through them, and keep the good ones. For macOS, Linux and Windows.
 
-**Status: early.** Nothing below works yet — the app opens an empty window
-with a title bar of its own. See the [roadmap](docs/ROADMAP.md) for the plan.
+**Status: 0.1.0, the first release.** It browses: choose a folder, look
+through its photos and read what the camera recorded. Marking the keepers
+comes next; see the [roadmap](docs/ROADMAP.md).
+
+## What it does today
+
+- **Browse folders** — a tree of the home folder and of every memory card
+  and drive mounted, which come and go as they are plugged in and out.
+- **See a folder's photos at once** — a grid of thumbnails made from the
+  previews cameras store in their files, so a folder of RAW files shows
+  as quickly as one of JPEGs.
+- **Look closely** — a viewer that fits the photo or shows it at 100 %,
+  zoomed with the mouse, a trackpad or the keyboard and moved by dragging,
+  with a filmstrip of the folder below.
+- **Read what the camera recorded** — the camera, the lens, when the
+  photo was taken and the exposure, in a panel beside the photo or over
+  it.
+- **Work from the keyboard** — the shortcuts established photography
+  tools use, listed in a reference the app opens.
+- **The same window on every system** — with a title bar of its own, a
+  menu bar at the top of the screen on macOS, and four themes.
+
+It reads the RAW files of Nikon cameras (NEF, NRW) and Sony cameras (ARW,
+SRF, SR2, ARQ), and JPEG files, through
+[raw-files](https://crates.io/crates/raw-files).
 
 ## What it will do
 
-- **Rename by EXIF** — name files from their capture date, camera and other
-  metadata.
-- **Rate sharpness** — spot blurred and out-of-focus shots at a glance.
-- **Pick keepers** — mark the photos worth keeping.
-- **Rate composition** — see how well each photo is framed.
-- **Cull RAW files fast** — show the JPEG preview embedded in every RAW file,
-  so browsing RAWs is as quick as browsing JPEGs.
+The app has three modes, one for each of a photographer's jobs. Library is
+the one that exists so far; the other two are in the window, disabled
+until they are built.
+
+- **Library** — pick the keepers, spot blurred and out-of-focus shots at
+  a glance, and see how well each photo is framed.
+- **Organizer** — bring photos in from a memory card, and rename them
+  from their capture date, camera and other metadata.
+- **Develop** — develop a RAW file into a picture.
 
 This app is meant to be local, fast and approachable, no account, no cloud.
 
 ## Build and run
 
-There are no releases yet. To build from source on macOS, Linux or Windows
-you need Rust 1.95 or later:
+Releases are source only for now: there are no installers or packaged
+builds yet. Download the source archive of a release from the
+[releases page](https://github.com/kuolas/photography-workbench/releases),
+or clone the repository. Building it on macOS, Linux or Windows needs Rust
+1.95 or later. To build and run the app:
+
+```sh
+cargo run --release
+```
+
+A release build takes longer than a debug build, as it optimises the
+whole program at once.
+
+To build and test it while working on it:
 
 ```sh
 cargo build
 cargo run
 cargo test
 ```
+
+On macOS, an app started with `cargo run` is not packaged as an
+application, so the app menu's title reads `photography-workbench` rather
+than Photography Workbench.
 
 The app needs a graphics card of the Vulkan, DirectX 12 or Metal class, as
 it shows photos in textures of up to 16384 pixels a side, which every such

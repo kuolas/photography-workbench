@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report this. photography-workbench is at a very early stage, so a short, reproducible report is the most useful kind.
+        Thanks for taking the time to report this. photography-workbench is at an early stage, so a short, reproducible report is the most useful kind.
 
         **A security problem does not belong here** — the tracker is public. Report it privately as [SECURITY.md](https://github.com/kuolas/photography-workbench/blob/master/SECURITY.md) describes.
   - type: textarea

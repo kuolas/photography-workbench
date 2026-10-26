@@ -6,14 +6,25 @@ requests live in the
 
 ## Where we are
 
-The repository, its license and its contribution process exist, and the
-decisions that shape the app are recorded
-([ADR009](architecture-decisions/adr009-raw-files-reads-raw-files.md) to
-[ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)).
-The app opens a window with a title bar of its own and a choice of
-themes; it does nothing else yet. The first release, 0.1.0, is being
-built, one pull request at a time, under
-[issue #4](https://github.com/kuolas/photography-workbench/issues/4).
+The first release, 0.1.0, ships Library's first milestone, Browse fast:
+
+- **A folder tree** — the home folder and every memory card and drive
+  mounted, to choose a folder from.
+- **A grid of thumbnails** — the folder's photos, shown from the previews
+  cameras store in their files.
+- **A viewer with a filmstrip** — one photo at a time, fitted or zoomed,
+  with the folder's photos in a row below.
+- **The photo's information** — what the camera recorded, beside the
+  photo or over it.
+- **The keyboard** — the views, the photos, the zoom and the docks,
+  driven from it.
+- **A window of its own** — the same on macOS, Linux and Windows.
+
+It was built one pull request at a time under
+[issue #4](https://github.com/kuolas/photography-workbench/issues/4), and
+the decisions that shape it are recorded in the
+[architecture decisions](architecture-decisions/README.md). Next in
+Library is picking the keepers.
 
 ## Three modes
 
@@ -80,6 +91,8 @@ JPEG files are read by raw-files too
 
 ## Smaller things after 0.1.0
 
+- A grid whose tiles stretch to fill its width, and a control for the
+  size of the thumbnails.
 - A full-screen view, and comparing two or four photos side by side.
 - Sorting by capture time.
 - A thumbnail cache on disk, so a folder opens as fast the second time.
