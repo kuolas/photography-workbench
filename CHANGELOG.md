@@ -79,9 +79,10 @@ Nothing has been released yet.
 - In Library's viewer, I shows or hides the current photo's information
   on a dark translucent panel at the viewer's top left, in labelled
   rows: when it was taken, the camera, the lens, the image's size in
-  pixels, its format and its size on disk, the focal length and ISO, and
-  the exposure with the exposure bias, each only where the file records
-  it, written as chosen in Settings. On macOS an item of the View menu
+  pixels, its format and its size on disk, the focal length, and the
+  exposure: the ISO, the shutter speed, the aperture and the exposure
+  bias, each only where the file records it, written as chosen in
+  Settings. On macOS an item of the View menu
   does the same, checked while the panel is turned on. The reference of
   keyboard shortcuts lists the key under Views, and whether the panel is
   shown is remembered between runs.
