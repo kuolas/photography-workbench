@@ -90,7 +90,7 @@ taken to name what is already known).
   out, as in ADR010.
 - The toolbar takes the controls the title bar's middle and a status bar
   would have held. With both side docks at their widest, at the
-  smallest window, it is about 440 points wide, and its controls must fit
+  smallest window, it is about 480 points wide, and its controls must fit
   that.
 - [ADR013](adr013-a-workspace-of-small-crates.md) lists trays among the
   window parts `desktop-ui` holds; there are none.
