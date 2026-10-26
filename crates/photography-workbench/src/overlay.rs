@@ -6,8 +6,9 @@
 //!
 //! Each row is a short label and its value: when the photo was taken, the
 //! camera, the lens, the image's size in pixels with its format and its
-//! size on disk, the focal length with the ISO, and the exposure with the
-//! exposure bias, each left out where the file does not record it
+//! size on disk, the focal length, and the exposure: the ISO, the shutter
+//! speed, the aperture and the exposure bias, each left out where the file
+//! does not record it
 //! ([`rows`]). The values are written by the Info dock's own functions
 //! ([`crate::info`]), as chosen in Settings. A file that records none of
 //! the rest has only the image's row.
@@ -77,10 +78,11 @@ const LENS: &str = "Lens";
 /// its size on disk.
 const IMAGE: &str = "Image";
 
-/// The label of the row saying the focal length and the ISO.
+/// The label of the row saying the focal length.
 const FOCAL: &str = "Focal";
 
-/// The label of the row saying the exposure and the exposure bias.
+/// The label of the row saying the exposure: the ISO, the shutter speed,
+/// the aperture and the exposure bias.
 const EXPOSURE: &str = "Exposure";
 
 /// What the panel says of `photo`, whose file a decode told `details` of,
@@ -89,10 +91,10 @@ const EXPOSURE: &str = "Exposure";
 /// was taken, written in `times`; [`CAMERA`], the camera's model, as
 /// [`info::makers_names`] writes it; [`LENS`] ([`info::lens`]); always
 /// [`IMAGE`], its size in pixels, its format and its size on disk counted
-/// in `sizes`, "8256 × 5504 · NEF · 52.3 MB"; [`FOCAL`], the focal length
-/// and the ISO, "70 mm · ISO 64", or the one recorded; and [`EXPOSURE`],
-/// the exposure and the exposure bias, "1/250 s at f/8 · −2/3 EV", or the
-/// part recorded. A file that records none of what the camera did, such
+/// in `sizes`, "8256 × 5504 · NEF · 52.3 MB"; [`FOCAL`], the focal length,
+/// "70 mm"; and [`EXPOSURE`], the ISO, the shutter speed, the aperture and
+/// the exposure bias, "ISO 64 · 1/250 s · f/8 · −2/3 EV", or the parts
+/// recorded. A file that records none of what the camera did, such
 /// as a JPEG that raw-files could not open or one whose EXIF block was
 /// stripped, has the one row.
 pub fn rows(
@@ -115,9 +117,14 @@ pub fn rows(
     };
     let shot = metadata.exposure();
     let focal = shot.focal_length().map(info::focal_length).and_then(known);
-    let iso = shot.iso().map(info::iso);
-    let exposure = info::exposure(shot.exposure_time(), shot.f_number());
-    let bias = shot.exposure_bias().map(info::compensation).and_then(known);
+    let exposure = side_by_side([
+        shot.iso().map(info::iso),
+        shot.exposure_time()
+            .map(info::shutter_speed)
+            .and_then(known),
+        shot.f_number().map(info::aperture).and_then(known),
+        shot.exposure_bias().map(info::compensation).and_then(known),
+    ]);
     [
         (
             TAKEN,
@@ -128,21 +135,19 @@ pub fn rows(
         (CAMERA, metadata.model().map(info::makers_names)),
         (LENS, metadata.lens().and_then(info::lens)),
         (IMAGE, Some(image)),
-        (FOCAL, side_by_side(focal, iso)),
-        (EXPOSURE, side_by_side(exposure, bias)),
+        (FOCAL, focal),
+        (EXPOSURE, exposure),
     ]
     .into_iter()
     .filter_map(|(label, value)| value.map(|value| (label, value)))
     .collect()
 }
 
-/// `first` and `second` side by side, or the one of them there is; `None`
-/// when neither is.
-fn side_by_side(first: Option<String>, second: Option<String>) -> Option<String> {
-    match (first, second) {
-        (Some(first), Some(second)) => Some([first, second].join(SEPARATOR)),
-        (first, second) => first.or(second),
-    }
+/// Those of `parts` there are, side by side in their order; `None` when
+/// none is.
+fn side_by_side(parts: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+    let parts: Vec<_> = parts.into_iter().flatten().collect();
+    (!parts.is_empty()).then(|| parts.join(SEPARATOR))
 }
 
 /// The id of the panel's node, by which screen readers and the tests
@@ -383,8 +388,9 @@ mod tests {
 
     /// A RAW file whose camera recorded everything has six rows: when it
     /// was taken, the camera's model without its make, the lens, the
-    /// image's size, format and size on disk, the focal length and ISO,
-    /// and the exposure with the exposure bias.
+    /// image's size, format and size on disk, the focal length, and the
+    /// exposure: the ISO, the shutter speed, the aperture and the exposure
+    /// bias.
     #[test]
     fn a_raw_file_recording_everything_has_six_rows() {
         let (_dir, photo) = photo("DSC_0001.NEF");
@@ -401,14 +407,17 @@ mod tests {
                 ("Camera", "Nikon Z 9".to_owned()),
                 ("Lens", "NIKKOR Z 70-200mm f/2.8 VR S".to_owned()),
                 ("Image", "8256 × 5504 · NEF · 52.3 MB".to_owned()),
-                ("Focal", "70 mm · ISO 64".to_owned()),
-                ("Exposure", "1/250 s at f/8 · \u{2212}2/3 EV".to_owned()),
+                ("Focal", "70 mm".to_owned()),
+                (
+                    "Exposure",
+                    "ISO 64 · 1/250 s · f/8 · \u{2212}2/3 EV".to_owned()
+                ),
             ]
         );
     }
 
     /// What the file does not record leaves its row out, and a row that
-    /// says two things says the one recorded; a fraction with a zero
+    /// says several things says those recorded; a fraction with a zero
     /// denominator, which is no value, says nothing either. The image's
     /// row, its size, format and size on disk, is always there, its size
     /// the visible image's the camera recorded, turned upright.
@@ -438,8 +447,7 @@ mod tests {
             [
                 row("Camera", "ILCE-7M4"),
                 image.clone(),
-                row("Focal", "ISO 64"),
-                row("Exposure", "1/250 s"),
+                row("Exposure", "ISO 64 · 1/250 s"),
             ]
         );
 
@@ -471,12 +479,20 @@ mod tests {
                 denominator: 0,
             })
             .with_iso(100)
+            .with_exposure_time(Rational {
+                numerator: 1,
+                denominator: 0,
+            })
+            .with_f_number(Rational {
+                numerator: 8,
+                denominator: 0,
+            })
             .with_exposure_bias(SignedRational {
                 numerator: 1,
                 denominator: 0,
             });
         let metadata = Metadata::default().with_exposure(no_number);
-        assert_eq!(said(metadata), [image.clone(), row("Focal", "ISO 100")]);
+        assert_eq!(said(metadata), [image.clone(), row("Exposure", "ISO 100")]);
 
         let upright = Metadata::default()
             .with_image_size(raw_files::Size {
