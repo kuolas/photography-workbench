@@ -91,7 +91,7 @@ impl Theme {
     pub const ALL: [Self; 4] = [Self::Paper, Self::Graphite, Self::Nexus, Self::Dark];
 
     /// Display name. It is also the value the app saves for the choice, so
-    /// renaming a theme resets users who chose it to System.
+    /// renaming a theme resets users who chose it to [`DEFAULT_CHOICE`].
     pub fn name(self) -> &'static str {
         match self {
             Self::Paper => "Paper",
@@ -186,14 +186,18 @@ impl Theme {
     }
 }
 
+/// The choice the app starts with when none is saved, or the one saved
+/// names no choice: Nexus.
+pub const DEFAULT_CHOICE: Option<Theme> = Some(Theme::Nexus);
+
 /// The theme to install for the user's `choice`, given the OS preference.
 ///
-/// `None`, "System", is Paper when the OS is light and Graphite when it is
+/// `None`, "System", is Paper when the OS is light and Nexus when it is
 /// dark or the platform doesn't report a preference.
 pub fn resolve(choice: Option<Theme>, ctx: &egui::Context) -> Theme {
     choice.unwrap_or_else(|| match ctx.system_theme() {
         Some(egui::Theme::Light) => Theme::Paper,
-        _ => Theme::Graphite, // OS dark, or preference unknown
+        _ => Theme::Nexus, // OS dark, or preference unknown
     })
 }
 
@@ -203,11 +207,22 @@ pub fn choice_name(choice: Option<Theme>) -> &'static str {
     choice.map_or("System", Theme::name)
 }
 
+/// The choice named `name`, its [`choice_name`]; `None` when `name` names
+/// no choice.
+pub fn choice_from_name(name: &str) -> Option<Option<Theme>> {
+    choices().find(|&choice| choice_name(choice) == name)
+}
+
+/// Every choice: System, `None`, first, then every theme, lightest to
+/// darkest.
+fn choices() -> impl Iterator<Item = Option<Theme>> {
+    std::iter::once(None).chain(Theme::ALL.map(Some))
+}
+
 /// A drop-down list of the theme choices, System first and then every
 /// theme, lightest to darkest. Picking one sets `choice`.
 pub fn picker(ui: &mut egui::Ui, id_salt: &str, choice: &mut Option<Theme>) -> egui::Response {
-    let choices = std::iter::once(None).chain(Theme::ALL.map(Some));
-    drop_down::show(ui, id_salt, choice, choices, choice_name)
+    drop_down::show(ui, id_salt, choice, choices(), choice_name)
 }
 
 /// The egui theme preference (`egui::Options::theme_preference`) that goes
@@ -520,6 +535,36 @@ mod tests {
         assert_eq!(p.text, v.widgets.noninteractive.fg_stroke.color);
         assert_eq!(p.link, v.hyperlink_color);
         assert_eq!(p.selection, v.selection.bg_fill);
+    }
+
+    /// Every choice is found again by its name; a name that is none is no
+    /// choice.
+    #[test]
+    fn a_choice_is_found_by_its_name() {
+        for choice in choices() {
+            assert_eq!(choice_from_name(choice_name(choice)), Some(choice));
+        }
+        assert_eq!(choice_from_name("Sepia"), None);
+    }
+
+    /// System is Paper under a light OS, and Nexus under a dark one or
+    /// one that tells nothing.
+    #[test]
+    fn system_is_paper_when_light_and_nexus_otherwise() {
+        let ctx = egui::Context::default();
+        let under = |os: Option<egui::Theme>| {
+            let input = egui::RawInput {
+                system_theme: os,
+                ..Default::default()
+            };
+            // A frame's textures must be taken, or egui panics on drop.
+            ctx.run_ui(input, |_| {}).textures_delta.clear();
+            resolve(None, &ctx)
+        };
+        assert_eq!(under(Some(egui::Theme::Light)), Theme::Paper);
+        assert_eq!(under(Some(egui::Theme::Dark)), Theme::Nexus);
+        assert_eq!(under(None), Theme::Nexus);
+        assert_eq!(resolve(Some(Theme::Dark), &ctx), Theme::Dark);
     }
 
     #[test]

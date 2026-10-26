@@ -34,7 +34,8 @@ const TITLE_BAR_ICONS: [(&str, char); 2] = [("settings", '⚙'), ("circle-questi
 
 /// The [`eframe::Storage`] key the theme choice is saved under, as the
 /// theme's [`Theme::name`], or `"System"` for none. The display name is the
-/// saved value, so renaming a theme resets users who chose it to System.
+/// saved value, so renaming a theme resets users who chose it to the
+/// default, [`theme::DEFAULT_CHOICE`].
 const THEME_KEY: &str = "theme";
 
 /// The [`eframe::Storage`] key how capture times are written is saved
@@ -156,8 +157,9 @@ impl PhotographyWorkbenchApp {
         // not apply, as in the grid.
         cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
         let saved = |key| cc.storage.and_then(|storage| storage.get_string(key));
-        let theme =
-            saved(THEME_KEY).and_then(|name| Theme::ALL.into_iter().find(|t| t.name() == name));
+        let theme = saved(THEME_KEY)
+            .and_then(|name| theme::choice_from_name(&name))
+            .unwrap_or(theme::DEFAULT_CHOICE);
         let capture_times = saved(CAPTURE_TIME_KEY)
             .and_then(|name| TimeForm::from_saved(&name))
             .unwrap_or_default();
@@ -1593,13 +1595,30 @@ mod tests {
             .get_by_role_and_label(Role::ComboBox, "Theme")
             .click();
         harness.run();
-        harness.get_by_label("Nexus").click();
+        harness.get_by_label("Graphite").click();
         harness.run();
-        assert_eq!(harness.state().resolved_theme, Some(Theme::Nexus));
+        assert_eq!(harness.state().resolved_theme, Some(Theme::Graphite));
 
         let mut storage = MemoryStorage::default();
         harness.state_mut().save(&mut storage);
-        assert_eq!(storage.get_string(THEME_KEY).as_deref(), Some("Nexus"));
+        assert_eq!(storage.get_string(THEME_KEY).as_deref(), Some("Graphite"));
+    }
+
+    /// The first run is in Nexus. A saved System stays System, and a saved
+    /// name that is no choice, as of a theme renamed since, is Nexus too.
+    #[test]
+    fn the_theme_is_nexus_unless_another_choice_is_saved() {
+        let harness = harness();
+        assert_eq!(harness.state().theme, Some(Theme::Nexus));
+        assert_eq!(harness.state().resolved_theme, Some(Theme::Nexus));
+        let restored = |name: &str| {
+            let mut storage = MemoryStorage::default();
+            storage.set_string(THEME_KEY, name.to_owned());
+            harness_from(&storage).state().theme
+        };
+        assert_eq!(restored("System"), None);
+        assert_eq!(restored("Paper"), Some(Theme::Paper));
+        assert_eq!(restored("Sepia"), Some(Theme::Nexus));
     }
 
     /// In every theme the title bar is filled with the docks' colour, so
