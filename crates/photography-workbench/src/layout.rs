@@ -26,13 +26,13 @@ use crate::mode::Layout;
 /// The width the left dock opens at the first time, and the widths it can
 /// be dragged to. With both side docks at their widest the window's centre
 /// keeps more than 300 points at the smallest the window can be.
-const LEFT_DOCK: (f32, std::ops::RangeInclusive<f32>) = (268.0, 200.0..=380.0);
+const LEFT_DOCK: (f32, std::ops::RangeInclusive<f32>) = (268.0, 200.0..=360.0);
 
 /// The width the right dock opens at the first time, and the widths it can
 /// be dragged to. With both side docks at their widest, at the smallest the
 /// window can be, the toolbar between them still holds its controls: it is
-/// about 440 points wide then.
-const RIGHT_DOCK: (f32, std::ops::RangeInclusive<f32>) = (270.0, 250.0..=410.0);
+/// about 480 points wide then (ADR019).
+const RIGHT_DOCK: (f32, std::ops::RangeInclusive<f32>) = (270.0, 250.0..=390.0);
 
 /// The height of the bottom dock, which holds the filmstrip: fixed, as
 /// the filmstrip's cells are.
@@ -46,6 +46,11 @@ const INFO: ((&str, char), &str) = (("info", 'ℹ'), "Info");
 /// name, which screen readers and the tests know it by.
 const FILMSTRIP_TOGGLE: ((&str, char), &str) =
     (("panel-bottom", '▁'), "Show or hide the filmstrip");
+
+/// The toolbar's toggle for the photo's information over the viewer's
+/// photo, as [`FILMSTRIP_TOGGLE`] is the filmstrip's.
+const PHOTO_INFORMATION_TOGGLE: ((&str, char), &str) =
+    (("badge-info", 'ℹ'), "Show or hide the photo's information");
 
 /// Which docks are shown, saved between runs. A dock the mode does not
 /// have is never shown, whatever it says here.
@@ -169,22 +174,65 @@ pub fn dock_toggles(
     clicked
 }
 
-/// The toolbar's toggle for the filmstrip, in a right-to-left layout, shown
-/// selected while the filmstrip is `shown`. It names in its tooltip the key
-/// combination that shows or hides the filmstrip on `surface`. Whether it
-/// was clicked.
+/// The toolbar's toggle for the filmstrip, shown selected while the
+/// filmstrip is `shown`. It names in its tooltip the key combination that
+/// shows or hides the filmstrip on `surface`. Whether it was clicked.
 pub fn filmstrip_toggle(
     ui: &mut egui::Ui,
     palette: &Palette,
     surface: Surface,
     shown: bool,
 ) -> bool {
-    let combination = keymap::key_combination_for(surface, Action::Dock(Side::Bottom));
-    let (icon, label) = FILMSTRIP_TOGGLE;
+    let toggle = ("filmstrip_toggle", FILMSTRIP_TOGGLE);
+    toolbar_toggle(
+        ui,
+        palette,
+        surface,
+        toggle,
+        Action::Dock(Side::Bottom),
+        shown,
+    )
+}
+
+/// The toolbar's toggle for the photo's information over the viewer's
+/// photo, shown selected while the information is `shown`. It names in its
+/// tooltip the key combination that shows or hides the information on
+/// `surface`. Whether it was clicked.
+pub fn photo_information_toggle(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    surface: Surface,
+    shown: bool,
+) -> bool {
+    let toggle = ("photo_information_toggle", PHOTO_INFORMATION_TOGGLE);
+    toolbar_toggle(
+        ui,
+        palette,
+        surface,
+        toggle,
+        Action::PhotoInformation,
+        shown,
+    )
+}
+
+/// A toggle at the toolbar's end, in its right-to-left layout: `toggle` is
+/// its id, its icon and its name. It is shown selected while what it
+/// toggles is `shown`, and names in its tooltip the key combination that
+/// does `action` on `surface`. Whether it was clicked.
+fn toolbar_toggle(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    surface: Surface,
+    toggle: (&str, ((&str, char), &str)),
+    action: Action,
+    shown: bool,
+) -> bool {
+    let (id, (icon, label)) = toggle;
+    let combination = keymap::key_combination_for(surface, action);
     // An id of its own, as what comes before it on the toolbar comes and
     // goes, and the ids egui gives by position would shift with it.
     let scope = egui::UiBuilder::new()
-        .id(egui::Id::new("filmstrip_toggle"))
+        .id(egui::Id::new(id))
         .layout(egui::Layout::right_to_left(egui::Align::Center));
     ui.scope_builder(scope, |ui| {
         toolbar::button(ui, palette, icon, label, shown, combination).clicked()
@@ -265,11 +313,11 @@ pub fn bottom_dock(
 
 #[cfg(test)]
 mod tests {
-    use super::{FILMSTRIP_TOGGLE, INFO};
+    use super::{FILMSTRIP_TOGGLE, INFO, PHOTO_INFORMATION_TOGGLE};
 
     #[test]
     fn every_icon_resolves() {
-        for ((name, _), label) in [INFO, FILMSTRIP_TOGGLE] {
+        for ((name, _), label) in [INFO, FILMSTRIP_TOGGLE, PHOTO_INFORMATION_TOGGLE] {
             assert!(desktop_ui::icons::resolves(name), "{label}: {name}");
         }
     }

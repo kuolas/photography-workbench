@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The photo's information over the viewer's photo: a few labelled rows on
-//! a dark, see-through panel at the viewer's top-left corner, which a key
-//! and, on macOS, the View menu show or hide.
+//! a dark, see-through panel at the viewer's top-left corner, which a key,
+//! a toggle on the toolbar and, on macOS, the View menu show or hide.
 //!
 //! Each row is a short label and its value: when the photo was taken, the
 //! camera, the lens, the image's size in pixels with its format and its

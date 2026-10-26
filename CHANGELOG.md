@@ -82,8 +82,9 @@ Nothing has been released yet.
   pixels, its format and its size on disk, the focal length, and the
   exposure: the ISO, the shutter speed, the aperture and the exposure
   bias, each only where the file records it, written as chosen in
-  Settings. On macOS an item of the View menu
-  does the same, checked while the panel is turned on. The reference of
+  Settings. A button on the toolbar beside the filmstrip's does the
+  same, lit while the panel is turned on, and on macOS so does an item
+  of the View menu, checked while it is. The reference of
   keyboard shortcuts lists the key under Views, and whether the panel is
   shown is remembered between runs.
 - In Library, with the viewer, the filmstrip under it shows the

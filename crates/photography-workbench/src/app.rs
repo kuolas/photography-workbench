@@ -831,14 +831,16 @@ impl eframe::App for PhotographyWorkbenchApp {
             let position = position(self.browser.photos());
             // The mode's own controls hold the app while the toolbar is
             // drawn, so the zoom controls read the viewer's zoom before it,
-            // and the filmstrip's toggle whether the filmstrip is shown, and
-            // a click on one is done after it, still before the bottom dock
-            // and the centre.
+            // the filmstrip's toggle whether the filmstrip is shown, and the
+            // information's whether it is turned on, and a click on one is
+            // done after it, still before the bottom dock and the centre.
             let zoom_shown = self.shows_viewer().then(|| self.zoom_shown(ui.ctx()));
             let mut zoomed = None;
             let surface = self.surface();
             let filmstrip_shown = parts.bottom_dock.then_some(self.docks.bottom);
             let mut filmstrip_toggled = false;
+            let information_shown = self.shows_viewer().then_some(self.info_overlay);
+            let mut information_toggled = false;
             let start = |ui: &mut egui::Ui| self.mode_controls(ui, &palette);
             let end = |ui: &mut egui::Ui| {
                 if let Some(position) = position {
@@ -855,6 +857,13 @@ impl eframe::App for PhotographyWorkbenchApp {
                     ui.add_space(ZOOM_GAP);
                     filmstrip_toggled = layout::filmstrip_toggle(ui, &palette, surface, shown);
                 }
+                // Beside the filmstrip's toggle, at the toolbar's own gap:
+                // the two choose what the viewer shows around the photo
+                // and over it.
+                if let Some(shown) = information_shown {
+                    information_toggled =
+                        layout::photo_information_toggle(ui, &palette, surface, shown);
+                }
             };
             toolbar::show(ui, "toolbar", &palette, start, end);
             if let Some(zooming) = zoomed {
@@ -862,6 +871,9 @@ impl eframe::App for PhotographyWorkbenchApp {
             }
             if filmstrip_toggled {
                 self.perform(ui.ctx(), Action::Dock(Side::Bottom));
+            }
+            if information_toggled {
+                self.perform(ui.ctx(), Action::PhotoInformation);
             }
         }
         // The same photos as the grid's, sharing the current one and the
@@ -1165,6 +1177,10 @@ mod tests {
 
     /// The toolbar's toggle for the bottom dock, the filmstrip's.
     const FILMSTRIP_TOGGLE: &str = "Show or hide the filmstrip";
+
+    /// The toolbar's toggle for the photo's information over the viewer's
+    /// photo.
+    const INFORMATION_TOGGLE: &str = "Show or hide the photo's information";
 
     /// A dock toggle hides its dock, and shows it again, and says which.
     #[test]
@@ -1871,6 +1887,47 @@ mod tests {
         press(&mut harness, Modifiers::NONE, Key::F6);
         assert!(!harness.state().docks.bottom);
         assert_eq!(toggled(&harness), Some(Toggled::False));
+    }
+
+    /// In the viewer the toggle for the photo's information is on the
+    /// toolbar, just left of the filmstrip's, at the toolbar's gap between
+    /// two controls, and shown selected while the information is turned
+    /// on. A click on it turns the information on, another turns it off,
+    /// and I does the same. The grid has no toggle.
+    #[test]
+    fn the_photo_information_s_toggle_is_on_the_toolbar_beside_the_filmstrip_s() {
+        let mut harness = viewer_harness();
+        let toggle = harness.get_by_label(INFORMATION_TOGGLE).rect();
+        let filmstrip = harness.get_by_label(FILMSTRIP_TOGGLE).rect();
+        let toolbar = panel(&harness, "toolbar");
+        assert!(toolbar.contains_rect(toggle), "{toggle:?} {toolbar:?}");
+        // The toolbar's gap between two controls, 6 points.
+        let gap = filmstrip.left() - toggle.right();
+        assert_eq!(gap, 6.0, "{toggle:?} {filmstrip:?}");
+        assert_eq!(
+            toggle.center().y,
+            filmstrip.center().y,
+            "{toggle:?} {filmstrip:?}"
+        );
+
+        let toggled = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let node = harness.get_by_label(INFORMATION_TOGGLE).accesskit_node();
+            node.toggled()
+        };
+        assert_eq!(toggled(&harness), Some(Toggled::False));
+        for shown in [true, false] {
+            harness.get_by_label(INFORMATION_TOGGLE).click();
+            harness.run();
+            assert_eq!(harness.state().info_overlay, shown);
+            assert_eq!(toggled(&harness), Some(Toggled::from(shown)));
+        }
+        press(&mut harness, Modifiers::NONE, Key::I);
+        assert!(harness.state().info_overlay);
+        assert_eq!(toggled(&harness), Some(Toggled::True));
+
+        harness.get_by_label("Thumbnail grid").click();
+        harness.run();
+        assert!(harness.query_by_label(INFORMATION_TOGGLE).is_none());
     }
 
     /// The viewer and its filmstrip are filled with the viewer's backdrop;
@@ -5283,9 +5340,10 @@ mod tests {
     }
 
     /// With both side docks at their widest, at the window's smallest, the
-    /// toolbar holds, from the left, the view buttons, the filmstrip's
-    /// toggle, the zoom controls and the count with the last of a thousand
-    /// photos current, none over another.
+    /// toolbar holds, from the left, the view buttons, the toggle for the
+    /// photo's information, the filmstrip's toggle, the zoom controls and
+    /// the count with the last of a thousand photos current, none over
+    /// another.
     #[test]
     fn the_toolbar_holds_its_controls_at_its_narrowest() {
         let dir = folder_of_numbered_photos(1000);
@@ -5301,11 +5359,19 @@ mod tests {
         harness.run();
         let toolbar = panel(&harness, "toolbar");
         let viewer = harness.get_by_label("Image viewer").rect();
+        let information = harness.get_by_label(INFORMATION_TOGGLE).rect();
         let toggle = harness.get_by_label(FILMSTRIP_TOGGLE).rect();
         let out = harness.get_by_label("Zoom out").rect();
         let full = harness.get_by_label("Zoom to 100 %").rect();
         let count = harness.get_by_label("1000 of 1000").rect();
-        assert!(viewer.right() < toggle.left(), "{viewer:?} {toggle:?}");
+        assert!(
+            viewer.right() < information.left(),
+            "{viewer:?} {information:?}"
+        );
+        assert!(
+            information.right() < toggle.left(),
+            "{information:?} {toggle:?}"
+        );
         assert!(toggle.right() < out.left(), "{toggle:?} {out:?}");
         assert!(full.right() < count.left(), "{full:?} {count:?}");
         assert!(count.right() <= toolbar.right(), "{count:?} {toolbar:?}");
