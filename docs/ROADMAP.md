@@ -70,11 +70,13 @@ whose milestones unlock the ones above:
 | 1 and 2, embedded previews of NEF and ARW files (released as 0.1.0) | Browse fast |
 | 3, basic metadata: capture time, camera, lens, exposure, orientation, sizes (released as 0.2.0) | The Info dock's camera data; later, Rename by EXIF and sorting by capture time |
 | 4, focus points in image coordinates (released as 0.3.0) | Rate sharpness |
-| 5, the sensor data; 6, development to a linear image with its colour model | Develop a RAW file |
+| 5, plain JPEG files: their metadata and the smaller copies of their picture (released as 0.4.0) | A camera JPEG's camera data in the Info dock, and its thumbnails as quick as a RAW file's |
+| 7, the sensor data; 8, development to a linear image with its colour model | Develop a RAW file |
 
 The cameras the app can open are the ones raw-files reads: Nikon NEF and
 Sony ARW first, then DNG, Canon and Fujifilm in raw-files' order. Plain
-JPEG files open directly.
+JPEG files are read by raw-files too
+([ADR018](architecture-decisions/adr018-raw-files-reads-jpeg-files-too.md)).
 
 ## Smaller things after 0.1.0
 

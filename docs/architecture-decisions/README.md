@@ -14,7 +14,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR006](adr006-ai-assisted-contributions.md) | AI-assisted contributions | Accepted |
 | [ADR007](adr007-egui-cross-platform.md) | egui, on macOS, Linux and Windows | Accepted |
 | [ADR008](adr008-lints-and-release-profile.md) | No unsafe code, a few extra lints, an optimized release build | Accepted |
-| [ADR009](adr009-raw-files-reads-raw-files.md) | raw-files reads RAW files | Accepted |
+| [ADR009](adr009-raw-files-reads-raw-files.md) | raw-files reads RAW files | Accepted; amended by [ADR018](adr018-raw-files-reads-jpeg-files-too.md), which reads plain JPEG files through raw-files too |
 | [ADR010](adr010-modes-and-the-window.md) | Three modes in one window with its own title bar | Accepted; its parts of the window superseded by [ADR014](adr014-the-parts-of-the-window.md) |
 | [ADR011](adr011-views-navigation-and-the-keymap.md) | Views, navigation and the keymap | Accepted; its choice of keys superseded by [ADR015](adr015-the-keys.md) |
 | [ADR012](adr012-version-numbers.md) | Version numbers | Accepted |
@@ -23,6 +23,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR015](adr015-the-keys.md) | The keys | Accepted |
 | [ADR016](adr016-the-viewer-s-zoom.md) | The viewer's zoom | Accepted |
 | [ADR017](adr017-showing-and-hiding-the-docks.md) | Showing and hiding the docks | Accepted |
+| [ADR018](adr018-raw-files-reads-jpeg-files-too.md) | raw-files reads JPEG files too | Accepted |
 
 ## When to write one
 
