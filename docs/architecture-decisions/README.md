@@ -22,8 +22,9 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR014](adr014-the-parts-of-the-window.md) | The parts of the window | Accepted; amended by [ADR017](adr017-showing-and-hiding-the-docks.md), which puts the filmstrip's toggle on the toolbar |
 | [ADR015](adr015-the-keys.md) | The keys | Accepted |
 | [ADR016](adr016-the-viewer-s-zoom.md) | The viewer's zoom | Accepted |
-| [ADR017](adr017-showing-and-hiding-the-docks.md) | Showing and hiding the docks | Accepted |
+| [ADR017](adr017-showing-and-hiding-the-docks.md) | Showing and hiding the docks | Accepted; amended by [ADR019](adr019-the-photo-s-information-on-the-toolbar.md), which narrows the side docks for the photo's information's toggle |
 | [ADR018](adr018-raw-files-reads-jpeg-files-too.md) | raw-files reads JPEG files too | Accepted |
+| [ADR019](adr019-the-photo-s-information-on-the-toolbar.md) | The photo's information on the toolbar | Accepted |
 
 ## When to write one
 

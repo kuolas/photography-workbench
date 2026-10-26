@@ -1,6 +1,8 @@
 # ADR017: Showing and hiding the docks
 
-- Status: Accepted
+- Status: Accepted; amended by
+  [ADR019](adr019-the-photo-s-information-on-the-toolbar.md), which
+  narrows the side docks for the photo's information's toggle
 - Amends: [ADR014](adr014-the-parts-of-the-window.md), in one point:
   the filmstrip's toggle is on the toolbar, not in the title bar
 - Date: 2026-10-25
