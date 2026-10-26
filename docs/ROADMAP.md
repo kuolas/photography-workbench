@@ -68,7 +68,7 @@ whose milestones unlock the ones above:
 | raw-files milestone | What it unlocks here |
 |---|---|
 | 1 and 2, embedded previews of NEF and ARW files (released as 0.1.0) | Browse fast |
-| 3, basic metadata: capture time, camera, lens, exposure, orientation, sizes (released as 0.2.0) | The Info dock's camera data; later, Rename by EXIF and sorting by capture time |
+| 3, basic metadata: capture time, camera, lens, exposure, orientation, sizes (released as 0.2.0), and the camera's settings, such as the white balance (released as 0.5.0) | The Info dock's camera data; later, the camera's settings beside it, Rename by EXIF and sorting by capture time |
 | 4, focus points in image coordinates (released as 0.3.0) | Rate sharpness |
 | 5, plain JPEG files: their metadata and the smaller copies of their picture (released as 0.4.0) | A camera JPEG's camera data in the Info dock, and its thumbnails as quick as a RAW file's |
 | 7, the sensor data; 8, development to a linear image with its colour model | Develop a RAW file |
