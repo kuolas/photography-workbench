@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! What the tests decode, made in code so that no photo is committed:
-//! JPEGs encoded from flat colours ([`jpeg`], [`gray_jpeg`]), and the TIFF structures
-//! ([`Tiff`]) that a RAW file and a JPEG's EXIF block are built on.
+//! JPEGs encoded from flat colours ([`jpeg`], [`exif_jpeg`], [`gray_jpeg`]),
+//! and the TIFF structures ([`Tiff`]) that a RAW file and a JPEG's EXIF
+//! block are built on.
 
 use image::codecs::jpeg::JpegEncoder;
 use image::{ExtendedColorType, ImageEncoder, Rgb, RgbImage};
@@ -37,40 +38,63 @@ pub fn jpeg(
     right: [u8; 3],
     orientation: Option<u16>,
 ) -> Vec<u8> {
+    exif_jpeg(width, height, left, right, orientation.map(oriented))
+}
+
+/// A JPEG of `width` by `height` pixels, its left half `left` and its
+/// right half `right`, with `exif` as its EXIF block when there is one.
+pub fn exif_jpeg(
+    width: u32,
+    height: u32,
+    left: [u8; 3],
+    right: [u8; 3],
+    exif: Option<Tiff>,
+) -> Vec<u8> {
     let image = RgbImage::from_fn(width, height, |x, _| {
         Rgb(if x < width / 2 { left } else { right })
     });
-    encode(
-        image.as_raw(),
-        width,
-        height,
-        ExtendedColorType::Rgb8,
-        orientation,
-    )
+    encode(image.as_raw(), width, height, ExtendedColorType::Rgb8, exif)
 }
 
 /// A grayscale JPEG of `width` by `height` pixels, one grey all over,
 /// with an EXIF block giving `orientation` when there is one.
 pub fn gray_jpeg(width: u32, height: u32, orientation: Option<u16>) -> Vec<u8> {
     let pixels = vec![128; usize::try_from(width * height).unwrap()];
-    encode(&pixels, width, height, ExtendedColorType::L8, orientation)
+    encode(
+        &pixels,
+        width,
+        height,
+        ExtendedColorType::L8,
+        orientation.map(oriented),
+    )
 }
 
-/// `pixels` of `colour`, `width` by `height`, encoded as a JPEG with an
-/// EXIF block giving `orientation` when there is one.
+/// An EXIF block whose IFD0 gives `orientation` and nothing else.
+pub fn oriented(orientation: u16) -> Tiff {
+    let mut exif = Tiff::default();
+    let ifd0 = exif.ifd();
+    exif.short(ifd0, ORIENTATION, orientation);
+    exif
+}
+
+/// A JPEG segment of `marker` holding `payload`.
+pub fn segment(marker: u8, payload: &[u8]) -> Vec<u8> {
+    let length = u16::try_from(payload.len() + 2).unwrap();
+    [&[0xFF, marker][..], &length.to_be_bytes(), payload].concat()
+}
+
+/// `pixels` of `colour`, `width` by `height`, encoded as a JPEG with
+/// `exif` as its EXIF block when there is one.
 fn encode(
     pixels: &[u8],
     width: u32,
     height: u32,
     colour: ExtendedColorType,
-    orientation: Option<u16>,
+    exif: Option<Tiff>,
 ) -> Vec<u8> {
     let mut bytes = Vec::new();
     let mut encoder = JpegEncoder::new_with_quality(&mut bytes, 95);
-    if let Some(orientation) = orientation {
-        let mut exif = Tiff::default();
-        let ifd0 = exif.ifd();
-        exif.short(ifd0, ORIENTATION, orientation);
+    if let Some(exif) = exif {
         encoder.set_exif_metadata(exif.build()).unwrap();
     }
     encoder.write_image(pixels, width, height, colour).unwrap();

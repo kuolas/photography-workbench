@@ -2017,9 +2017,9 @@ mod tests {
     }
 
     /// Info shows a JPEG file's name, size on disk and format, when it was
-    /// taken, unknown, its size and which way it is laid out, in boxes
-    /// headed by what they hold, and says the camera's data is read from
-    /// RAW files only.
+    /// taken, its size and which way it is laid out, and what took it and
+    /// how, in boxes headed by what they hold; this one has no EXIF block,
+    /// so what the camera recorded is all "—".
     #[test]
     fn info_shows_what_a_jpeg_file_holds() {
         let dir = photos_folder();
@@ -2038,12 +2038,18 @@ mod tests {
             "Image size: 300 × 200",
             "Orientation: Landscape",
             "Shooting Information",
-            "Camera data is read from RAW files only.",
+            "Make: —",
+            "Model: —",
+            "Lens: —",
+            "Focal length: —",
+            "Exposure: —",
+            "ISO: —",
+            "Exposure bias: —",
         ];
         for label in shown {
             assert!(in_right_dock(&harness, label), "{label}");
         }
-        let not_shown = ["No photo selected", "Reading…", "ISO: —"];
+        let not_shown = ["No photo selected", "Reading…"];
         for label in not_shown {
             assert!(!in_right_dock(&harness, label), "{label}");
         }
@@ -2055,6 +2061,40 @@ mod tests {
                 .any(|node| dock.contains_rect(node.rect()));
             assert!(!shown, "{label}");
         }
+    }
+
+    /// A JPEG file whose frame header lies past more segments than
+    /// raw-files walks is shown, but tells nothing of what the camera
+    /// recorded: Info still shows Shooting Information's rows, each "—".
+    #[test]
+    fn info_shows_the_shooting_rows_of_a_jpeg_raw_files_refuses() {
+        let dir = photos_folder();
+        let photo = dir.path().join("DSC_0001.jpg");
+        let jpeg = crate::textures::jpeg(300, 200);
+        let sof = jpeg
+            .windows(2)
+            .position(|marker| marker == [0xFF, 0xC0])
+            .unwrap();
+        // Two thousand empty comments before the frame header.
+        let comments = [0xFF, 0xFE, 0x00, 0x02].repeat(2000);
+        std::fs::write(&photo, [&jpeg[..sof], &comments, &jpeg[sof..]].concat()).unwrap();
+        let (mut harness, _) = harness_on(None, vec![home(dir.path())]);
+        click(&mut harness, "Home");
+        let shown = [
+            "Image size: 300 × 200",
+            "Shooting Information",
+            "Make: —",
+            "Model: —",
+            "Lens: —",
+            "Focal length: —",
+            "Exposure: —",
+            "ISO: —",
+            "Exposure bias: —",
+        ];
+        for label in shown {
+            assert!(in_right_dock(&harness, label), "{label}");
+        }
+        assert!(!in_right_dock(&harness, "Reading…"));
     }
 
     /// A value too long for its row is cut short with "…", and shows whole
@@ -2181,8 +2221,6 @@ mod tests {
         for label in shown {
             assert!(in_right_dock(&harness, label), "{label}");
         }
-        let jpeg_only = "Camera data is read from RAW files only.";
-        assert!(!in_right_dock(&harness, jpeg_only));
     }
 
     /// Opens Settings and picks `choice` in its drop-down labelled

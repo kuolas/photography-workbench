@@ -9,8 +9,8 @@
 //! size on disk, the focal length with the ISO, and the exposure with the
 //! exposure bias, each left out where the file does not record it
 //! ([`rows`]). The values are written by the Info dock's own functions
-//! ([`crate::info`]), as chosen in Settings. A JPEG file's EXIF block is
-//! not read, so for one only the image's row is shown.
+//! ([`crate::info`]), as chosen in Settings. A file that records none of
+//! the rest has only the image's row.
 //!
 //! The labels stand in one column, and the values start in one column a
 //! little past the widest label. The panel is fixed to the viewer's
@@ -92,8 +92,9 @@ const EXPOSURE: &str = "Exposure";
 /// in `sizes`, "8256 × 5504 · NEF · 52.3 MB"; [`FOCAL`], the focal length
 /// and the ISO, "70 mm · ISO 64", or the one recorded; and [`EXPOSURE`],
 /// the exposure and the exposure bias, "1/250 s at f/8 · −2/3 EV", or the
-/// part recorded. A JPEG file records none of what the camera did, as far
-/// as the app reads it, so it has the one row.
+/// part recorded. A file that records none of what the camera did, such
+/// as a JPEG that raw-files could not open or one whose EXIF block was
+/// stripped, has the one row.
 pub fn rows(
     photo: &Photo,
     details: &Details,
@@ -508,10 +509,11 @@ mod tests {
         );
     }
 
-    /// A JPEG file, of which the app reads no camera data, has the one
-    /// row of the image's size, format and size on disk.
+    /// A file that records none of what the camera did, here a JPEG that
+    /// raw-files could not open, has the one row of the image's size,
+    /// format and size on disk.
     #[test]
-    fn a_jpeg_file_has_one_row() {
+    fn a_file_recording_nothing_of_the_camera_has_one_row() {
         let (_dir, photo) = photo("DSC_0001.jpg");
         let details = Details {
             largest: Size {
