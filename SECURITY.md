@@ -21,12 +21,10 @@ Bugs that are not security-sensitive go in the public
 
 ## Supported versions
 
-Nothing has been released yet. Once something is, only the latest release
-will receive security fixes.
+Only the latest release receives security fixes.
 
 ## Scope
 
-Nothing in the program reads untrusted input yet — it opens an empty window. A
-photo culling app will read image files and their metadata, which are
-untrusted input; once it does, crashes and memory-safety problems on malformed
-files will be the most valuable reports.
+The app reads image files and their metadata, RAW files and JPEG files, from
+any folder or memory card it is shown. They are untrusted input, so crashes
+and memory-safety problems on malformed files are the most valuable reports.
