@@ -1,6 +1,8 @@
 # ADR009: raw-files reads RAW files
 
-- Status: Accepted
+- Status: Accepted; amended by
+  [ADR018](adr018-raw-files-reads-jpeg-files-too.md), which reads plain
+  JPEG files through raw-files too
 - Date: 2026-10-14
 - Issue: #4
 
