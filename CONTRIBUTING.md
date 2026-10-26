@@ -1,8 +1,9 @@
 # Contributing to photography-workbench
 
 Thanks for your interest! photography-workbench is a desktop app for culling
-photos, written in Rust. It is at a very early stage — the scope is still
-being decided — so ideas, bug reports and small fixes are all welcome.
+photos, written in Rust. It is at an early stage — one of its three modes
+is built, and the scope is still settling — so ideas, bug reports and small
+fixes are all welcome.
 
 This page is the one place the project's rules live. It is short on purpose;
 if something here is unclear, that is a bug in this page, and an issue about it
