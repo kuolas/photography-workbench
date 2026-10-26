@@ -13,9 +13,10 @@
 //! a format raw-files reads or a JPEG's, and whose name does not start
 //! with a dot, is decoded as a thumbnail, on as many
 //! threads as the machine has cores, and the test fails listing those that
-//! could not be. A second test decodes each RAW file's largest preview
-//! whole, and fails listing those whose size it told before differs from
-//! the size decoded.
+//! could not be. A second test decodes each photo's largest image whole,
+//! a RAW file's largest preview or a JPEG file's own image, and fails
+//! listing those whose size the thumbnail's decode told differs from the
+//! size decoded.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -132,21 +133,17 @@ fn every_photo_of_the_local_corpus_decodes() {
     });
 }
 
-/// The size a thumbnail's decode tells of the largest preview is the one
-/// its frame header gives; decoded whole, the largest is measured by the
-/// decoder itself. The two must agree, or 100 % would change as larger
-/// decodes arrive.
+/// The size a thumbnail's decode tells of the largest image, a RAW
+/// file's largest preview or a JPEG file's own image, which it decodes
+/// from a smaller copy when it carries one, is the one its frame header
+/// gives; decoded whole, the largest is measured by the decoder itself.
+/// The two must agree, or 100 % would change as larger decodes arrive.
 #[test]
 #[ignore = "needs PW_LOCAL_CORPUS, a folder of photos"]
-fn every_raw_file_of_the_local_corpus_tells_its_largest_preview_s_true_size() {
-    let Some(mut photos) = corpus() else {
+fn every_photo_of_the_local_corpus_tells_its_largest_image_s_true_size() {
+    let Some(photos) = corpus() else {
         return;
     };
-    photos.retain(|path| {
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(is_raw)
-    });
     check_each(&photos, "measured", |path| {
         let told = previews::decode(path, LONGEST).map_err(|failure| failure.to_string())?;
         let whole = previews::decode(path, u32::MAX).map_err(|failure| failure.to_string())?;
