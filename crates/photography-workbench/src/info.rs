@@ -4,14 +4,14 @@
 //! photo's information, as a decode of its file told it
 //! ([`crate::textures::Details`]).
 //!
-//! The information is in three boxes, each headed by what it holds. File
-//! Information says the file's name, its size on disk and its format.
-//! Image Information says when the photo was taken, the size of its
-//! image, which way it is laid out and, for a RAW file, the largest
-//! preview it holds, which is what 100 % shows, and how many it holds.
-//! Shooting Information says what took the photo and how: the camera,
-//! the lens and the exposure, as a RAW file or a JPEG's EXIF block
-//! records them.
+//! The information is in three boxes, each headed by what it holds, the
+//! photo's own first and the file's last. Shooting Information says what
+//! took the photo and how: the camera, the lens and the exposure, as a RAW
+//! file or a JPEG's EXIF block records them. Image Information says when
+//! the photo was taken, the size of its image, which way it is laid out
+//! and, for a RAW file, the largest preview it holds, which is what 100 %
+//! shows, and how many it holds. File Information says the file's name,
+//! its size on disk and its format.
 //! Each row reads "Label: value", the value at the box's right edge, cut
 //! short with "…" where it does not fit and whole under the pointer then;
 //! a value the file does not record is "—".
@@ -216,26 +216,30 @@ pub fn show(
     };
     Frame::NONE.inner_margin(PADDING).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        group(ui, palette, "File Information", |ui| {
-            file_rows(ui, palette, photo, details, sizes);
-        });
+        let file_information = |ui: &mut egui::Ui| {
+            group(ui, palette, "File Information", |ui| {
+                file_rows(ui, palette, photo, details, sizes);
+            });
+        };
         let Some(details) = details else {
+            file_information(ui);
             ui.add_space(BOX_GAP);
             let reading =
                 failure.map_or_else(|| "Reading…".to_owned(), |failure| failure.to_string());
             note(ui, &reading);
             return;
         };
-        ui.add_space(BOX_GAP);
-        group(ui, palette, "Image Information", |ui| {
-            image_rows(ui, palette, photo, details, times);
-        });
-        ui.add_space(BOX_GAP);
         group(ui, palette, "Shooting Information", |ui| {
             // A file that records none of it has every row all the same.
             let metadata = details.metadata.as_ref();
             shooting_rows(ui, palette, metadata.unwrap_or(&Metadata::default()));
         });
+        ui.add_space(BOX_GAP);
+        group(ui, palette, "Image Information", |ui| {
+            image_rows(ui, palette, photo, details, times);
+        });
+        ui.add_space(BOX_GAP);
+        file_information(ui);
     });
 }
 
@@ -302,22 +306,32 @@ fn image_rows(
     row(ui, palette, "Orientation", orientation(details.largest));
 }
 
-/// Shooting Information's rows: the camera, the lens and the exposure, as
-/// `metadata` records them.
+/// Shooting Information's rows: [`shooting`] of `metadata`.
 fn shooting_rows(ui: &mut egui::Ui, palette: &Palette, metadata: &Metadata) {
+    for (label, value) in shooting(metadata) {
+        row(ui, palette, label, value.as_deref().unwrap_or(NONE));
+    }
+}
+
+/// What Shooting Information says of a photo whose file records
+/// `metadata`, a row apiece, each its label and its value: the camera's
+/// make and model, the lens, the focal length, then the exposure in the
+/// order the panel over the viewer's photo says it, the ISO, the shutter
+/// speed, the aperture and the exposure bias. A value the file does not
+/// record is `None`, which the row says as "—", as each value's own
+/// function writes one recorded as a fraction with a zero denominator.
+fn shooting(metadata: &Metadata) -> [(&'static str, Option<String>); 8] {
     let shot = metadata.exposure();
-    let rows = [
+    [
         ("Make", metadata.make().map(makers_names)),
         ("Model", metadata.model().map(makers_names)),
         ("Lens", metadata.lens().and_then(lens)),
         ("Focal length", shot.focal_length().map(focal_length)),
-        ("Exposure", exposure(shot.exposure_time(), shot.f_number())),
         ("ISO", shot.iso().map(iso)),
+        ("Shutter speed", shot.exposure_time().map(shutter_speed)),
+        ("Aperture", shot.f_number().map(aperture)),
         ("Exposure bias", shot.exposure_bias().map(compensation)),
-    ];
-    for (label, value) in rows {
-        row(ui, palette, label, value.as_deref().unwrap_or(NONE));
-    }
+    ]
 }
 
 /// A box headed `heading`, holding what `add_contents` adds.
@@ -505,19 +519,6 @@ pub fn iso(iso: u32) -> String {
         "ISO 65535 or more".to_owned()
     } else {
         format!("ISO {iso}")
-    }
-}
-
-/// How a photo was exposed, in one line: the exposure `time` at the
-/// aperture `f_number`, "1/2000 s at f/8", or the one of them known,
-/// "1/2000 s" or "f/8". `None` when neither is.
-pub fn exposure(time: Option<Rational>, f_number: Option<Rational>) -> Option<String> {
-    let known = |text: String| (text != NONE).then_some(text);
-    let time = time.map(shutter_speed).and_then(known);
-    let f_number = f_number.map(aperture).and_then(known);
-    match (time, f_number) {
-        (Some(time), Some(f_number)) => Some(format!("{time} at {f_number}")),
-        (time, f_number) => time.or(f_number),
     }
 }
 
@@ -746,11 +747,11 @@ mod tests {
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable as _;
     use previews::Size;
-    use raw_files::{Metadata, Rational, SignedRational};
+    use raw_files::{Exposure, Metadata, Rational, SignedRational};
 
     use super::{
-        Clock, SizeUnits, TimeForm, aperture, clock, compensation, exposure, file_size,
-        focal_length, image_rows, iso, lens_text, makers_names, orientation, pixel_size, show,
+        Clock, NONE, SizeUnits, TimeForm, aperture, clock, compensation, file_size, focal_length,
+        image_rows, iso, lens_text, makers_names, orientation, pixel_size, shooting, show,
         shutter_speed, upright, want,
     };
     use crate::textures::{self, Details, Textures};
@@ -1041,15 +1042,44 @@ mod tests {
         assert_eq!(iso(65_535), "ISO 65535 or more");
     }
 
-    /// The exposure is the time at the aperture, or the one of them the
-    /// file records, or nothing.
+    /// Shooting Information says the camera, the lens and the focal
+    /// length, then the ISO, the shutter speed, the aperture and the
+    /// exposure bias, each in a row of its own; what the file does not
+    /// record, or records as a fraction with a zero denominator, is "—".
     #[test]
-    fn an_exposure_is_the_time_at_the_aperture() {
-        let (time, f_number) = (Some(rational(1, 2000)), Some(rational(8, 1)));
-        assert_eq!(exposure(time, f_number).as_deref(), Some("1/2000 s at f/8"));
-        assert_eq!(exposure(time, None).as_deref(), Some("1/2000 s"));
-        assert_eq!(exposure(None, f_number).as_deref(), Some("f/8"));
-        assert_eq!(exposure(None, None), None);
+    fn shooting_information_has_a_row_for_the_shutter_speed_and_the_aperture() {
+        let shot = Exposure::default()
+            .with_focal_length(rational(70, 1))
+            .with_iso(560)
+            .with_exposure_time(rational(1, 20))
+            .with_f_number(rational(45, 10))
+            .with_exposure_bias(signed(0, 1));
+        let metadata = Metadata::default()
+            .with_make("NIKON CORPORATION")
+            .with_model("NIKON Z 9")
+            .with_exposure(shot);
+        let rows = |metadata| {
+            shooting(&metadata)
+                .map(|(label, value)| format!("{label}: {}", value.as_deref().unwrap_or(NONE)))
+        };
+        assert_eq!(
+            rows(metadata),
+            [
+                "Make: Nikon Corporation",
+                "Model: Nikon Z 9",
+                "Lens: —",
+                "Focal length: 70 mm",
+                "ISO: ISO 560",
+                "Shutter speed: 1/20 s",
+                "Aperture: f/4.5",
+                "Exposure bias: 0 EV",
+            ]
+        );
+        let no_number = Exposure::default()
+            .with_exposure_time(rational(1, 0))
+            .with_f_number(rational(8, 0));
+        let said = rows(Metadata::default().with_exposure(no_number));
+        assert_eq!(&said[5..7], ["Shutter speed: —", "Aperture: —"]);
     }
 
     #[test]
