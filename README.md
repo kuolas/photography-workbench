@@ -3,6 +3,8 @@
 A fast desktop app for culling photos: open a folder of RAW or JPEG files,
 flick through them, and keep the good ones. For macOS, Linux and Windows.
 
+![Photography Workbench in Library mode: a photo of an airliner in the viewer, with its camera, lens and exposure on a panel over it and in the Info dock on the right, the folder tree on the left and the filmstrip below](docs/images/library.webp)
+
 **Status: 0.1.0, the first release.** It browses: choose a folder, look
 through its photos and read what the camera recorded. Marking the keepers
 comes next; see the [roadmap](docs/ROADMAP.md).
@@ -134,3 +136,9 @@ FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
 The Inter typeface in `crates/desktop-ui/assets/fonts/` is copyright The
 Inter Project Authors and licensed under the SIL Open Font License, version
 1.1; see [its licence](crates/desktop-ui/assets/fonts/LICENSE-Inter.txt).
+
+The screenshot `docs/images/library.webp` is copyright Alvaro Kuolas and
+licensed under the
+[Creative Commons Attribution-ShareAlike 4.0 International licence](https://creativecommons.org/licenses/by-sa/4.0/)
+(CC BY-SA 4.0), except for the photos it shows, which are copyright
+Alvaro Kuolas, all rights reserved, and are not covered by that licence.
