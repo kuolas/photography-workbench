@@ -62,7 +62,7 @@ const SYSTEM_FRAME: bool = cfg!(target_os = "macos");
 /// The title bar's frame: its fill and its margins. [`title_bar_left_pad`]
 /// counts on this frame's left margin.
 pub fn title_bar_frame(palette: &Palette) -> Frame {
-    Frame::NONE.fill(palette.title_bar).inner_margin(Margin {
+    Frame::NONE.fill(palette.panel).inner_margin(Margin {
         left: TITLE_BAR_LEFT_MARGIN,
         right: 0,
         top: 0,

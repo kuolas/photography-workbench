@@ -235,10 +235,9 @@ pub struct Palette {
     pub dark_mode: bool,
 
     // --- backgrounds ---
-    /// Panels: the menu bar and the main view (egui `panel_fill`).
+    /// Panels: the title bar, the docks and the bars, one surface (egui
+    /// `panel_fill`).
     pub panel: Color32,
-    /// The title bar.
-    pub title_bar: Color32,
     /// A strip of chrome set into a panel: one shade below
     /// [`Self::panel`] in every theme, so the two read as one family.
     pub strip: Color32,
@@ -311,8 +310,7 @@ impl Palette {
         Self {
             dark_mode: false,
             panel: hex(0xF3F1E9),           // main content paper
-            title_bar: hex(0xE7E3D8),       // a step below the paper
-            strip: hex(0xE2DDD0),           // a step below the title bar
+            strip: hex(0xE2DDD0),           // a step below the paper
             window: hex(0xFBF9F3),          // dialogs / menus, brighter paper
             field: hex(0xFFFDF7),           // inputs, brightest (soft, not pure white)
             chip: hex(0xE4DFD2),            // tiles sit just below the paper
@@ -342,7 +340,6 @@ impl Palette {
         Self {
             dark_mode: true,
             panel: Color32::DARK_GRAY,
-            title_bar: Color32::from_gray(48),
             strip: Color32::from_gray(70),
             window: Color32::from_gray(27),
             field: Color32::from_gray(10),
@@ -377,7 +374,6 @@ impl Palette {
         Self {
             dark_mode: true,
             panel: hex(0x333333),           // chrome bars and docks
-            title_bar: hex(0x262626),       // a step below the chrome
             strip: hex(0x292929),           // a shade below the chrome
             window: hex(0x242424),          // menus and dialogs, a step below the chrome
             field: hex(0x1A1A1A),           // text inputs sunk to the content-well tone
@@ -409,7 +405,6 @@ impl Palette {
         Self {
             dark_mode: true,
             panel: Color32::from_gray(27),
-            title_bar: Color32::from_gray(30),
             strip: Color32::from_gray(22),
             window: Color32::from_gray(27),
             field: Color32::from_gray(10),
