@@ -8,10 +8,12 @@
 //!
 //! What a file holds is told by its content, never its name, as raw-files
 //! tells its formats: a file that starts as every JPEG does is decoded as
-//! one, whole, and any other is opened with raw-files, which refuses what
-//! it does not read. Of a RAW file only an embedded preview is decoded,
-//! never the sensor data. raw-files opens a JPEG file too, for what its
-//! EXIF block records; a JPEG it refuses is decoded all the same.
+//! one, and any other is opened with raw-files, which refuses what it does
+//! not read. Of a RAW file only an embedded preview is decoded, never the
+//! sensor data. raw-files opens a JPEG file too, for what its EXIF block
+//! records and the smaller copies of its picture it carries, one of which
+//! is decoded in its place when it is long enough; a JPEG raw-files
+//! refuses is decoded whole all the same.
 
 use std::fmt;
 use std::fs::File;
@@ -47,6 +49,18 @@ const MAX_SIDE: u32 = 32_768;
 /// bytes a pixel, so it may have about 89 million pixels; the largest
 /// previews have 60 million.
 const MAX_PIXEL_BYTES: u64 = 512 * 1024 * 1024;
+
+/// How much a JPEG's smaller copy may differ in shape from the file's own
+/// image and still stand in for it, in percent: by how much the copy's
+/// width times the own image's height and its height times the own
+/// image's width differ, of the larger. Cameras round the sides of their
+/// copies, so a D600's 570 × 375 beside its 6016 × 4016 differs by 1.5 %,
+/// and Sony's 1616 × 1080 beside 6000 × 4000 by 0.25 %. A copy of
+/// another shape differs by far more: a 4:3 thumbnail of a 3:2 picture by
+/// 11 %, and one that an export turned a quarter left as it was by as
+/// much as the turn. A stale copy of the same shape, left by a half
+/// turn, a flip or a crop to the same shape, cannot be told apart.
+const SHAPE_TOLERANCE_PERCENT: u64 = 3;
 
 /// A width and a height in pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -112,8 +126,9 @@ impl Decoded {
     }
 
     /// The size of the image decoded, upright, before it was scaled down:
-    /// a JPEG's own size, or the size of the RAW file's preview that was
-    /// chosen, which may be smaller than the largest it holds.
+    /// the size of the image chosen, a JPEG's own or one of the smaller
+    /// copies it carries, or a RAW file's preview, which may be smaller
+    /// than the largest the file holds.
     pub fn full(&self) -> Size {
         self.full
     }
@@ -122,9 +137,9 @@ impl Decoded {
     /// was decoded: a JPEG's own size, or the size of the RAW file's
     /// largest preview. Showing the photo at 100 % shows this many pixels.
     ///
-    /// When the largest preview is the one decoded, this is
+    /// When the largest image is the one decoded, this is
     /// [`full`](Self::full), the size the decoder found; otherwise it is
-    /// the size the preview's own frame header gives, read when the file
+    /// the size the image's own frame header gives, read when the file
     /// was opened, which is where the decoder finds it too.
     pub fn largest(&self) -> Size {
         self.largest
@@ -166,18 +181,23 @@ impl Decoded {
 /// `longest` pixels: scaled down to that when it is longer, never scaled
 /// up. A `longest` of 0 is taken as 1.
 ///
-/// A JPEG file is decoded whole and turned upright by the orientation its
-/// own EXIF block gives, as raw-files reads it, with what the camera
-/// recorded there; one that raw-files refuses is turned upright by the
-/// orientation the decoder reads from the same block, and tells nothing
-/// of what the camera recorded. Of a RAW file's embedded previews, the
-/// smallest whose longer side is at least `longest` is decoded, or the
-/// largest when none is that long, and turned upright by the orientation
-/// the RAW file gives, which is the camera's at the moment of capture.
-/// Whichever is decoded, the upright size of every preview is told too,
-/// the largest's among them, and what the camera recorded, at no cost:
+/// Of a JPEG file's own image and the smaller copies of it the file
+/// carries, such as its EXIF thumbnail and the images its MPF index
+/// lists, of its own image's shape, the smallest whose longer side is at
+/// least `longest` is decoded, or its own image when none is that long or
+/// the copy cannot be decoded, unless the file cannot be read; either is
+/// turned upright by the orientation its EXIF block gives, as raw-files
+/// reads it, with what the camera recorded there. One that raw-files refuses is decoded
+/// whole, turned upright by the orientation the decoder reads from the
+/// same block, and tells nothing of what the camera recorded. Of a RAW
+/// file's embedded previews, the smallest whose longer side is at least
+/// `longest` is decoded, or the largest when none is that long, and
+/// turned upright by the orientation the RAW file gives, which is the
+/// camera's at the moment of capture; whichever is decoded, the upright
+/// size of every preview of the RAW file is told too, the largest's among
+/// them. What the camera recorded is told of either kind, at no cost, as
 /// raw-files measures every preview and reads the metadata when it opens
-/// the file. The file's size on disk is told for either kind.
+/// the file, and so is the file's size on disk.
 ///
 /// This reads the file and decodes it, which takes a while, so it belongs
 /// off the UI thread.
@@ -246,16 +266,38 @@ pub fn decode(path: &Path, longest: u32) -> Result<Decoded, Failure> {
 }
 
 /// The JPEG file `file`, `length` bytes long, decoded with its longer
-/// side at most `longest`; with the upright size of its own image and
-/// what the camera recorded in it, as raw-files reads them.
+/// side at most `longest`; with the upright size of its own image, which
+/// is its largest, and what the camera recorded in it, as raw-files
+/// reads them.
 ///
-/// Its image is decoded from the file itself ([`jpeg_file`]), its bytes
-/// held once, and turned upright by the orientation raw-files reads,
-/// IFD0's.
+/// Its image is chosen as a RAW file's preview is, of the JPEG images
+/// raw-files lists, smallest first: the first whose longer side is at
+/// least `longest`, or else the largest. They are the file's own image,
+/// the preview that starts at its first byte, and the smaller copies of
+/// it the file carries, such as its EXIF thumbnail and the images its MPF
+/// index lists. Only copies smaller than its own image count: an MPF
+/// index may list a larger image too, such as an original kept for
+/// preservation, which is never decoded and never the largest. And only
+/// copies of its own image's shape: a 4:3 thumbnail of a 3:2 picture, or
+/// a copy that an export turned a quarter left as it was, would show the
+/// picture otherwise than it is. A stale copy of the same shape, left by
+/// a half turn, a flip or a crop to the same shape, cannot be told apart
+/// and may be decoded. Each is turned upright by the orientation
+/// raw-files reads, IFD0's.
 ///
-/// A JPEG that raw-files refuses is decoded whole. One longer than
-/// [`MAX_JPEG_BYTES`] is too large, and is refused before raw-files opens
-/// it.
+/// Only the copy chosen is tried, so a file that lists many copies that
+/// cannot be decoded costs one. It is read with raw-files and held twice
+/// while it is decoded, as a RAW file's preview is. When it cannot be
+/// decoded, being damaged, too large or coded in a way the decoder does
+/// not read, it is let go and the file's own image is decoded in its
+/// place; only a file that cannot be read stops the decode
+/// ([`gives_way`]). The file's own image is decoded from the file itself
+/// ([`jpeg_file`]), its bytes held once.
+///
+/// A JPEG that raw-files refuses, or of which it lists no image at the
+/// file's first byte, is decoded whole. One longer than
+/// [`MAX_JPEG_BYTES`] is too large, whatever copies it carries, and is
+/// refused before raw-files opens it.
 fn decode_jpeg_file(
     mut file: File,
     length: u64,
@@ -264,7 +306,7 @@ fn decode_jpeg_file(
     if length > MAX_JPEG_BYTES {
         return Err(Failure::TooLarge);
     }
-    let Ok(raw) = RawFile::from_reader(&mut file) else {
+    let Ok(mut raw) = RawFile::from_reader(&mut file) else {
         // raw-files refuses a JPEG whose structure it does not read, such
         // as one whose frame header lies past more segments than it walks,
         // which the decoder may read all the same: such a file is still
@@ -275,15 +317,86 @@ fn decode_jpeg_file(
         return Ok((jpeg, largest, None));
     };
     let metadata = raw.metadata().clone();
+    let own = jpegs(raw.previews())
+        .find(|preview| preview.byte_range().start == 0)
+        .copied();
+    let orientation = own.map_or(metadata.orientation(), |own| own.orientation());
+    // The smallest copy long enough, of those raw-files lists smallest
+    // first; the only one tried, so a file listing many damaged copies
+    // costs one.
+    let chosen = own.and_then(|own| {
+        smaller_copies(raw.previews(), &own)
+            .find(|copy| copy.width().max(copy.height()) >= longest)
+            .map(|copy| (own, copy))
+    });
+    if let Some((own, copy)) = chosen {
+        let decoded = raw
+            .read_preview(&copy)
+            .map_err(|error| Failure::from_raw(&error))
+            .and_then(|bytes| {
+                let orientation = Some(upright_by(copy.orientation()));
+                decode_jpeg(Cursor::new(bytes), orientation, longest, MAX_PIXEL_BYTES)
+            });
+        match decoded {
+            Ok(jpeg) => {
+                // As its frame header gives it, which raw-files read.
+                let largest =
+                    upright_size(own.width(), own.height(), upright_by(own.orientation()));
+                return Ok((jpeg, largest, Some(metadata)));
+            }
+            Err(failure) if gives_way(failure) => {}
+            Err(failure) => return Err(failure),
+        }
+    }
     drop(raw);
     let jpeg = decode_jpeg(
         jpeg_file(file)?,
-        Some(upright_by(metadata.orientation())),
+        Some(upright_by(orientation)),
         longest,
         MAX_PIXEL_BYTES,
     )?;
     let largest = jpeg.full;
     Ok((jpeg, largest, Some(metadata)))
+}
+
+/// The JPEGs of `previews`, in their order, smaller than `own`, the
+/// file's own image, and of its shape: those whose longer side is shorter
+/// than its own's, neither side longer than its own's side, and whose
+/// shape is the own image's ([`same_shape`]).
+///
+/// A copy whose longer side is as long as the own image's is left out
+/// too: the own image, whose bytes are held once, is decoded instead.
+fn smaller_copies<'a>(
+    previews: &'a [Preview],
+    own: &'a Preview,
+) -> impl Iterator<Item = Preview> + 'a {
+    let longer = |preview: &Preview| preview.width().max(preview.height());
+    jpegs(previews)
+        .filter(move |preview| {
+            longer(preview) < longer(own)
+                && preview.width() <= own.width()
+                && preview.height() <= own.height()
+                && same_shape(preview, own)
+        })
+        .copied()
+}
+
+/// Whether `copy` has the shape of `own`, to within
+/// [`SHAPE_TOLERANCE_PERCENT`]. Both are compared as stored: every image
+/// of a JPEG file is turned upright by the same orientation, IFD0's.
+fn same_shape(copy: &Preview, own: &Preview) -> bool {
+    let across = u64::from(copy.width()) * u64::from(own.height());
+    let down = u64::from(copy.height()) * u64::from(own.width());
+    across.abs_diff(down) * 100 <= SHAPE_TOLERANCE_PERCENT * across.max(down)
+}
+
+/// Whether the smaller copy of a JPEG chosen to be decoded, which failed
+/// with `failure`, gives way to the file's own image: unless the file
+/// cannot be read, which its own image cannot be either. raw-files lists
+/// a copy by its frame header alone, so one it lists may be damaged, too
+/// large, or coded in a way the decoder does not read.
+fn gives_way(failure: Failure) -> bool {
+    !matches!(failure, Failure::Unreadable(_))
 }
 
 /// Whether the file starts as every JPEG does. A file too short to hold
@@ -494,7 +607,7 @@ fn turns(orientation: Orientation) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fixtures::{self, BLUE, GREEN, RED, Tiff, YELLOW, near};
+    use crate::fixtures::{self, BLUE, CYAN, GREEN, MAGENTA, RED, Tiff, YELLOW, near};
     use std::fs;
     use std::io;
     use std::path::PathBuf;
@@ -750,6 +863,189 @@ mod tests {
         );
         let (top, bottom) = ends(photo.image(), false);
         assert!(near(top, RED) && near(bottom, GREEN), "{top:?} {bottom:?}");
+    }
+
+    /// A `width` by `height` size.
+    fn sized(width: u32, height: u32) -> Size {
+        Size { width, height }
+    }
+
+    /// A JPEG file as a camera writes one, 800 × 600, left half red and
+    /// right half green, shown upright by `orientation`: holding
+    /// `thumbnail` in its EXIF block, and `copies` after its own image,
+    /// listed in its MPF index.
+    fn camera_jpeg(orientation: u16, thumbnail: Vec<u8>, copies: &[Vec<u8>]) -> Vec<u8> {
+        let exif = fixtures::thumbnailed(orientation, thumbnail);
+        let main = fixtures::exif_jpeg(800, 600, RED, GREEN, Some(exif));
+        fixtures::with_images(&main, copies)
+    }
+
+    /// A camera's EXIF thumbnail, 160 × 120, left half cyan and right half
+    /// magenta.
+    fn thumbnail() -> Vec<u8> {
+        fixtures::jpeg(160, 120, CYAN, MAGENTA, None)
+    }
+
+    /// A smaller copy of the picture, 400 × 300, left half blue and right
+    /// half yellow.
+    fn copy() -> Vec<u8> {
+        fixtures::jpeg(400, 300, BLUE, YELLOW, None)
+    }
+
+    /// An image larger than the picture, 1600 × 1200, left half green and
+    /// right half red, as an original kept for preservation.
+    fn original() -> Vec<u8> {
+        fixtures::jpeg(1600, 1200, GREEN, RED, None)
+    }
+
+    /// The stored sizes of the previews raw-files lists in `file`.
+    fn listed(file: &[u8]) -> Vec<(u32, u32)> {
+        let raw = RawFile::from_reader(Cursor::new(file)).unwrap();
+        let sizes = raw.previews().iter();
+        sizes
+            .map(|preview| (preview.width(), preview.height()))
+            .collect()
+    }
+
+    /// The left and right halves of `photo`'s image are `left` and `right`.
+    fn halves(photo: &Decoded, left: [u8; 3], right: [u8; 3]) -> bool {
+        let (have_left, have_right) = ends(photo.image(), true);
+        near(have_left, left) && near(have_right, right)
+    }
+
+    #[test]
+    fn a_jpeg_s_smallest_copy_long_enough_is_decoded() {
+        let file = camera_jpeg(1, thumbnail(), &[copy(), original()]);
+        assert_eq!(
+            listed(&file),
+            [(160, 120), (400, 300), (800, 600), (1600, 1200)]
+        );
+        for longest in [161, 200, 400] {
+            let photo = decoded(&file, longest).unwrap();
+            assert_eq!(photo.full(), sized(400, 300), "{longest}");
+            assert_eq!(photo.largest(), sized(800, 600), "{longest}");
+            assert_eq!(size(photo.image()).0, longest);
+            assert!(halves(&photo, BLUE, YELLOW), "{longest}");
+        }
+    }
+
+    #[test]
+    fn a_jpeg_s_exif_thumbnail_is_decoded_when_long_enough() {
+        let file = camera_jpeg(1, thumbnail(), &[copy()]);
+        for longest in [100, 160] {
+            let photo = decoded(&file, longest).unwrap();
+            assert_eq!(photo.full(), sized(160, 120), "{longest}");
+            assert_eq!(photo.largest(), sized(800, 600), "{longest}");
+            assert!(halves(&photo, CYAN, MAGENTA), "{longest}");
+        }
+    }
+
+    /// Longer than every copy, a JPEG is decoded from its own image, never
+    /// scaled up.
+    #[test]
+    fn a_jpeg_longer_than_its_copies_is_decoded_from_its_own_image() {
+        let file = camera_jpeg(1, thumbnail(), &[copy()]);
+        for longest in [401, 800, u32::MAX] {
+            let photo = decoded(&file, longest).unwrap();
+            assert_eq!(photo.full(), sized(800, 600), "{longest}");
+            assert_eq!(photo.largest(), sized(800, 600), "{longest}");
+            assert_eq!(size(photo.image()).0, longest.min(800));
+            assert!(halves(&photo, RED, GREEN), "{longest}");
+        }
+    }
+
+    /// An image the MPF index lists that is larger than the JPEG's own,
+    /// as an original kept beside it, is neither decoded nor its largest.
+    #[test]
+    fn an_image_larger_than_a_jpeg_s_own_is_never_decoded_nor_its_largest() {
+        let file = camera_jpeg(1, thumbnail(), &[copy(), original()]);
+        for longest in [100, 801, 1600, u32::MAX] {
+            let photo = decoded(&file, longest).unwrap();
+            assert_eq!(photo.largest(), sized(800, 600), "{longest}");
+            if longest > 800 {
+                assert_eq!(photo.full(), sized(800, 600), "{longest}");
+                assert!(halves(&photo, RED, GREEN), "{longest}");
+            }
+        }
+    }
+
+    /// A copy of another shape than the JPEG's own image, as one turned a
+    /// quarter that a rotated export kept, or a 4:3 thumbnail of a 16:9
+    /// picture, is never decoded: the next copy or the own image is.
+    #[test]
+    fn a_copy_of_another_shape_is_never_decoded() {
+        let turned = fixtures::jpeg(300, 400, BLUE, YELLOW, None);
+        let file = camera_jpeg(1, thumbnail(), &[turned]);
+        assert_eq!(listed(&file), [(160, 120), (300, 400), (800, 600)]);
+        let photo = decoded(&file, 200).unwrap();
+        assert_eq!(photo.full(), sized(800, 600));
+        assert!(halves(&photo, RED, GREEN));
+
+        let exif = fixtures::thumbnailed(1, thumbnail());
+        let wide = fixtures::exif_jpeg(1600, 900, RED, GREEN, Some(exif));
+        assert_eq!(listed(&wide), [(160, 120), (1600, 900)]);
+        let photo = decoded(&wide, 100).unwrap();
+        assert_eq!(photo.full(), sized(1600, 900));
+        assert!(halves(&photo, RED, GREEN));
+    }
+
+    /// A copy whose shape differs from the own image's by little, as a
+    /// camera rounds the sides of its copies, is decoded: here by 1.5 %.
+    #[test]
+    fn a_copy_of_nearly_the_same_shape_is_decoded() {
+        let near_shape = fixtures::jpeg(406, 300, BLUE, YELLOW, None);
+        let file = camera_jpeg(1, thumbnail(), &[near_shape]);
+        let photo = decoded(&file, 200).unwrap();
+        assert_eq!(photo.full(), sized(406, 300));
+        assert!(halves(&photo, BLUE, YELLOW));
+    }
+
+    /// The copies are stored as the JPEG's own image is, so each is turned
+    /// upright by the orientation of IFD0: here a quarter turn clockwise,
+    /// which brings the left half to the top.
+    #[test]
+    fn a_jpeg_s_copy_is_turned_upright_by_its_orientation() {
+        let file = camera_jpeg(6, thumbnail(), &[copy()]);
+        for (longest, full, (top, bottom)) in [
+            (100, sized(120, 160), (CYAN, MAGENTA)),
+            (200, sized(300, 400), (BLUE, YELLOW)),
+        ] {
+            let photo = decoded(&file, longest).unwrap();
+            assert_eq!(photo.full(), full, "{longest}");
+            assert_eq!(photo.largest(), sized(600, 800), "{longest}");
+            assert_eq!(size(photo.image()).1, longest);
+            let (have_top, have_bottom) = ends(photo.image(), false);
+            assert!(
+                near(have_top, top) && near(have_bottom, bottom),
+                "{longest}: {have_top:?} {have_bottom:?}"
+            );
+        }
+    }
+
+    /// A copy that raw-files lists, its frame header whole, but that ends
+    /// before its image, gives way to the JPEG's own image.
+    #[test]
+    fn a_damaged_copy_of_a_jpeg_gives_way_to_its_own_image() {
+        let damaged = fixtures::cut_before_scan;
+        let file = camera_jpeg(1, thumbnail(), &[damaged(&copy())]);
+        assert_eq!(listed(&file), [(160, 120), (400, 300), (800, 600)]);
+        let photo = decoded(&file, 200).unwrap();
+        assert_eq!(photo.full(), sized(800, 600));
+        assert_eq!(photo.largest(), sized(800, 600));
+        assert!(halves(&photo, RED, GREEN));
+    }
+
+    /// Only the copy chosen is tried: when it gives way, a larger copy,
+    /// intact and long enough, is not, and the JPEG's own image is
+    /// decoded. So a file listing many damaged copies costs one.
+    #[test]
+    fn no_other_copy_is_tried_after_the_chosen_one_gives_way() {
+        let damaged = fixtures::cut_before_scan;
+        let file = camera_jpeg(1, damaged(&thumbnail()), &[copy()]);
+        assert_eq!(listed(&file), [(160, 120), (400, 300), (800, 600)]);
+        let photo = decoded(&file, 100).unwrap();
+        assert_eq!(photo.full(), sized(800, 600));
+        assert!(halves(&photo, RED, GREEN));
     }
 
     /// A NEF holding a 160 × 120 preview, left half red and right half
@@ -1008,6 +1304,16 @@ mod tests {
             .set_len(MAX_JPEG_BYTES + 1)
             .unwrap();
         assert_eq!(decode(&path, 512), Err(Failure::TooLarge));
+        // One carrying a copy that would be long enough.
+        let jpeg = camera_jpeg(1, thumbnail(), &[copy()]);
+        let (_dir, path) = file("huge.jpg", &jpeg);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(MAX_JPEG_BYTES + 1)
+            .unwrap();
+        assert_eq!(decode(&path, 256), Err(Failure::TooLarge));
     }
 
     /// A grayscale JPEG shown whole holds, at once, its decoded pixels
@@ -1059,6 +1365,24 @@ mod tests {
             let raw = raw_files::Orientation::from_exif(value).unwrap();
             assert_eq!(u16::from(upright_by(raw).to_exif()), value);
             assert_eq!(turns(upright_by(raw)), raw.swaps_dimensions());
+        }
+    }
+
+    /// The JPEG decoder takes even a frame it does not decode, such as one
+    /// coded arithmetically, for damage, so no copy can be built that fails
+    /// otherwise: the rule is checked on its own.
+    #[test]
+    fn a_copy_gives_way_unless_the_file_cannot_be_read() {
+        for failure in [
+            Failure::Unsupported,
+            Failure::NoPreview,
+            Failure::Damaged,
+            Failure::TooLarge,
+        ] {
+            assert!(gives_way(failure), "{failure:?}");
+        }
+        for kind in [io::ErrorKind::NotFound, io::ErrorKind::Other] {
+            assert!(!gives_way(Failure::Unreadable(kind)), "{kind:?}");
         }
     }
 

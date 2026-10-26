@@ -37,7 +37,8 @@
 //! up to a step of [`STEP`] pixels, so resizing the window does not
 //! decode it again at every pixel, and no longer than the largest texture
 //! the graphics card takes ([`picture_side`]). A picture takes a while to
-//! decode, as it is a RAW file's largest preview, or a JPEG whole, so the
+//! decode, as it is decoded from one of the larger images the file holds,
+//! a RAW file's preview or a JPEG's own image or a large copy of it, so the
 //! photo's thumbnail at the largest size thumbnails are decoded at is
 //! wanted before it, as a quick stand-in; while the picture is on its
 //! way, the best texture of the photo held is shown in its place, so a

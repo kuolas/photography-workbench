@@ -43,18 +43,21 @@ Nothing has been released yet.
   is expanded and selected is remembered between runs.
 - In Library, selecting a folder shows its photos, the RAW files of
   Nikon and Sony cameras and JPEG files, in the grid: a tile for each,
-  showing its name and its thumbnail, the current one outlined. A photo
-  that cannot be shown says why when the pointer rests on it. A
-  click makes a photo the current one, and a double-click, or Enter,
-  opens it in the viewer, which shows it alone, as large as the centre
-  allows and sharp at the screen's resolution, or why it cannot be shown
-  when the pointer rests on it. While it shows a photo, the next and the
-  previous are made ready, so stepping to either shows it sharp at once,
-  and "Loading…" shows under the photo when it takes a while. The
-  toolbar shows which photo of how many is the current one. The photos
-  are read again when the window comes back to the front, so photos
-  copied in meanwhile show, photos changed meanwhile show as they are
-  now, and the current photo stays the current one.
+  showing its name and its thumbnail, the current one outlined. A
+  camera's JPEG files show their thumbnails from the smaller copies the
+  camera stores in them, so a folder of them shows about as quickly as
+  one of RAW files. A photo that cannot be shown says why when the
+  pointer rests on it. A click makes a photo the current one, and a
+  double-click, or Enter, opens it in the viewer, which shows it alone,
+  as large as the centre allows and sharp at the screen's resolution, or
+  why it cannot be shown when the pointer rests on it. While it shows a
+  photo, the next and the previous are made ready, so stepping to either
+  shows it sharp at once, and "Loading…" shows under the photo when it
+  takes a while. The toolbar shows which photo of how many is the
+  current one. The photos are read again when the window comes back to
+  the front, so photos copied in meanwhile show, photos changed
+  meanwhile show as they are now, and the current photo stays the
+  current one.
 - In Library's viewer, a click on the photo switches between fitted
   and 100 %, where each pixel of the photo's largest image is a pixel
   of the screen, the point clicked brought to the middle. The mouse
