@@ -10,8 +10,8 @@
 //! image, which way it is laid out and, for a RAW file, the largest
 //! preview it holds, which is what 100 % shows, and how many it holds.
 //! Shooting Information says what took the photo and how: the camera,
-//! the lens and the exposure. A JPEG file's EXIF block is not read, so
-//! for one that box says the camera's data is read from RAW files only.
+//! the lens and the exposure, as a RAW file or a JPEG's EXIF block
+//! records them.
 //! Each row reads "Label: value", the value at the box's right edge, cut
 //! short with "…" where it does not fit and whole under the pointer then;
 //! a value the file does not record is "—".
@@ -87,7 +87,7 @@ const HEADING_ROOM: f32 = 4.0;
 /// The height of a row.
 const ROW_HEIGHT: f32 = 19.0;
 
-/// The size of a row's text, and of a note in place of rows.
+/// The size of a row's text, and of a note under a box.
 const ROW_TEXT: f32 = 12.5;
 
 /// The least room between a row's label and its value.
@@ -232,10 +232,9 @@ pub fn show(
         });
         ui.add_space(BOX_GAP);
         group(ui, palette, "Shooting Information", |ui| {
-            match &details.metadata {
-                Some(metadata) => shooting_rows(ui, palette, metadata),
-                None => note(ui, "Camera data is read from RAW files only."),
-            }
+            // A file that records none of it has every row all the same.
+            let metadata = details.metadata.as_ref();
+            shooting_rows(ui, palette, metadata.unwrap_or(&Metadata::default()));
         });
     });
 }
@@ -400,7 +399,7 @@ fn row(ui: &mut egui::Ui, palette: &Palette, label: &str, value: &str) {
     }
 }
 
-/// A line of `text`, dimmed, in place of rows or under a box.
+/// A line of `text`, dimmed, under a box.
 fn note(ui: &mut egui::Ui, text: &str) {
     let text = RichText::new(text).size(ROW_TEXT).weak();
     ui.add(Label::new(text).selectable(false).wrap());

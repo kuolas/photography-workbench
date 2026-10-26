@@ -253,10 +253,10 @@ pub struct Details {
     /// How many bytes the file takes on disk.
     pub bytes: u64,
     /// The upright sizes of the previews a RAW file holds, smallest first;
-    /// none for a JPEG file.
+    /// none for a JPEG file, whatever smaller copies of it it carries.
     pub previews: Vec<Size>,
-    /// What the camera recorded, read from a RAW file; `None` for a JPEG
-    /// file.
+    /// What the camera recorded, read from a RAW file or a JPEG's EXIF
+    /// block; `None` only for a JPEG file that raw-files could not open.
     pub metadata: Option<Metadata>,
 }
 
@@ -1357,7 +1357,15 @@ mod tests {
         let before = on_disk(&a);
         let details = store.details(&a).unwrap();
         assert_eq!(details.bytes, before);
-        assert_eq!((details.previews.len(), &details.metadata), (0, &None));
+        assert_eq!(details.previews.len(), 0);
+        let image_size = details.metadata.as_ref().and_then(Metadata::image_size);
+        assert_eq!(
+            image_size,
+            Some(raw_files::Size {
+                width: 400,
+                height: 300
+            })
+        );
         decoded(&mut store, &ctx, &b, 1024);
         assert_eq!(store.largest(&b), size(400, 300), "from a picture");
 
