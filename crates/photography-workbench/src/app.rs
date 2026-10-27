@@ -4358,7 +4358,7 @@ mod tests {
         let before = picture_side(&harness);
 
         harness.state_mut().textures.stall(true);
-        harness.set_size(PhotographyWorkbenchApp::MIN_WINDOW + egui::vec2(600.0, 400.0));
+        harness.set_size(PhotographyWorkbenchApp::MIN_WINDOW + egui::vec2(800.0, 400.0));
         let start = harness.ctx.input(|i| i.time) + 1.0;
         for later in [0.0, 0.5, 2.0] {
             frame_at(&mut harness, start + later);
