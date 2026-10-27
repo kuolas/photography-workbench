@@ -7,6 +7,7 @@ use catalog::photos::Photo;
 use desktop_ui::chrome::{self, TITLE_BAR_HEIGHT};
 use desktop_ui::dock::{self, Side};
 use desktop_ui::fonts;
+use desktop_ui::slider;
 use desktop_ui::style;
 use desktop_ui::theme::{self, Theme};
 use desktop_ui::toolbar;
@@ -58,6 +59,10 @@ const VIEW_KEY: &str = "view";
 /// information over its photo is saved under, as `"true"` or `"false"`.
 const INFO_OVERLAY_KEY: &str = "show_info_overlay";
 
+/// The [`eframe::Storage`] key the grid's thumbnail size is saved under,
+/// as the size in points written as a whole number, such as `"220"`.
+const THUMBNAIL_SIZE_KEY: &str = "thumbnail_size";
+
 /// The application state, owned by eframe for the life of the window.
 #[derive(Default)]
 pub struct PhotographyWorkbenchApp {
@@ -94,11 +99,18 @@ pub struct PhotographyWorkbenchApp {
     /// Whether Library's viewer shows the current photo's information on
     /// a panel over the photo, saved between runs.
     info_overlay: bool,
+    /// The smallest side of the grid's tiles, in points, chosen on the
+    /// toolbar and saved between runs.
+    thumbnail_size: f32,
     /// How many tiles the grid laid out in a row the last time it was
     /// drawn, which the keys that move a row up or down go by. `None`
     /// until it is drawn, and from a change of mode, view or docks shown
     /// until it is drawn again.
     grid_columns: Option<usize>,
+    /// How wide the grid laid its rows out the last time it was drawn,
+    /// which the sizes the slider snaps to depend on. `None` until it is
+    /// drawn.
+    grid_width: Option<f32>,
     /// Whether the Settings dialog is open.
     show_settings: bool,
     /// Whether the About dialog is open.
@@ -141,9 +153,11 @@ impl PhotographyWorkbenchApp {
     /// Called once, before the first frame. Installs the fonts and the
     /// style, and restores the saved theme choice, how capture times are
     /// written and file sizes counted, mode, docks and view, whether the
-    /// viewer shows the photo's information over its photo, and what is
-    /// expanded and selected in the folder tree; with none saved, or an
-    /// unreadable one, takes the default, the photo's information hidden.
+    /// viewer shows the photo's information over its photo, the grid's
+    /// thumbnail size, and what is expanded and selected in the folder
+    /// tree; with none saved, or an unreadable one, takes the default, the
+    /// photo's information hidden. A thumbnail size outside the range the
+    /// toolbar offers is held to its nearest end.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         fonts::install(&cc.egui_ctx);
         style::install(&cc.egui_ctx);
@@ -173,6 +187,10 @@ impl PhotographyWorkbenchApp {
             .and_then(|name| View::from_saved(&name))
             .unwrap_or_default();
         let info_overlay = saved(INFO_OVERLAY_KEY).is_some_and(|value| value == "true");
+        let thumbnail_size = saved(THUMBNAIL_SIZE_KEY)
+            .and_then(|value| value.parse::<f32>().ok())
+            .filter(|size| size.is_finite())
+            .map_or(grid::DEFAULT_SIZE, |size| grid::clamped(size.round()));
         let mut app = Self {
             theme,
             capture_times,
@@ -181,6 +199,7 @@ impl PhotographyWorkbenchApp {
             docks: Docks::restore(cc.storage),
             view,
             info_overlay,
+            thumbnail_size,
             browser: Browser::restore(cc.storage),
             mac_window_buttons: measure_mac_window_buttons(cc),
             menu: MacMenu::install(cc),
@@ -542,8 +561,10 @@ impl PhotographyWorkbenchApp {
                     list.photos(),
                     list.current(),
                     list.folder(),
+                    self.thumbnail_size,
                 );
                 self.grid_columns = Some(shown.columns);
+                self.grid_width = Some(shown.width);
                 if let Some(click) = shown.click {
                     self.browser.select_photo(click.index);
                     if click.open {
@@ -626,10 +647,36 @@ const ZOOM_BUTTONS: [(Zooming, &str, (&str, char)); 4] = [
 /// changes.
 const ZOOM_LABEL_WIDTH: f32 = 52.0;
 
-/// The room between the toolbar's count and the zoom controls, and between
-/// the zoom controls and the filmstrip's toggle, on top of the toolbar's gap
-/// between two controls, so they read apart.
+/// The room between the toolbar's count and the zoom controls or the slider
+/// for the thumbnail size, and between the zoom controls and the
+/// filmstrip's toggle, on top of the toolbar's gap between two controls,
+/// so they read apart.
 const ZOOM_GAP: f32 = 6.0;
+
+/// The name of the toolbar's slider for the size of the grid's
+/// thumbnails, which screen readers and its tooltip give.
+const THUMBNAIL_SIZE: &str = "Thumbnail size";
+
+/// The slider at the toolbar's end in Library's grid that sets `size`,
+/// the smallest side of the grid's tiles, from [`grid::SMALLEST_SIZE`] at
+/// its left end to [`grid::LARGEST_SIZE`] at its right.
+fn thumbnail_size_slider(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    size: &mut f32,
+) -> Option<f32> {
+    // An id of its own, as the count beside it comes and goes, and the
+    // ids egui gives by position would shift with it.
+    let scope = egui::UiBuilder::new()
+        .id(egui::Id::new("thumbnail_size"))
+        .layout(egui::Layout::right_to_left(egui::Align::Center));
+    ui.scope_builder(scope, |ui| {
+        let slider = slider::show(ui, palette, THUMBNAIL_SIZE, size, grid::SIZE_RANGE);
+        slider.response.on_hover_text(THUMBNAIL_SIZE);
+        slider.click
+    })
+    .inner
+}
 
 /// The zoom controls at the toolbar's end in Library's viewer, from the
 /// left: zoom out, the zoom shown ([`viewer::zoom_label`]), zoom in, fit
@@ -833,10 +880,14 @@ impl eframe::App for PhotographyWorkbenchApp {
             let position = position(self.browser.photos());
             // The mode's own controls hold the app while the toolbar is
             // drawn, so the zoom controls read the viewer's zoom before it,
-            // the filmstrip's toggle whether the filmstrip is shown, and the
-            // information's whether it is turned on, and a click on one is
-            // done after it, still before the bottom dock and the centre.
+            // the slider the grid's thumbnail size, the filmstrip's toggle
+            // whether the filmstrip is shown, and the information's whether
+            // it is turned on, and a click on one is done after it, and the
+            // size set kept, still before the bottom dock and the centre.
             let zoom_shown = self.shows_viewer().then(|| self.zoom_shown(ui.ctx()));
+            let shows_grid = self.mode == Mode::Library && self.view == View::Grid;
+            let mut thumbnail_size = shows_grid.then_some(self.thumbnail_size);
+            let mut size_clicked = None;
             let mut zoomed = None;
             let surface = self.surface();
             let filmstrip_shown = parts.bottom_dock.then_some(self.docks.bottom);
@@ -850,6 +901,10 @@ impl eframe::App for PhotographyWorkbenchApp {
                         .size(COUNT_SIZE)
                         .color(palette.text);
                     ui.add(egui::Label::new(text).selectable(false));
+                }
+                if let Some(size) = &mut thumbnail_size {
+                    ui.add_space(ZOOM_GAP);
+                    size_clicked = thumbnail_size_slider(ui, &palette, size);
                 }
                 if let Some(shown) = zoom_shown {
                     ui.add_space(ZOOM_GAP);
@@ -868,6 +923,33 @@ impl eframe::App for PhotographyWorkbenchApp {
                 }
             };
             toolbar::show(ui, "toolbar", &palette, start, end);
+            // A size picked by a drag of the slider is snapped to the
+            // largest at which as many tiles fit in a row, a whole number
+            // of points, so every move of the slider changes the grid; a
+            // click steps to the next of those sizes on its side of the
+            // knob, one tile more or fewer to a row, and on the knob
+            // itself to none. Until the grid has been drawn its width is
+            // unknown: a drag's size is then held to the point, and a
+            // click does nothing. A size not picked, as one restored, is
+            // left as it is: snapped to the window's width, it would not
+            // come back to its tiles when the window did.
+            if let Some(at) = size_clicked {
+                if let Some(width) = self.grid_width {
+                    let size = self.thumbnail_size;
+                    if at > size {
+                        self.thumbnail_size = grid::larger(width, size);
+                    } else if at < size {
+                        self.thumbnail_size = grid::smaller(width, size);
+                    }
+                }
+            } else if let Some(size) = thumbnail_size
+                && size != self.thumbnail_size
+            {
+                self.thumbnail_size = match self.grid_width {
+                    Some(width) => grid::snapped(width, size),
+                    None => size.round(),
+                };
+            }
             if let Some(zooming) = zoomed {
                 self.perform(ui.ctx(), Action::Zoom(zooming));
             }
@@ -957,6 +1039,7 @@ impl eframe::App for PhotographyWorkbenchApp {
         self.docks.save(storage);
         storage.set_string(VIEW_KEY, self.view.name().to_owned());
         storage.set_string(INFO_OVERLAY_KEY, self.info_overlay.to_string());
+        storage.set_string(THUMBNAIL_SIZE_KEY, self.thumbnail_size.to_string());
         self.browser.save(storage);
     }
 }
@@ -981,11 +1064,13 @@ mod tests {
     use catalog::folders::{Place, Root};
 
     use crate::disk::Disk;
+    use crate::grid;
 
     use super::{
         Action, CAPTURE_TIME_KEY, Docks, FILE_SIZES_KEY, Framing, INFO_OVERLAY_KEY, MODE_KEY, Mode,
-        PhotographyWorkbenchApp, Side, SizeUnits, THEME_KEY, TITLE_BAR_ICONS, Textures, Theme,
-        TimeForm, VIEW_KEY, View, ZOOM_BUTTONS, ZOOM_GAP, Zooming,
+        PhotographyWorkbenchApp, Side, SizeUnits, THEME_KEY, THUMBNAIL_SIZE, THUMBNAIL_SIZE_KEY,
+        TITLE_BAR_ICONS, Textures, Theme, TimeForm, VIEW_KEY, View, ZOOM_BUTTONS, ZOOM_GAP,
+        Zooming,
     };
 
     /// Settings kept in memory, in place of eframe's file.
@@ -1171,6 +1256,38 @@ mod tests {
 
         storage.set_string(VIEW_KEY, "Filmstrip".to_owned());
         assert_eq!(harness_from(&storage).state().view, View::Grid);
+    }
+
+    /// The grid's thumbnail size is saved as its number of points and
+    /// restored on the next run, to the point. An unreadable one, or one
+    /// that is not a finite number, starts at the default, 220 points, and
+    /// one outside the range the toolbar offers is held to its nearest
+    /// end.
+    #[test]
+    fn the_thumbnail_size_is_saved_and_restored() {
+        let mut storage = MemoryStorage::default();
+        let mut harness = harness();
+        harness.state_mut().save(&mut storage);
+        let saved = storage.get_string(THUMBNAIL_SIZE_KEY);
+        assert_eq!(saved.as_deref(), Some("220"));
+        harness.state_mut().thumbnail_size = 300.0;
+        harness.state_mut().save(&mut storage);
+        let saved = storage.get_string(THUMBNAIL_SIZE_KEY);
+        assert_eq!(saved.as_deref(), Some("300"));
+        assert_eq!(harness_from(&storage).state().thumbnail_size, 300.0);
+
+        let restored = |saved: &str| {
+            let mut storage = MemoryStorage::default();
+            storage.set_string(THUMBNAIL_SIZE_KEY, saved.to_owned());
+            harness_from(&storage).state().thumbnail_size
+        };
+        assert_eq!(restored("300"), 300.0);
+        assert_eq!(restored("187.5"), 188.0, "to the point");
+        assert_eq!(restored("abc"), 220.0);
+        assert_eq!(restored("NaN"), 220.0);
+        assert_eq!(restored("inf"), 220.0);
+        assert_eq!(restored("10"), 90.0);
+        assert_eq!(restored("1000"), 480.0);
     }
 
     /// The title bar's toggle for each side dock.
@@ -1906,6 +2023,31 @@ mod tests {
         press(&mut harness, Modifiers::NONE, Key::F6);
         assert!(!harness.state().docks.bottom);
         assert_eq!(toggled(&harness), Some(Toggled::False));
+    }
+
+    /// In the grid the slider for the thumbnail size is on the toolbar,
+    /// just left of the count, set apart from it, and level with it; the
+    /// viewer, which has the zoom controls there, has no slider.
+    #[test]
+    fn the_thumbnail_size_s_slider_is_on_the_toolbar_in_the_grid() {
+        let dir = folder_of_numbered_photos(3);
+        let mut harness = grid_harness(dir.path());
+        let slider = harness.get_by_label(THUMBNAIL_SIZE).rect();
+        let toolbar = panel(&harness, "toolbar");
+        assert!(toolbar.contains_rect(slider), "{slider:?} {toolbar:?}");
+        let count = harness
+            .query_all_by_label_contains(" of ")
+            .find(|node| toolbar.contains_rect(node.rect()))
+            .expect("no count")
+            .rect();
+        // On top of the toolbar's gap between two controls, 6 points.
+        let gap = count.left() - slider.right();
+        assert_eq!(gap, ZOOM_GAP + 6.0, "{slider:?} {count:?}");
+        assert_eq!(slider.center().y, count.center().y, "{slider:?} {count:?}");
+
+        click(&mut harness, "Image viewer");
+        harness.get_by_label("Zoom out");
+        assert!(harness.query_by_label(THUMBNAIL_SIZE).is_none());
     }
 
     /// In the viewer the toggle for the photo's information is on the
@@ -2963,6 +3105,143 @@ mod tests {
         assert!(named, "no name with its middle at {name_at:?}");
     }
 
+    /// Dragging the knob of the slider for the thumbnail size past its
+    /// right end makes the grid's tiles 480 points at least, fewer to a row
+    /// than at the default size; past its left end, less than the
+    /// default's 220 points, 90 at least, and more to a row. A drag to a
+    /// place between picks a whole number of points.
+    #[test]
+    fn the_slider_sets_the_tiles_size() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        let columns = tiles_in_a_row(&harness, 30);
+        let slider = harness.get_by_label(THUMBNAIL_SIZE).rect();
+        let fraction =
+            (grid::DEFAULT_SIZE - grid::SMALLEST_SIZE) / (grid::LARGEST_SIZE - grid::SMALLEST_SIZE);
+        let knob = slider.left_center() + egui::vec2(fraction * slider.width(), 0.0);
+        let past = egui::vec2(slider.width(), 0.0);
+
+        drag(&mut harness, knob, past);
+        assert_eq!(harness.state().thumbnail_size, grid::LARGEST_SIZE);
+        let tile = grid_tile(&harness, &photo(1)).expect("no tile");
+        assert!(tile.width() >= 480.0, "{tile:?}");
+        let fewer = tiles_in_a_row(&harness, 30);
+        assert!(fewer < columns, "{fewer} of {columns}");
+
+        // The left end: the largest size at which as many tiles fit as
+        // at the smallest, 90 or a little more.
+        drag(&mut harness, slider.right_center(), -2.0 * past);
+        let width = harness.state().grid_width.expect("not drawn");
+        let smallest = grid::snapped(width, grid::SMALLEST_SIZE);
+        assert_eq!(harness.state().thumbnail_size, smallest);
+        assert!((90.0..110.0).contains(&smallest), "{smallest}");
+        let tile = grid_tile(&harness, &photo(1)).expect("no tile");
+        assert!((90.0..220.0).contains(&tile.width()), "{tile:?}");
+        let more = tiles_in_a_row(&harness, 30);
+        assert!(more > columns, "{more} of {columns}");
+
+        // A third of the way along 110 points lands between points, and
+        // on a size the grid holds as many tiles of as of the size picked,
+        // the largest, which is the tiles' own width to the point.
+        let third = egui::vec2(slider.width() / 3.0, 0.0);
+        drag(&mut harness, slider.left_center(), third);
+        let picked = harness.state().thumbnail_size;
+        assert!((210.0..=240.0).contains(&picked), "{picked}");
+        assert_eq!(picked.fract(), 0.0, "{picked}");
+        let tile = grid_tile(&harness, &photo(1)).expect("no tile").width();
+        assert!(picked <= tile && tile < picked + 1.0, "{tile} for {picked}");
+        // The knob sits at that size. Dragged a little left, the same
+        // number of tiles fit, and the size stays; a little right, one
+        // fewer fits, and the size is the next the slider snaps to.
+        let same = tiles_in_a_row(&harness, 30);
+        let fraction = (picked - grid::SMALLEST_SIZE) / (grid::LARGEST_SIZE - grid::SMALLEST_SIZE);
+        let knob = slider.left_center() + egui::vec2(fraction * slider.width(), 0.0);
+        let little = egui::vec2(4.0, 0.0);
+        drag(&mut harness, knob, -little);
+        assert_eq!(harness.state().thumbnail_size, picked);
+        assert_eq!(tiles_in_a_row(&harness, 30), same);
+        drag(&mut harness, knob, little);
+        let next = harness.state().thumbnail_size;
+        assert!(next > picked, "{next}");
+        assert_eq!(tiles_in_a_row(&harness, 30), same - 1);
+        let tile = grid_tile(&harness, &photo(1)).expect("no tile").width();
+        assert!(next <= tile && tile < next + 1.0, "{tile} for {next}");
+    }
+
+    /// A size the slider did not pick, as one restored or set from the
+    /// keys, is left as it is, between the sizes the slider snaps to or
+    /// not: snapped to the window's width, it would not come back to its
+    /// tiles when the window did.
+    #[test]
+    fn a_size_not_picked_on_the_slider_is_left_as_it_is() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        harness.state_mut().thumbnail_size = 300.0;
+        harness.run();
+        assert_eq!(harness.state().thumbnail_size, 300.0);
+    }
+
+    /// A click on the slider steps the size to the next the slider snaps
+    /// to on the click's side of the knob, one tile fewer to a row right
+    /// of it, one more left of it, however far from the knob the click
+    /// is, and a click on the knob itself changes nothing.
+    #[test]
+    fn a_click_on_the_slider_steps_the_size_towards_it() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        let width = harness.state().grid_width.expect("not drawn");
+        let slider = harness.get_by_label(THUMBNAIL_SIZE).rect();
+        let size = |harness: &Harness<'_, PhotographyWorkbenchApp>| harness.state().thumbnail_size;
+        let knob = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let fraction =
+                (size(harness) - grid::SMALLEST_SIZE) / (grid::LARGEST_SIZE - grid::SMALLEST_SIZE);
+            slider.left_center() + egui::vec2(fraction * slider.width(), 0.0)
+        };
+        let columns = tiles_in_a_row(&harness, 30);
+        click_at(&mut harness, slider.right_center());
+        assert_eq!(size(&harness), grid::larger(width, grid::DEFAULT_SIZE));
+        assert_eq!(tiles_in_a_row(&harness, 30), columns - 1);
+        let two = size(&harness);
+        let right_of_knob = knob(&harness) + egui::vec2(3.0, 0.0);
+        click_at(&mut harness, right_of_knob);
+        assert_eq!(size(&harness), grid::larger(width, two));
+        assert_eq!(tiles_in_a_row(&harness, 30), columns - 2);
+        let on_knob = knob(&harness);
+        click_at(&mut harness, on_knob);
+        assert_eq!(size(&harness), grid::larger(width, two), "on the knob");
+        click_at(&mut harness, slider.left_center());
+        assert_eq!(size(&harness), two);
+        assert_eq!(tiles_in_a_row(&harness, 30), columns - 1);
+        let left_of_knob = knob(&harness) - egui::vec2(3.0, 0.0);
+        click_at(&mut harness, left_of_knob);
+        assert_eq!(size(&harness), grid::smaller(width, two));
+        assert_eq!(tiles_in_a_row(&harness, 30), columns);
+    }
+
+    /// A thumbnail size outside the range the toolbar offers, as could be
+    /// set from elsewhere than the slider, is held to its nearest end: the
+    /// tiles are laid out as at the smallest size or at the largest. In a
+    /// window wide enough for two tiles of the largest to a row, so a size
+    /// larger still would lay out one.
+    #[test]
+    fn a_size_outside_the_range_is_held_to_it() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        harness.set_size(WIDE_WINDOW);
+        harness.run();
+        let laid_out = |harness: &mut Harness<'_, PhotographyWorkbenchApp>, size| {
+            harness.state_mut().thumbnail_size = size;
+            harness.run();
+            let tile = grid_tile(harness, &photo(1)).expect("no tile");
+            (tile.size(), tiles_in_a_row(harness, 30))
+        };
+        let smallest = laid_out(&mut harness, grid::SMALLEST_SIZE);
+        assert_eq!(laid_out(&mut harness, 5.0), smallest);
+        let largest = laid_out(&mut harness, grid::LARGEST_SIZE);
+        assert!(largest.1 >= 2, "{largest:?}");
+        assert_eq!(laid_out(&mut harness, 5000.0), largest);
+    }
+
     /// The photo at the top of the grid's view, of the `count` photos
     /// numbered from 1: the first whose tile reaches below the centre's
     /// top edge.
@@ -3012,6 +3291,39 @@ mod tests {
             "{top} now in the row from {now}"
         );
         assert!(grid_tile(&harness, &photo(150)).is_some(), "laid out");
+    }
+
+    /// A change of the thumbnail size lays the tiles out again, and the
+    /// grid keeps its place rather than leaping to the current photo: the
+    /// photo at the top of its view is in the row at the top still, and
+    /// the current photo, scrolled away from, stays out of view, as the
+    /// tiles grow to the largest size and shrink to the smallest.
+    #[test]
+    fn changing_the_size_keeps_the_grid_s_place() {
+        let dir = folder_of_numbered_photos(300);
+        let mut harness = grid_harness(dir.path());
+        make_current(&mut harness, 150);
+        wheel_over_grid(&mut harness, egui::vec2(0.0, -3000.0));
+        assert!(!in_grid_view(&harness, &photo(150)));
+        // The tiles level with the photo at the top of the view: the row's.
+        let in_a_row = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let top = top_of_grid_view(harness, 300);
+            let level = grid_tile(harness, &photo(top)).expect("no tile").top();
+            (1..=300)
+                .filter(|&n| grid_tile(harness, &photo(n)).is_some_and(|tile| tile.top() == level))
+                .count()
+        };
+        for size in [grid::LARGEST_SIZE, grid::SMALLEST_SIZE] {
+            let top = top_of_grid_view(&harness, 300);
+            harness.state_mut().thumbnail_size = size;
+            harness.run();
+            let (now, columns) = (top_of_grid_view(&harness, 300), in_a_row(&harness));
+            assert!(
+                now <= top && top < now + columns,
+                "{size}: {top} now in the row from {now}"
+            );
+            assert!(!in_grid_view(&harness, &photo(150)), "{size}: followed");
+        }
     }
 
     /// The textures drawn in the last frame with their middle in `room`,
@@ -6009,7 +6321,8 @@ mod tests {
     /// case. The scenes: `grid`, the grid with the home folder selected
     /// and Info showing its first photo; `grid-wide`, the same in a window
     /// of [`WIDE_WINDOW`], as the tiles stretch to share a wider row;
-    /// `viewer`, that photo in the
+    /// `grid-small` and `grid-large`, the grid with the smallest and the
+    /// largest thumbnail size; `viewer`, that photo in the
     /// viewer, with the filmstrip and Info; `filmstrip-hidden`, the viewer
     /// with the filmstrip hidden; `widest-docks`, the viewer with both side
     /// docks dragged to their widest; `overlay`, that photo in the viewer
@@ -6052,6 +6365,16 @@ mod tests {
             settle(&mut harness);
             screenshot(&mut harness, out, theme, "grid-wide");
             harness.set_size(PhotographyWorkbenchApp::MIN_WINDOW);
+            settle(&mut harness);
+            for (scene, size) in [
+                ("grid-small", grid::SMALLEST_SIZE),
+                ("grid-large", grid::LARGEST_SIZE),
+            ] {
+                harness.state_mut().thumbnail_size = size;
+                settle(&mut harness);
+                screenshot(&mut harness, out, theme, scene);
+            }
+            harness.state_mut().thumbnail_size = grid::DEFAULT_SIZE;
             settle(&mut harness);
             for (scene, shown) in dialogs {
                 *shown(harness.state_mut()) = true;

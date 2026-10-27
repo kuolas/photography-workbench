@@ -2,8 +2,16 @@
 
 //! The thumbnail grid in Library's centre: a square tile for each of a
 //! folder's photos, row after row, the current one outlined. A row holds
-//! as many tiles as fit at the smallest they may be, and they stretch to
-//! share its width, so the grid fills the centre whatever its width.
+//! as many tiles as fit at the size chosen on the toolbar, the smallest
+//! they may be, and they stretch to share its width, so the grid fills
+//! the centre whatever its width.
+//!
+//! Between two sizes at which another tile fits in a row, the row is
+//! full already and the size chosen changes nothing, so the toolbar's
+//! slider snaps to those sizes: dragged, to the largest at which as many
+//! tiles fit as of the size picked, which is the tiles' own width
+//! ([`snapped`]), and clicked, to the next of them on that side of its
+//! knob, one tile fewer or one more to a row ([`larger`], [`smaller`]).
 //!
 //! A tile shows its photo's file name over its thumbnail, which sits
 //! straight on the grid's backdrop with nothing behind it, or, for a
@@ -43,7 +51,7 @@
 //! above or below another ([`above`], [`below`]), for the number of
 //! tiles in a row it last laid out.
 
-use std::ops::Range;
+use std::ops::{Range, RangeInclusive};
 use std::path::Path;
 
 use catalog::photos::Photo;
@@ -54,9 +62,56 @@ use egui::{FontId, Margin, Rect, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, Wi
 use crate::follow;
 use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN, Textures, Thumbnail};
 
-/// The smallest side of a tile: a row holds as many tiles at least this
-/// wide as fit, and they stretch to share its width ([`side`]).
-const TILE: f32 = 220.0;
+/// The least the smallest side of a tile can be chosen to be, in points.
+pub const SMALLEST_SIZE: f32 = 90.0;
+
+/// The most the smallest side of a tile can be chosen to be, in points.
+pub const LARGEST_SIZE: f32 = 480.0;
+
+/// The smallest side of a tile until another is chosen, in points.
+pub const DEFAULT_SIZE: f32 = 220.0;
+
+/// The sizes the smallest side of a tile can be chosen from, on the
+/// toolbar: a row holds as many tiles at least that wide as fit, and they
+/// stretch to share its width ([`side`]).
+pub const SIZE_RANGE: RangeInclusive<f32> = SMALLEST_SIZE..=LARGEST_SIZE;
+
+/// `size` held to [`SIZE_RANGE`]: itself within it, else its nearest end.
+pub fn clamped(size: f32) -> f32 {
+    size.clamp(SMALLEST_SIZE, LARGEST_SIZE)
+}
+
+/// The largest whole size at which as many tiles fit in a row of a grid
+/// `width` points wide as at `size`, held to [`SIZE_RANGE`]: the size
+/// the slider snaps to, so that every move of it changes the grid, as
+/// between two of these the row is full already. It is the width of the
+/// tiles laid out at `size`, to the point.
+pub fn snapped(width: f32, size: f32) -> f32 {
+    fitting(width, columns(width, clamped(size)))
+}
+
+/// The size one tile fewer to a row than at `size` snaps to, in a grid
+/// `width` points wide: the largest at which that many fit, held to
+/// [`SIZE_RANGE`], or the range's largest at one to a row ([`snapped`]).
+pub fn larger(width: f32, size: f32) -> f32 {
+    match columns(width, clamped(size)) {
+        1 => LARGEST_SIZE,
+        columns => fitting(width, columns - 1),
+    }
+}
+
+/// The size one tile more to a row than at `size` snaps to, in a grid
+/// `width` points wide: the largest at which that many fit, held to
+/// [`SIZE_RANGE`] ([`snapped`]).
+pub fn smaller(width: f32, size: f32) -> f32 {
+    fitting(width, columns(width, clamped(size)) + 1)
+}
+
+/// The largest whole size at which `columns` tiles fit in a row of a
+/// grid `width` points wide, held to [`SIZE_RANGE`].
+fn fitting(width: f32, columns: usize) -> f32 {
+    clamped((room(width) / columns as f32 - GAP).floor())
+}
 
 /// The gap between two tiles, across and down.
 const GAP: f32 = 1.0;
@@ -114,10 +169,13 @@ struct LaidOut {
 }
 
 /// What the grid did in a frame.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shown {
     /// How many tiles it laid out in a row.
     pub columns: usize,
+    /// How wide it laid the rows out, which the sizes the slider snaps
+    /// to depend on ([`snapped`]).
+    pub width: f32,
     /// The click on a tile, if any.
     pub click: Option<Click>,
 }
@@ -125,10 +183,14 @@ pub struct Shown {
 /// The grid of `photos`, the photos of `folder`, filling `ui`, with the
 /// photo at `current` outlined and the thumbnails in `textures`; it
 /// scrolls when the rows do not fit. As many tiles fit in a row as the
-/// width allows at their smallest, and at least one, and they stretch to
-/// share the width; only the pixel fractions are left over, at the right.
-/// `folder` tells one list from another, so the grid brings the current
-/// photo into view when the list changes.
+/// width allows at `size` points, the smallest side chosen for them, and
+/// at least one, and they stretch to share the width; only the pixel
+/// fractions are left over, at the right. A `size` outside [`SIZE_RANGE`]
+/// is held to its nearest end, so no size lays out thousands of tiles to
+/// a row. `folder` tells one list from another, so the grid brings the
+/// current photo into view when the list changes. A change of `size`
+/// lays the tiles out again, and the grid keeps its place, as it does
+/// when its width changes.
 pub fn show(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -136,9 +198,12 @@ pub fn show(
     photos: &[Photo],
     current: Option<usize>,
     folder: &Path,
+    size: f32,
 ) -> Shown {
-    let columns = columns(ui.available_width());
-    let side = side(ui.available_width(), columns, ui.pixels_per_point());
+    let size = clamped(size);
+    let width = ui.available_width();
+    let columns = columns(width, size);
+    let side = side(width, columns, ui.pixels_per_point());
     let rows = photos.len().div_ceil(columns);
     let id = ui.make_persistent_id("grid");
     let laid_out = LaidOut { columns, side };
@@ -146,6 +211,7 @@ pub fn show(
     let before = ui.ctx().data(|data| data.get_temp::<LaidOut>(laid_out_id));
     ui.ctx()
         .data_mut(|data| data.insert_temp(laid_out_id, laid_out));
+    // What the grid shows, for when to follow: the folder's photos.
     let list = egui::Id::new(folder);
     let follow = follow::follows(ui.ctx(), id, list, current);
     let mut click = None;
@@ -214,7 +280,11 @@ pub fn show(
     if let Some(click) = click {
         follow::shown(ui.ctx(), id, list, Some(click.index));
     }
-    Shown { columns, click }
+    Shown {
+        columns,
+        width,
+        click,
+    }
 }
 
 /// Where to scroll a grid laid out `now`, so that the photo at the top of
@@ -319,12 +389,18 @@ fn rows_ahead(range: Range<usize>, rows: usize) -> Vec<usize> {
     ahead
 }
 
-/// How many tiles at their smallest ([`TILE`]) fit in a row of a grid
+/// How many tiles at least `size` points wide fit in a row of a grid
 /// `width` points wide: at least one, however narrow it is.
-fn columns(width: f32) -> usize {
-    let room = width - 2.0 * f32::from(MARGIN) + GAP;
+fn columns(width: f32, size: f32) -> usize {
     // A negative width is cast to none.
-    ((room / (TILE + GAP)).floor() as usize).max(1)
+    ((room(width) / (size + GAP)).floor() as usize).max(1)
+}
+
+/// The room for tiles and the gaps between them in a row of a grid
+/// `width` points wide: the width less the margins, and a gap more, as
+/// the last tile has none after it.
+fn room(width: f32) -> f32 {
+    width - 2.0 * f32::from(MARGIN) + GAP
 }
 
 /// The side of the tiles in a row of a grid `width` points wide that
@@ -396,19 +472,35 @@ fn photo_tile(
 
 #[cfg(test)]
 mod tests {
-    use super::{LaidOut, above, anchored, below, columns, rows_ahead, side, want_order};
+    use super::{
+        LaidOut, above, anchored, below, columns, larger, rows_ahead, side, smaller, snapped,
+        want_order,
+    };
     use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN};
 
     /// A row holds as many tiles of 220 points at least, 1 point apart, as
     /// fit between 4 points of room at each side, and at least one.
     #[test]
     fn a_row_holds_as_many_tiles_as_fit() {
-        assert_eq!(columns(8.0 + 220.0), 1);
-        assert_eq!(columns(8.0 + 441.0 - 0.5), 1);
-        assert_eq!(columns(8.0 + 441.0), 2);
-        assert_eq!(columns(8.0 + 3.0 * 221.0 - 1.0), 3);
-        assert_eq!(columns(100.0), 1);
-        assert_eq!(columns(-5.0), 1);
+        assert_eq!(columns(8.0 + 220.0, 220.0), 1);
+        assert_eq!(columns(8.0 + 441.0 - 0.5, 220.0), 1);
+        assert_eq!(columns(8.0 + 441.0, 220.0), 2);
+        assert_eq!(columns(8.0 + 3.0 * 221.0 - 1.0, 220.0), 3);
+        assert_eq!(columns(100.0, 220.0), 1);
+        assert_eq!(columns(-5.0, 220.0), 1);
+    }
+
+    /// A row holds as many tiles of the size chosen at least as fit: of
+    /// the smallest, 90 points, many; of the largest, 480, few.
+    #[test]
+    fn a_row_holds_as_many_tiles_of_the_size_chosen_as_fit() {
+        assert_eq!(columns(8.0 + 2.0 * 91.0 - 1.0, 90.0), 2);
+        assert_eq!(columns(8.0 + 2.0 * 91.0 - 1.5, 90.0), 1);
+        assert_eq!(columns(8.0 + 7.0 * 91.0 - 1.0, 90.0), 7);
+        assert_eq!(columns(8.0 + 480.0, 480.0), 1);
+        assert_eq!(columns(8.0 + 961.0 - 0.5, 480.0), 1);
+        assert_eq!(columns(8.0 + 961.0, 480.0), 2);
+        assert_eq!(columns(100.0, 480.0), 1);
     }
 
     /// The tiles of a row share its width, less the margins and the gaps,
@@ -500,6 +592,52 @@ mod tests {
         let order = want_order(2..3, 4, 3, 10, Some(9));
         let indices: Vec<usize> = order.iter().map(|&(index, _)| index).collect();
         assert_eq!(indices, [9, 6, 7, 8, 3, 4, 5]);
+    }
+
+    /// The size the slider snaps to is the largest whole one at which as
+    /// many tiles fit in a row as at the size picked, which is the tiles'
+    /// own width: in a grid 694 points wide, with 687 for tiles and gaps,
+    /// 228 for three to a row (3 × 229 = 687), 342 for two and 97 for
+    /// seven; a size a little past 228 is two to a row. The range's ends
+    /// hold: one to a row would be 686, held to 480, and a size outside
+    /// the range is held to it first.
+    #[test]
+    fn the_slider_snaps_to_the_largest_size_that_fits_as_many_tiles() {
+        assert_eq!(snapped(694.0, 220.0), 228.0);
+        assert_eq!(snapped(694.0, 228.0), 228.0);
+        assert_eq!(columns(694.0, 228.0), 3);
+        assert_eq!(snapped(694.0, 228.5), 342.0);
+        assert_eq!(columns(694.0, 342.0), 2);
+        assert_eq!(snapped(694.0, 90.0), 97.0);
+        assert_eq!(columns(694.0, 97.0), 7);
+        assert_eq!(snapped(694.0, 480.0), 480.0);
+        assert_eq!(snapped(694.0, 5000.0), 480.0);
+        assert_eq!(snapped(694.0, 5.0), 97.0);
+        // Eight to a row in a wide window: 1913 / 8 less the gap, 238.125.
+        assert_eq!(snapped(1920.0, 220.0), 238.0);
+        assert_eq!(columns(1920.0, 238.0), 8);
+    }
+
+    /// A step goes to the size one tile fewer or one more to a row snaps
+    /// to, in the grid 694 points wide: from 220, three to a row, 342 for
+    /// two and 170 for four; from two, one to a row would be 686, so the
+    /// range's largest; at one, the largest still; from seven, 97, eight
+    /// would be 84, so the range's smallest, and from the smallest, the
+    /// smallest still, while one fewer than seven is 113.
+    #[test]
+    fn a_step_goes_to_the_size_one_tile_fewer_or_one_more_snap_to() {
+        assert_eq!(larger(694.0, 220.0), 342.0);
+        assert_eq!(smaller(694.0, 220.0), 170.0);
+        assert_eq!(columns(694.0, 170.0), 4);
+        assert_eq!(larger(694.0, 342.0), 480.0);
+        assert_eq!(larger(694.0, 480.0), 480.0);
+        assert_eq!(smaller(694.0, 97.0), 90.0);
+        assert_eq!(smaller(694.0, 90.0), 90.0);
+        assert_eq!(larger(694.0, 90.0), 113.0);
+        assert_eq!(columns(694.0, 113.0), 6);
+        // From a size between two the slider snaps to, the same.
+        assert_eq!(larger(694.0, 187.4), 342.0);
+        assert_eq!(smaller(694.0, 187.4), 170.0);
     }
 
     /// Laid out again, the grid is scrolled to where the photo at the top
