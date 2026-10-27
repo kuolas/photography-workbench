@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 //! The thumbnail grid in Library's centre: a square tile for each of a
-//! folder's photos, row after row, the current one outlined.
+//! folder's photos, row after row, the current one outlined. A row holds
+//! as many tiles as fit at the smallest they may be, and they stretch to
+//! share its width, so the grid fills the centre whatever its width.
 //!
 //! A tile shows its photo's file name over its thumbnail, which sits
 //! straight on the grid's backdrop with nothing behind it, or, for a
@@ -20,6 +22,12 @@
 //! current photo's first, and after them those of a screen of rows above
 //! and one below, the nearest first, so they are ready when scrolled to
 //! ([`want_order`]).
+//!
+//! The tiles are laid out again whenever the grid's width changes, as
+//! the window or a dock is resized, and when the size of the tiles does:
+//! the rows are then another height, and may hold another number of
+//! photos, so the grid is scrolled to where the photo at the top of the
+//! view now is, and the view keeps its place ([`anchored`]).
 //!
 //! The grid brings the current photo's row into view, scrolled just far
 //! enough, when the current photo changes, when the list does, or when
@@ -46,7 +54,8 @@ use egui::{FontId, Margin, Rect, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, Wi
 use crate::follow;
 use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN, Textures, Thumbnail};
 
-/// The side of a tile.
+/// The smallest side of a tile: a row holds as many tiles at least this
+/// wide as fit, and they stretch to share its width ([`side`]).
 const TILE: f32 = 220.0;
 
 /// The gap between two tiles, across and down.
@@ -96,6 +105,14 @@ pub struct Click {
     pub open: bool,
 }
 
+/// How the grid was last laid out, kept in egui's memory from one frame
+/// to the next: how many tiles to a row, and their side.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct LaidOut {
+    columns: usize,
+    side: f32,
+}
+
 /// What the grid did in a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Shown {
@@ -108,9 +125,10 @@ pub struct Shown {
 /// The grid of `photos`, the photos of `folder`, filling `ui`, with the
 /// photo at `current` outlined and the thumbnails in `textures`; it
 /// scrolls when the rows do not fit. As many tiles fit in a row as the
-/// width allows, and at least one; the room left over stays at the
-/// right. `folder` tells one list from another, so the grid brings the
-/// current photo into view when the list changes.
+/// width allows at their smallest, and at least one, and they stretch to
+/// share the width; only the pixel fractions are left over, at the right.
+/// `folder` tells one list from another, so the grid brings the current
+/// photo into view when the list changes.
 pub fn show(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -120,8 +138,14 @@ pub fn show(
     folder: &Path,
 ) -> Shown {
     let columns = columns(ui.available_width());
+    let side = side(ui.available_width(), columns, ui.pixels_per_point());
     let rows = photos.len().div_ceil(columns);
     let id = ui.make_persistent_id("grid");
+    let laid_out = LaidOut { columns, side };
+    let laid_out_id = id.with("laid out");
+    let before = ui.ctx().data(|data| data.get_temp::<LaidOut>(laid_out_id));
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(laid_out_id, laid_out));
     let list = egui::Id::new(folder);
     let follow = follow::follows(ui.ctx(), id, list, current);
     let mut click = None;
@@ -129,19 +153,31 @@ pub fn show(
         // Rows 1 point apart: egui adds the gap between items to each
         // row's height.
         ui.spacing_mut().item_spacing.y = GAP;
-        let area = egui::ScrollArea::vertical()
+        let mut area = egui::ScrollArea::vertical()
             .id_salt("grid")
             .auto_shrink([false, false])
             .content_margin(Margin::same(MARGIN));
-        area.show_rows(ui, TILE, rows, |ui, range| {
+        // The scroll area keeps where it is scrolled to under the id egui
+        // makes from its salt.
+        let scroll_id = ui.make_persistent_id(egui::IdSalt::new("grid"));
+        let state = egui::scroll_area::State::load(ui.ctx(), scroll_id);
+        let offset = state.map_or(0.0, |state| state.offset.y);
+        // Set before the rows are laid out, so the rows laid out are the
+        // ones scrolled to, however far they are.
+        if let Some(before) = before
+            && before != laid_out
+        {
+            area = area.vertical_scroll_offset(anchored(offset, before, laid_out));
+        }
+        area.show_rows(ui, side, rows, |ui, range| {
             if follow && let Some(index) = current {
                 // Asked from inside the scroll area, where it listens. It
                 // glides there over the next frames, and lays out the rows
                 // it passes as it goes, however far the row is.
-                ui.scroll_to_rect(row_to_show(ui, range.start, index / columns), None);
+                ui.scroll_to_rect(row_to_show(ui, range.start, index / columns, side), None);
             }
             // Every tile's thumbnail fits in the same room.
-            let room = Vec2::splat(TILE) - IMAGE_INSET.sum();
+            let room = Vec2::splat(side) - IMAGE_INSET.sum();
             let longest = textures::longest(room.max_elem(), ui.pixels_per_point());
             for (index, priority) in want_order(range.clone(), rows, columns, photos.len(), current)
             {
@@ -149,11 +185,11 @@ pub fn show(
             }
             let mut outline = None;
             for row in range {
-                let (_, rect) = ui.allocate_space(vec2(ui.available_width(), TILE));
+                let (_, rect) = ui.allocate_space(vec2(ui.available_width(), side));
                 let first = row * columns;
                 for (column, photo) in photos[first..].iter().take(columns).enumerate() {
-                    let left_top = rect.left_top() + vec2(column as f32 * (TILE + GAP), 0.0);
-                    let tile = Rect::from_min_size(left_top, egui::Vec2::splat(TILE));
+                    let left_top = rect.left_top() + vec2(column as f32 * (side + GAP), 0.0);
+                    let tile = Rect::from_min_size(left_top, egui::Vec2::splat(side));
                     let index = first + column;
                     let is_current = current == Some(index);
                     let thumbnail = textures.thumbnail(photo.path(), longest);
@@ -181,20 +217,39 @@ pub fn show(
     Shown { columns, click }
 }
 
-/// Where the tiles of `row` are, in `ui`, which lays out the rows from
-/// `first`, with the room to leave between them and the view's edge when
-/// the row is scrolled into view: 4 points, as the first and last rows
-/// have when the grid is scrolled to its ends, less the gap egui leaves
-/// of its own, which is the one between the rows. Scrolled to, the row
-/// is brought just far enough that its tiles are whole: up until they
-/// are 4 points below the view's top edge, when that edge cuts them or
-/// they are above it, or down until they are 4 points above its bottom
-/// edge, when that cuts them or they are below it, and not at all when
-/// they are in view already.
-fn row_to_show(ui: &egui::Ui, first: usize, row: usize) -> Rect {
+/// Where to scroll a grid laid out `now`, so that the photo at the top of
+/// its view is where it was when the grid was laid out `before` and
+/// scrolled `offset` points down its rows: the photo that began the row
+/// at the view's top, in the row it is in now, with the view as far into
+/// that row as it was into the other. A grid scrolled to its top, where
+/// the margin is, stays there.
+fn anchored(offset: f32, before: LaidOut, now: LaidOut) -> f32 {
+    let margin = f32::from(MARGIN);
+    if offset <= margin {
+        return offset;
+    }
+    let rows = (offset - margin) / (before.side + GAP);
+    let row = rows.floor();
+    let into = rows - row;
+    let first = row as usize * before.columns.max(1);
+    let row_now = (first / now.columns.max(1)) as f32;
+    margin + (row_now + into) * (now.side + GAP)
+}
+
+/// Where the tiles of `row`, `side` points high, are, in `ui`, which lays
+/// out the rows from `first`, with the room to leave between them and the
+/// view's edge when the row is scrolled into view: 4 points, as the first
+/// and last rows have when the grid is scrolled to its ends, less the gap
+/// egui leaves of its own, which is the one between the rows. Scrolled
+/// to, the row is brought just far enough that its tiles are whole: up
+/// until they are 4 points below the view's top edge, when that edge cuts
+/// them or they are above it, or down until they are 4 points above its
+/// bottom edge, when that cuts them or they are below it, and not at all
+/// when they are in view already.
+fn row_to_show(ui: &egui::Ui, first: usize, row: usize, side: f32) -> Rect {
     let rows = row as f32 - first as f32;
-    let top = ui.max_rect().top() + rows * (TILE + GAP);
-    let tiles = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=top + TILE);
+    let top = ui.max_rect().top() + rows * (side + GAP);
+    let tiles = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=top + side);
     tiles.expand2(vec2(0.0, f32::from(MARGIN) - GAP))
 }
 
@@ -264,12 +319,26 @@ fn rows_ahead(range: Range<usize>, rows: usize) -> Vec<usize> {
     ahead
 }
 
-/// How many tiles fit in a row of a grid `width` points wide: at least
-/// one, however narrow it is.
+/// How many tiles at their smallest ([`TILE`]) fit in a row of a grid
+/// `width` points wide: at least one, however narrow it is.
 fn columns(width: f32) -> usize {
     let room = width - 2.0 * f32::from(MARGIN) + GAP;
     // A negative width is cast to none.
     ((room / (TILE + GAP)).floor() as usize).max(1)
+}
+
+/// The side of the tiles in a row of a grid `width` points wide that
+/// holds `columns` of them: the room between the margins, less the gaps,
+/// shared equally, and rounded down to whole pixels on a screen of
+/// `pixels_per_point`, so that on a screen of a whole number of pixels a
+/// point every tile's edges lie on the pixel grid and its thumbnail is
+/// drawn sharp; what is left over, less than a pixel a tile, stays at
+/// the right. At least a pixel, however narrow the grid.
+fn side(width: f32, columns: usize, pixels_per_point: f32) -> f32 {
+    let columns = columns.max(1) as f32;
+    let room = width - 2.0 * f32::from(MARGIN) - (columns - 1.0) * GAP;
+    let pixels = (room / columns * pixels_per_point).floor().max(1.0);
+    pixels / pixels_per_point
 }
 
 /// The tile of `photo` at `rect`, showing `thumbnail` on the grid's
@@ -299,7 +368,7 @@ fn photo_tile(
         name.clone(),
         TextFormat::simple(FontId::proportional(NAME_SIZE), palette.text),
     );
-    job.wrap = TextWrapping::truncate_at_width(TILE - 2.0 * NAME_LEFT);
+    job.wrap = TextWrapping::truncate_at_width(rect.width() - 2.0 * NAME_LEFT);
     let galley = painter.layout_job(job);
     let elided = galley.elided;
     painter.galley(
@@ -327,11 +396,11 @@ fn photo_tile(
 
 #[cfg(test)]
 mod tests {
-    use super::{above, below, columns, rows_ahead, want_order};
+    use super::{LaidOut, above, anchored, below, columns, rows_ahead, side, want_order};
     use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN};
 
-    /// A row holds as many 220-point tiles, 1 point apart, as fit between
-    /// 4 points of room at each side, and at least one.
+    /// A row holds as many tiles of 220 points at least, 1 point apart, as
+    /// fit between 4 points of room at each side, and at least one.
     #[test]
     fn a_row_holds_as_many_tiles_as_fit() {
         assert_eq!(columns(8.0 + 220.0), 1);
@@ -340,6 +409,27 @@ mod tests {
         assert_eq!(columns(8.0 + 3.0 * 221.0 - 1.0), 3);
         assert_eq!(columns(100.0), 1);
         assert_eq!(columns(-5.0), 1);
+    }
+
+    /// The tiles of a row share its width, less the margins and the gaps,
+    /// rounded down to whole pixels of the screen, and are a pixel at
+    /// least.
+    #[test]
+    fn the_tiles_of_a_row_share_its_width() {
+        assert_eq!(side(8.0 + 441.0, 2, 1.0), 220.0);
+        assert_eq!(side(8.0 + 441.0 + 10.0, 2, 1.0), 225.0);
+        assert_eq!(side(8.0 + 441.0 + 1.0, 2, 1.0), 220.0, "half a point");
+        assert_eq!(side(8.0 + 441.0 + 1.0, 2, 2.0), 220.5, "a whole pixel");
+        assert_eq!(side(8.0 + 3.0 * 221.0 - 1.0 + 2.0, 3, 1.0), 220.0);
+        assert_eq!(side(8.0 + 3.0 * 221.0 - 1.0 + 3.0, 3, 1.0), 221.0);
+        assert_eq!(side(100.0, 1, 1.0), 92.0, "a lone tile fills a narrow row");
+        assert_eq!(side(-5.0, 1, 1.0), 1.0);
+        assert_eq!(side(-5.0, 1, 2.0), 0.5);
+        assert_eq!(
+            side(8.0 + 441.0, 0, 1.0),
+            441.0,
+            "a row has a tile at least"
+        );
     }
 
     /// Up goes to the same column of the row before, and stays put in
@@ -410,5 +500,40 @@ mod tests {
         let order = want_order(2..3, 4, 3, 10, Some(9));
         let indices: Vec<usize> = order.iter().map(|&(index, _)| index).collect();
         assert_eq!(indices, [9, 6, 7, 8, 3, 4, 5]);
+    }
+
+    /// Laid out again, the grid is scrolled to where the photo at the top
+    /// of its view now is, as far into its row as the view was: taller
+    /// tiles move the view down by the rows' growth, more to a row move it
+    /// up to the row the photo is in now, and the grid's top stays its top.
+    #[test]
+    fn a_grid_laid_out_again_keeps_the_photo_at_the_top_of_its_view() {
+        let laid = |columns, side| LaidOut { columns, side };
+        // The view at the top of row 5 (4 + 5 * 221), the tiles 10 taller.
+        assert_eq!(
+            anchored(1109.0, laid(3, 220.0), laid(3, 230.0)),
+            4.0 + 5.0 * 231.0
+        );
+        // Half a row into row 5.
+        let half = anchored(1109.0 + 110.5, laid(3, 220.0), laid(3, 230.0));
+        assert_eq!(half, 4.0 + 5.5 * 231.0);
+        // Four to a row, then five: row 5 began with photo 20, now in row 4.
+        assert_eq!(
+            anchored(1109.0, laid(4, 220.0), laid(5, 220.0)),
+            4.0 + 4.0 * 221.0
+        );
+        // Five to a row, then three: photo 25, now in row 8.
+        assert_eq!(
+            anchored(1109.0, laid(5, 220.0), laid(3, 220.0)),
+            4.0 + 8.0 * 221.0
+        );
+        // At the top, or within the margin, the grid stays where it is.
+        assert_eq!(anchored(0.0, laid(3, 220.0), laid(2, 330.0)), 0.0);
+        assert_eq!(anchored(4.0, laid(3, 220.0), laid(2, 330.0)), 4.0);
+        assert_eq!(
+            anchored(1109.0, laid(0, 220.0), laid(0, 220.0)),
+            1109.0,
+            "a column at least"
+        );
     }
 }
