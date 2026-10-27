@@ -31,6 +31,9 @@ decision is
 - The filmstrip glides to the current photo too when it brings it into
   view after the photo changed, rather than jumping; it still jumps when
   it comes on screen with the viewer.
+- Opening the viewer, or showing the filmstrip again, centres the strip
+  on the current photo whether its cell was in view or not, so the
+  photo chosen in the grid is in the strip's middle.
 - The grid's tiles stretch to fill its width: a row holds as many tiles
   of the chosen size at least as fit, and they share the width equally,
   to the pixel. Resizing the window, or a dock, keeps the grid's place.
