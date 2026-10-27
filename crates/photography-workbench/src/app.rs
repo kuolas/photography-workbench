@@ -4218,6 +4218,22 @@ mod tests {
         assert_eq!(cell.left(), dock.left(), "{cell:?} {dock:?}");
     }
 
+    /// A photo made current while the filmstrip glides to another, in
+    /// view now but not where the glide ends, is in view when the glide
+    /// ends: the last photo made current, then the third a frame later.
+    #[test]
+    fn a_photo_made_current_during_the_filmstrip_s_glide_is_in_view_when_it_ends() {
+        let dir = folder_of_30_photos();
+        let mut harness = gliding_harness(dir.path(), true);
+        harness.state_mut().browser.select_photo(29);
+        harness.step();
+        assert!(in_filmstrip_view(&harness, &photo(3)), "still in view");
+        harness.state_mut().browser.select_photo(2);
+        wait(&mut harness, 1.0);
+        assert!(in_filmstrip_view(&harness, &photo(3)));
+        assert!(!in_filmstrip_view(&harness, &photo(30)));
+    }
+
     /// Opening the viewer with a photo far along the strip current shows
     /// it in the strip at once, and so does opening it again after the
     /// strip was scrolled away from it.
@@ -4675,6 +4691,57 @@ mod tests {
         make_current(&mut harness, 30);
         click(&mut harness, "Thumbnail grid");
         assert!(in_grid_view(&harness, &photo(30)));
+    }
+
+    /// Library on the photos of `dir` with the frames a sixtieth of a
+    /// second apart, as on a screen, and egui's scroll animation on, which
+    /// the harness turns off, so a glide shows: in the grid, or in the
+    /// viewer when `viewer`.
+    fn gliding_harness(dir: &Path, viewer: bool) -> Harness<'static, PhotographyWorkbenchApp> {
+        let builder = Harness::builder().with_step_dt(1.0 / 60.0);
+        let (mut harness, _) = harness_built(builder, None, vec![home(dir)]);
+        harness.get_by_label("Home").click();
+        wait(&mut harness, 1.0);
+        if viewer {
+            harness.get_by_label("Image viewer").click();
+            wait(&mut harness, 1.0);
+        }
+        let glide = egui::style::ScrollAnimation::default();
+        harness
+            .ctx
+            .all_styles_mut(|style| style.scroll_animation = glide);
+        harness
+    }
+
+    /// A photo made current while the grid glides to another, in view
+    /// now but not where the glide ends, is in view when the glide ends:
+    /// the last photo made current, then the third a frame later. And a
+    /// glide cut short by opening the viewer does not go on when the grid
+    /// comes back with another photo current, one in view where the glide
+    /// paused, the fifth, and not where it was going.
+    #[test]
+    fn a_photo_made_current_during_the_grid_s_glide_is_in_view_when_it_ends() {
+        let dir = folder_of_30_photos();
+        let mut harness = gliding_harness(dir.path(), false);
+        harness.state_mut().browser.select_photo(29);
+        harness.step();
+        assert!(in_grid_view(&harness, &photo(3)), "still in view");
+        harness.state_mut().browser.select_photo(2);
+        wait(&mut harness, 1.0);
+        assert!(in_grid_view(&harness, &photo(3)));
+        assert!(!in_grid_view(&harness, &photo(30)));
+
+        harness.state_mut().browser.select_photo(29);
+        harness.step();
+        harness.step();
+        assert!(in_grid_view(&harness, &photo(5)), "still in view");
+        harness.get_by_label("Image viewer").click();
+        wait(&mut harness, 1.0);
+        harness.state_mut().browser.select_photo(4);
+        harness.get_by_label("Thumbnail grid").click();
+        wait(&mut harness, 1.0);
+        assert!(in_grid_view(&harness, &photo(5)));
+        assert!(!in_grid_view(&harness, &photo(30)));
     }
 
     /// Brought into view, the current photo's row glides there over the

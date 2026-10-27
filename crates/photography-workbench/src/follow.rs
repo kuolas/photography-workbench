@@ -10,6 +10,12 @@
 //! the next, under an id of its own, and asks [`follows`] once a frame,
 //! before it scrolls. It is told why, too: a view that has just come on
 //! screen may move differently from one the photo changed in.
+//!
+//! A view that glides to the photo, as egui scrolls when asked to show
+//! something, keeps where it asked the glide to end ([`gliding`]) and
+//! judges what is in view from there ([`glide_end`]) while the glide is
+//! under way: egui keeps the end to itself, and a photo in view now may
+//! be out of view when the glide ends.
 
 /// What a view last brought into view, and when it was last drawn, kept
 /// in egui's memory from one frame to the next.
@@ -80,9 +86,58 @@ fn remember(ctx: &egui::Context, id: egui::Id, list: egui::Id, current: Option<u
     ctx.data_mut(|data| data.insert_temp(id, now));
 }
 
+/// The longest a glide takes, in seconds, and a little over: egui glides
+/// for 0.3 seconds at most. A glide asked for longer ago than this is
+/// over, or was overtaken by the user's scrolling.
+const LONGEST_GLIDE: f64 = 0.5;
+
+/// Where a view asked egui to glide to, and when, kept in egui's memory
+/// from one frame to the next.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Gliding {
+    /// The scroll offset the glide ends at.
+    to: f32,
+    /// egui's time when the glide was asked for.
+    since: f64,
+}
+
+/// Keep in egui's memory that the view `id` has asked egui for a glide
+/// ending with its scroll offset at `to`.
+pub fn gliding(ctx: &egui::Context, id: egui::Id, to: f32) {
+    let since = ctx.input(|input| input.time);
+    ctx.data_mut(|data| data.insert_temp(id.with("glide"), Gliding { to, since }));
+}
+
+/// Where the glide the view `id` asked for ends, while it is under way:
+/// `at` is the view's scroll offset now, and the glide is under way
+/// until the view is within a point of its end, as egui counts arriving,
+/// or [`LONGEST_GLIDE`] has passed since it was asked for. Over, it is
+/// forgotten, and `None`.
+pub fn glide_end(ctx: &egui::Context, id: egui::Id, at: f32) -> Option<f32> {
+    let key = id.with("glide");
+    let gliding: Option<Gliding> = ctx.data(|data| data.get_temp(key));
+    let now = ctx.input(|input| input.time);
+    match gliding {
+        Some(glide) if (glide.to - at).abs() >= 1.0 && now - glide.since < LONGEST_GLIDE => {
+            Some(glide.to)
+        }
+        Some(_) => {
+            ctx.data_mut(|data| data.remove_temp::<Gliding>(key));
+            None
+        }
+        None => None,
+    }
+}
+
+/// Forget the glide the view `id` asked for, if any: the view has come
+/// back on screen where it was put, not where the glide was going.
+pub fn glide_over(ctx: &egui::Context, id: egui::Id) {
+    ctx.data_mut(|data| data.remove_temp::<Gliding>(id.with("glide")));
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Reason, follows, shown};
+    use super::{Reason, follows, glide_end, glide_over, gliding, shown};
 
     /// What a view does in a pass: drawn showing a list with a current
     /// photo, and that photo then clicked on, or not; or not drawn.
@@ -195,5 +250,63 @@ mod tests {
                 Some(Some(Reason::Change))
             ]
         );
+    }
+
+    /// Run a pass at egui's time `time`, and what `act` returns in it.
+    fn at(
+        ctx: &egui::Context,
+        time: f64,
+        act: impl FnOnce(&egui::Context) -> Option<f32>,
+    ) -> Option<f32> {
+        let mut end = None;
+        let mut act = Some(act);
+        let input = egui::RawInput {
+            time: Some(time),
+            ..Default::default()
+        };
+        let mut output = ctx.run_ui(input, |ui| end = act.take().and_then(|act| act(ui.ctx())));
+        // No renderer takes the font atlas egui hands it.
+        output.textures_delta.clear();
+        end
+    }
+
+    /// A glide asked for ends where it was asked to, while the view is
+    /// not within a point of there and half a second has not passed
+    /// since; then it is over and forgotten, as it is when the view comes
+    /// back on screen.
+    #[test]
+    fn a_glide_ends_where_it_was_asked_to_until_the_view_arrives() {
+        let ctx = egui::Context::default();
+        let id = egui::Id::new("view");
+        let asked = |ctx: &egui::Context, to| {
+            gliding(ctx, id, to);
+            None
+        };
+        assert_eq!(at(&ctx, 0.0, |ctx| asked(ctx, 500.0)), None);
+        assert_eq!(at(&ctx, 0.1, |ctx| glide_end(ctx, id, 0.0)), Some(500.0));
+        assert_eq!(at(&ctx, 0.2, |ctx| glide_end(ctx, id, 120.0)), Some(500.0));
+        assert_eq!(
+            at(&ctx, 0.3, |ctx| glide_end(ctx, id, 499.5)),
+            None,
+            "arrived"
+        );
+        assert_eq!(
+            at(&ctx, 0.3, |ctx| glide_end(ctx, id, 0.0)),
+            None,
+            "forgotten"
+        );
+        at(&ctx, 1.0, |ctx| asked(ctx, 900.0));
+        assert_eq!(at(&ctx, 1.4, |ctx| glide_end(ctx, id, 100.0)), Some(900.0));
+        assert_eq!(
+            at(&ctx, 1.6, |ctx| glide_end(ctx, id, 100.0)),
+            None,
+            "too old"
+        );
+        at(&ctx, 2.0, |ctx| asked(ctx, 300.0));
+        at(&ctx, 2.0, |ctx| {
+            glide_over(ctx, id);
+            None
+        });
+        assert_eq!(at(&ctx, 2.1, |ctx| glide_end(ctx, id, 0.0)), None, "over");
     }
 }

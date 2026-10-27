@@ -42,8 +42,12 @@
 //! the grid comes back on screen, and then only if the photo's tile is
 //! not wholly in view already ([`crate::follow`]). It glides there over
 //! the next frames, as egui scrolls when asked to show something,
-//! rather than jumping, so the eye follows where the photos went. A
-//! click is the exception: the photo clicked on is where the pointer
+//! rather than jumping, so the eye follows where the photos went.
+//! Whether the tile is in view is judged from where a glide under way
+//! ends, not from where the grid is now, as a tile in view now may be
+//! out of view when the glide ends; and a glide cut short when the grid
+//! was hidden does not go on when the grid comes back. A click is the
+//! exception: the photo clicked on is where the pointer
 //! is, and moving the grid under it would put another photo under the
 //! second click of a double-click.
 //!
@@ -57,7 +61,9 @@ use std::path::Path;
 use catalog::photos::Photo;
 use desktop_ui::theme::Palette;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
-use egui::{FontId, Margin, Rect, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, WidgetType, vec2};
+use egui::{
+    Align, FontId, Margin, Rect, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, WidgetType, vec2,
+};
 
 use crate::follow;
 use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN, Textures, Thumbnail};
@@ -213,7 +219,7 @@ pub fn show(
         .data_mut(|data| data.insert_temp(laid_out_id, laid_out));
     // What the grid shows, for when to follow: the folder's photos.
     let list = egui::Id::new(folder);
-    let follow = follow::follows(ui.ctx(), id, list, current).is_some();
+    let follow = follow::follows(ui.ctx(), id, list, current);
     let mut click = None;
     ui.scope(|ui| {
         // Rows 1 point apart: egui adds the gap between items to each
@@ -227,20 +233,47 @@ pub fn show(
         // makes from its salt.
         let scroll_id = ui.make_persistent_id(egui::IdSalt::new("grid"));
         let state = egui::scroll_area::State::load(ui.ctx(), scroll_id);
-        let offset = state.map_or(0.0, |state| state.offset.y);
+        let mut offset = state.map_or(0.0, |state| state.offset.y);
         // Set before the rows are laid out, so the rows laid out are the
         // ones scrolled to, however far they are.
         if let Some(before) = before
             && before != laid_out
         {
-            area = area.vertical_scroll_offset(anchored(offset, before, laid_out));
+            offset = anchored(offset, before, laid_out);
+            area = area.vertical_scroll_offset(offset);
         }
+        if follow == Some(follow::Reason::Return) {
+            // Come back on screen, the grid is where it was left. A glide
+            // cut short when it was hidden would go on under the photo:
+            // the scroll area's state is stored afresh, without it, and
+            // the grid's own memory of it dropped.
+            let mut fresh = egui::scroll_area::State::default();
+            fresh.offset.y = offset;
+            fresh.store(ui.ctx(), scroll_id);
+            follow::glide_over(ui.ctx(), id);
+        }
+        // Where the current photo's row is brought to, if it is not in
+        // view: judged from where a glide under way ends, not from where
+        // the grid is now, as a row in view now may be out of view then.
+        let from = follow::glide_end(ui.ctx(), id, offset).unwrap_or(offset);
+        let destination = match (follow, current) {
+            (Some(_), Some(index)) => {
+                scrolled_to_show(index / columns, side, from, ui.available_height())
+            }
+            _ => None,
+        };
         area.show_rows(ui, side, rows, |ui, range| {
-            if follow && let Some(index) = current {
-                // Asked from inside the scroll area, where it listens. It
-                // glides there over the next frames, and lays out the rows
-                // it passes as it goes, however far the row is.
-                ui.scroll_to_rect(row_to_show(ui, range.start, index / columns, side), None);
+            if let (Some(to), Some(index)) = (destination, current) {
+                // Asked from inside the scroll area, where it listens, and
+                // aligned outright, to the view's top edge going up and
+                // its bottom edge going down, so a glide under way is sent
+                // there instead of left to run. egui glides there over the
+                // next frames, and lays out the rows it passes as it goes,
+                // however far the row is.
+                let align = if to < from { Align::Min } else { Align::Max };
+                let row = row_to_show(ui, range.start, index / columns, side);
+                ui.scroll_to_rect(row, Some(align));
+                follow::gliding(ui.ctx(), id, to);
             }
             // Every tile's thumbnail fits in the same room.
             let room = Vec2::splat(side) - IMAGE_INSET.sum();
@@ -306,16 +339,36 @@ fn anchored(offset: f32, before: LaidOut, now: LaidOut) -> f32 {
     margin + (row_now + into) * (now.side + GAP)
 }
 
+/// Where to scroll a grid of tiles `side` points high, scrolled `offset`
+/// points down its rows, with `height` points of them in view, so the
+/// tiles of `row` are wholly in view, scrolled as little as it takes: up
+/// until they are 4 points below the view's top edge, when that edge cuts
+/// them or they are above it, or down until they are 4 points above its
+/// bottom edge, when that cuts them or they are below it, as the first
+/// and last rows are when the grid is scrolled to its ends. A view too
+/// short for a whole tile shows its top. `None` when they are wholly in
+/// view already. It is where egui's glide to the row ends, asked for
+/// with [`row_to_show`] aligned to the edge the row comes in by.
+fn scrolled_to_show(row: usize, side: f32, offset: f32, height: f32) -> Option<f32> {
+    let margin = f32::from(MARGIN);
+    let top = margin + row as f32 * (side + GAP);
+    let bottom = top + side;
+    if offset <= top && bottom <= offset + height {
+        None
+    } else if top < offset {
+        Some(top - margin)
+    } else {
+        Some((bottom + margin - height).min(top - margin))
+    }
+}
+
 /// Where the tiles of `row`, `side` points high, are, in `ui`, which lays
 /// out the rows from `first`, with the room to leave between them and the
 /// view's edge when the row is scrolled into view: 4 points, as the first
 /// and last rows have when the grid is scrolled to its ends, less the gap
 /// egui leaves of its own, which is the one between the rows. Scrolled
-/// to, the row is brought just far enough that its tiles are whole: up
-/// until they are 4 points below the view's top edge, when that edge cuts
-/// them or they are above it, or down until they are 4 points above its
-/// bottom edge, when that cuts them or they are below it, and not at all
-/// when they are in view already.
+/// to, aligned to the view's top edge or its bottom edge, the row lands
+/// where [`scrolled_to_show`] says.
 fn row_to_show(ui: &egui::Ui, first: usize, row: usize, side: f32) -> Rect {
     let rows = row as f32 - first as f32;
     let top = ui.max_rect().top() + rows * (side + GAP);
@@ -473,8 +526,8 @@ fn photo_tile(
 #[cfg(test)]
 mod tests {
     use super::{
-        LaidOut, above, anchored, below, columns, larger, rows_ahead, side, smaller, snapped,
-        want_order,
+        LaidOut, above, anchored, below, columns, larger, rows_ahead, scrolled_to_show, side,
+        smaller, snapped, want_order,
     };
     use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN};
 
@@ -638,6 +691,35 @@ mod tests {
         // From a size between two the slider snaps to, the same.
         assert_eq!(larger(694.0, 187.4), 342.0);
         assert_eq!(smaller(694.0, 187.4), 170.0);
+    }
+
+    /// A row is scrolled into view just far enough: down until its tiles
+    /// end 4 points above the view's bottom, up until they start 4 points
+    /// below its top, and not at all when they are wholly in view. Rows
+    /// of 220-point tiles are 221 points apart, from 4 points below the
+    /// grid's top.
+    #[test]
+    fn a_row_is_scrolled_just_into_view() {
+        let scrolled = |row, offset, height| scrolled_to_show(row, 220.0, offset, height);
+        // In a view 500 points high, at the top: rows 0 and 1 are
+        // wholly in view, row 2 (446 to 666) is cut by the bottom edge.
+        assert_eq!(scrolled(0, 0.0, 500.0), None);
+        assert_eq!(scrolled(1, 0.0, 500.0), None);
+        assert_eq!(scrolled(2, 0.0, 500.0), Some(666.0 + 4.0 - 500.0));
+        assert_eq!(scrolled(9, 0.0, 500.0), Some(2213.0 + 4.0 - 500.0));
+        // Scrolled 300 points down: row 1 (225 to 445) is cut by the top
+        // edge, and row 0 is above it.
+        assert_eq!(scrolled(1, 300.0, 500.0), Some(221.0));
+        assert_eq!(scrolled(0, 300.0, 500.0), Some(0.0));
+        assert_eq!(scrolled(2, 300.0, 500.0), None);
+        // A view shorter than a tile shows its top.
+        assert_eq!(scrolled(3, 0.0, 100.0), Some(663.0));
+        assert_eq!(scrolled(0, 0.0, 100.0), Some(0.0));
+        // Larger tiles: rows of 300-point tiles are 301 points apart.
+        assert_eq!(
+            scrolled_to_show(2, 300.0, 0.0, 500.0),
+            Some(906.0 + 4.0 - 500.0)
+        );
     }
 
     /// Laid out again, the grid is scrolled to where the photo at the top
