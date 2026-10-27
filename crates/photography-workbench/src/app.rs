@@ -2911,11 +2911,12 @@ mod tests {
         assert_eq!(count(&harness).as_deref(), Some("3 of 3"));
     }
 
-    /// The tiles are 220 points square, 1 point apart across and down,
-    /// from 4 points in from the centre's left and top, as many to a row
-    /// as fit, the room left over at the right. A photo's name starts 8
-    /// points in from its tile's left, its middle 12 down from its top. Nothing
-    /// is filled behind a tile, and the current photo, an empty file that
+    /// The tiles are square, 1 point apart across and down, from 4 points
+    /// in from the centre's left and top, as many of 220 points at least to
+    /// a row as fit, stretched to share its width to the point, the pixel
+    /// fractions left over at the right. A photo's name starts 8 points in
+    /// from its tile's left, its middle 12 down from its top. Nothing is
+    /// filled behind a tile, and the current photo, an empty file that
     /// cannot be shown, has the room its thumbnail would take outlined in
     /// the accent colour, 2 points clear of it.
     #[test]
@@ -2929,9 +2930,11 @@ mod tests {
         let centre = centre(&harness);
         let columns = ((centre.width() - 8.0 + 1.0) / 221.0).floor() as usize;
         assert!((2..8).contains(&columns), "{centre:?}");
+        let side = ((centre.width() - 8.0 - (columns - 1) as f32) / columns as f32).floor();
+        assert!((220.0..441.0).contains(&side), "{side}");
         let tile = |i: usize| harness.get_by_label(&format!("DSC_000{i}.NEF")).rect();
         let first = tile(1);
-        assert_eq!(first.size(), egui::Vec2::splat(220.0), "{first:?}");
+        assert_eq!(first.size(), egui::Vec2::splat(side), "{first:?}");
         assert_eq!(first.left_top(), centre.left_top() + egui::vec2(4.0, 4.0));
         assert_eq!(tile(2).left_top(), first.right_top() + egui::vec2(1.0, 0.0));
         let last_across = tile(columns);
@@ -2939,7 +2942,7 @@ mod tests {
             last_across.right() <= centre.right() - 4.0,
             "{last_across:?}"
         );
-        assert!(centre.right() - 4.0 - last_across.right() < 221.0);
+        assert!(centre.right() - 4.0 - last_across.right() < columns as f32);
         let below = tile(columns + 1);
         assert_eq!(below.left_top(), first.left_bottom() + egui::vec2(0.0, 1.0));
 
@@ -2958,6 +2961,57 @@ mod tests {
             _ => false,
         });
         assert!(named, "no name with its middle at {name_at:?}");
+    }
+
+    /// The photo at the top of the grid's view, of the `count` photos
+    /// numbered from 1: the first whose tile reaches below the centre's
+    /// top edge.
+    fn top_of_grid_view(harness: &Harness<'_, PhotographyWorkbenchApp>, count: usize) -> usize {
+        let top = centre(harness).top();
+        (1..=count)
+            .find(|&n| grid_tile(harness, &photo(n)).is_some_and(|tile| tile.bottom() > top))
+            .expect("no tile in view")
+    }
+
+    /// Resizing the window lays the tiles out again, wider, and then with
+    /// more to a row, and the grid keeps its place: the photo at the top of
+    /// its view stays there, and the current photo, scrolled to deep in
+    /// the folder, stays where it was to within a row.
+    #[test]
+    fn resizing_the_window_keeps_the_grid_s_place() {
+        let dir = folder_of_numbered_photos(300);
+        let mut harness = grid_harness(dir.path());
+        make_current(&mut harness, 150);
+        assert!(in_grid_view(&harness, &photo(150)));
+        // The tiles level with the photo at the top of the view: the row's.
+        let in_a_row = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            let top = top_of_grid_view(harness, 300);
+            let level = grid_tile(harness, &photo(top)).expect("no tile").top();
+            (1..=300)
+                .filter(|&n| grid_tile(harness, &photo(n)).is_some_and(|tile| tile.top() == level))
+                .count()
+        };
+        let columns = in_a_row(&harness);
+        let top = top_of_grid_view(&harness, 300);
+        let was = grid_tile(&harness, &photo(150)).expect("no tile").top();
+        for wider in [10.0, 40.0] {
+            harness.set_size(PhotographyWorkbenchApp::MIN_WINDOW + egui::vec2(wider, 0.0));
+            harness.run();
+            assert_eq!(in_a_row(&harness), columns, "{wider}");
+            assert_eq!(top_of_grid_view(&harness, 300), top, "{wider}");
+            let now = grid_tile(&harness, &photo(150)).expect("no tile").top();
+            assert!((now - was).abs() < 30.0, "{wider}: {was} to {now}");
+        }
+        harness.set_size(WIDE_WINDOW);
+        harness.run();
+        let wide = in_a_row(&harness);
+        assert!(wide > columns, "{wide} of {columns}");
+        let now = top_of_grid_view(&harness, 300);
+        assert!(
+            now <= top && top < now + wide,
+            "{top} now in the row from {now}"
+        );
+        assert!(grid_tile(&harness, &photo(150)).is_some(), "laid out");
     }
 
     /// The textures drawn in the last frame with their middle in `room`,
@@ -5869,6 +5923,10 @@ mod tests {
     /// further frame, up to 8 frames each time.
     const SETTLE_RUNS: usize = 20;
 
+    /// The size of the window in the screenshots of a wider one than the
+    /// smallest: a common desktop screen's.
+    const WIDE_WINDOW: egui::Vec2 = egui::vec2(1920.0, 1080.0);
+
     /// Run frames until no decode is still to come and the app asks for no
     /// further frame, or [`SETTLE_RUNS`] runs have gone by, so the
     /// thumbnails and pictures wanted are drawn.
@@ -5937,8 +5995,9 @@ mod tests {
     }
 
     /// The window, drawn by the graphics card at its smallest size, one
-    /// pixel a point, in every theme and scene, written as PNG files for
-    /// people to review the look of every surface. It runs only when asked
+    /// pixel a point, in every theme and scene, and in one scene wider,
+    /// written as PNG files for people to review the look of every
+    /// surface. It runs only when asked
     /// for, with `PW_SCREENSHOTS` naming the folder to write them to:
     ///
     /// ```sh
@@ -5948,7 +6007,9 @@ mod tests {
     ///
     /// Each file is named `<theme>-<scene>.png`, the theme's name in lower
     /// case. The scenes: `grid`, the grid with the home folder selected
-    /// and Info showing its first photo; `viewer`, that photo in the
+    /// and Info showing its first photo; `grid-wide`, the same in a window
+    /// of [`WIDE_WINDOW`], as the tiles stretch to share a wider row;
+    /// `viewer`, that photo in the
     /// viewer, with the filmstrip and Info; `filmstrip-hidden`, the viewer
     /// with the filmstrip hidden; `widest-docks`, the viewer with both side
     /// docks dragged to their widest; `overlay`, that photo in the viewer
@@ -5987,6 +6048,11 @@ mod tests {
 
             let mut harness = drawn_harness(&storage, &photos);
             screenshot(&mut harness, out, theme, "grid");
+            harness.set_size(WIDE_WINDOW);
+            settle(&mut harness);
+            screenshot(&mut harness, out, theme, "grid-wide");
+            harness.set_size(PhotographyWorkbenchApp::MIN_WINDOW);
+            settle(&mut harness);
             for (scene, shown) in dialogs {
                 *shown(harness.state_mut()) = true;
                 settle(&mut harness);
