@@ -4041,13 +4041,89 @@ mod tests {
         wheel_over_filmstrip(&mut harness, egui::vec2(10_000.0, 0.0));
         assert!(!in_filmstrip_view(&harness, &photo(26)));
         open(&mut harness, "Thumbnail grid");
-        // The click's frame, the strip's first, and the one it is scrolled
-        // in; a glide would take a dozen more.
+        // The click's frame and the strip's first, which is scrolled
+        // before its cells are laid out; a glide would take a dozen more.
         harness.get_by_label("Image viewer").click();
-        for _ in 0..3 {
+        for _ in 0..2 {
             harness.step();
         }
         assert!(in_filmstrip_view(&harness, &photo(26)), "glided");
+
+        // A glide cut short by hiding the strip does not go on when it
+        // is shown again with another photo current: photo 1 made
+        // current, the strip comes back at its start, not at photo 26.
+        harness.state_mut().browser.select_photo(0);
+        wait(&mut harness, 1.0);
+        harness.state_mut().browser.select_photo(25);
+        harness.step();
+        harness.step();
+        assert!(
+            !in_filmstrip_view(&harness, &photo(26)),
+            "glide not under way"
+        );
+        open(&mut harness, FILMSTRIP_TOGGLE);
+        harness.state_mut().browser.select_photo(0);
+        wait(&mut harness, 1.0);
+        open(&mut harness, FILMSTRIP_TOGGLE);
+        let (cell, _) = film_cell(&harness, &photo(1)).expect("not laid out");
+        let dock = panel(&harness, "bottom_dock");
+        assert_eq!(cell.left(), dock.left(), "{cell:?} {dock:?}");
+        assert!(!in_filmstrip_view(&harness, &photo(26)));
+    }
+
+    /// The strip come on screen, with the viewer or its dock, has the
+    /// current photo in its middle, though the photo's cell was in view
+    /// where the strip was, as the photo chosen in the grid is where the
+    /// eye looks first: the eighth, in view at the strip's start, and
+    /// the ninth, in view beside the eighth, which a change leaves where
+    /// it is. The first photo, whose cell cannot be in the middle, is at
+    /// the strip's start.
+    #[test]
+    fn the_filmstrip_centres_the_current_photo_as_it_comes_on_screen() {
+        let dir = folder_of_30_photos();
+        let mut harness = grid_harness(dir.path());
+        let centred = |harness: &Harness<'_, PhotographyWorkbenchApp>, n: usize| {
+            let (cell, _) = film_cell(harness, &photo(n)).expect("not laid out");
+            let middle = panel(harness, "bottom_dock").center().x;
+            (cell.center().x - middle).abs() <= 0.5
+        };
+        make_current(&mut harness, 8);
+        click(&mut harness, "Image viewer");
+        assert!(centred(&harness, 8));
+
+        make_current(&mut harness, 9);
+        assert!(in_filmstrip_view(&harness, &photo(9)));
+        assert!(!centred(&harness, 9), "in view, so not moved to");
+        click(&mut harness, FILMSTRIP_TOGGLE);
+        click(&mut harness, FILMSTRIP_TOGGLE);
+        assert!(centred(&harness, 9));
+
+        click(&mut harness, "Thumbnail grid");
+        make_current(&mut harness, 1);
+        click(&mut harness, "Image viewer");
+        let (cell, _) = film_cell(&harness, &photo(1)).expect("not laid out");
+        let dock = panel(&harness, "bottom_dock");
+        assert_eq!(cell.left(), dock.left(), "{cell:?} {dock:?}");
+
+        // The last photo, on the strip's first frame, which is the
+        // click's: the strip is held to its end before the cells are
+        // laid out, not after, by egui, a frame late.
+        click(&mut harness, "Thumbnail grid");
+        make_current(&mut harness, 30);
+        harness.get_by_label("Image viewer").click();
+        harness.step();
+        let (cell, _) = film_cell(&harness, &photo(30)).expect("not laid out");
+        assert_eq!(cell.right(), dock.right(), "{cell:?} {dock:?}");
+        // A folder whose photos all fit, with the last one current: the
+        // strip stays at its start, on its first frame too.
+        let few = folder_of_numbered_photos(4);
+        let mut harness = grid_harness(few.path());
+        make_current(&mut harness, 4);
+        harness.get_by_label("Image viewer").click();
+        harness.step();
+        let (cell, _) = film_cell(&harness, &photo(1)).expect("not laid out");
+        let dock = panel(&harness, "bottom_dock");
+        assert_eq!(cell.left(), dock.left(), "{cell:?} {dock:?}");
     }
 
     /// Opening the viewer with a photo far along the strip current shows

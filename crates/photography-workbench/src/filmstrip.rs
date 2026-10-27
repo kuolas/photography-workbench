@@ -19,16 +19,18 @@
 //! first ([`want_order`]). A mouse's wheel, which turns up and down,
 //! scrolls it sideways.
 //!
-//! The strip brings the current photo into view when the current photo
-//! changes or when the strip comes back on screen, and then only if the
-//! photo is not in view already. It glides there when the photo changed,
-//! as egui scrolls when asked to show something, so the eye follows
-//! where the strip went, and jumps there when the strip has just come on
-//! screen, as there was nothing to follow from: with the viewer, with its
-//! dock shown again, or with another folder's photos, which are read
-//! while the strip is not drawn. Nothing else moves it: not time passing,
-//! and not the strip being scrolled, so a photographer looking along the
-//! folder is not pulled back ([`crate::follow`]).
+//! The strip brings the current photo to its middle when the current
+//! photo changes, if the photo is not in view already, gliding there, as
+//! egui scrolls when asked to show something, so the eye follows where
+//! the strip went; and when the strip comes on screen, with the viewer,
+//! with its dock shown again or with another folder's photos, which are
+//! read while the strip is not drawn, whether the photo was in view or
+//! not, so the photo chosen in the grid is where the eye looks first,
+//! jumping there before its cells are laid out, as there was nothing to
+//! follow from and no frame is to show the strip where it was. Nothing
+//! else moves it: not time passing, and not the strip being scrolled, so
+//! a photographer looking along the folder is not pulled back
+//! ([`crate::follow`]).
 
 use std::cmp::Reverse;
 use std::ops::Range;
@@ -37,7 +39,6 @@ use std::path::Path;
 use catalog::photos::Photo;
 use desktop_ui::fonts;
 use desktop_ui::theme::Palette;
-use egui::style::ScrollAnimation;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{
     Align, Align2, FontFamily, FontId, Margin, Rect, Sense, Stroke, StrokeKind, WidgetInfo,
@@ -114,66 +115,81 @@ pub fn show(
         // A vertical wheel, the one most mice have, scrolls the strip
         // sideways, without Shift held.
         ui.style_mut().always_scroll_the_only_direction = true;
-        egui::ScrollArea::horizontal()
+        let area = egui::ScrollArea::horizontal()
             .id_salt(id)
             .auto_shrink([false, false])
-            .content_margin(Margin::ZERO)
-            .show_viewport(ui, |ui, viewport| {
-                let height = ui.available_height();
-                let (_, strip) = ui.allocate_space(vec2(photos.len() as f32 * CELL, height));
-                // `viewport` is measured from the strip's left edge.
-                let cell = |index: usize| {
-                    let left_top = strip.left_top() + vec2(index as f32 * CELL, 0.0);
-                    Rect::from_min_size(left_top, vec2(CELL, height))
-                };
+            .content_margin(Margin::ZERO);
+        if follow == Some(follow::Reason::Return)
+            && let Some(index) = current
+        {
+            // The photo chosen before the strip came on screen goes to
+            // the middle at once, in view or not, and before the cells
+            // are laid out, so no frame shows the strip where it was:
+            // held to the strip's ends here, as egui holds the offset
+            // only after the cells are laid out. The scroll area's state
+            // is stored afresh, so a glide cut short when the strip was
+            // hidden does not go on under the photo.
+            let width = ui.available_width();
+            let farthest = (photos.len() as f32 * CELL - width).max(0.0);
+            let middle = (index as f32 + 0.5) * CELL - width / 2.0;
+            let mut state = egui::scroll_area::State::default();
+            state.offset.x = middle.clamp(0.0, farthest);
+            // Under the id the scroll area keeps its state by: its salt
+            // as a salt, which is not the same as the id itself.
+            let salt = egui::IdSalt::new(id);
+            state.store(ui.ctx(), ui.make_persistent_id(salt));
+        }
+        area.show_viewport(ui, |ui, viewport| {
+            let height = ui.available_height();
+            let (_, strip) = ui.allocate_space(vec2(photos.len() as f32 * CELL, height));
+            // `viewport` is measured from the strip's left edge.
+            let cell = |index: usize| {
+                let left_top = strip.left_top() + vec2(index as f32 * CELL, 0.0);
+                Rect::from_min_size(left_top, vec2(CELL, height))
+            };
 
-                if let Some(reason) = follow
-                    && let Some(index) = current
-                {
-                    let left = index as f32 * CELL;
-                    let in_view = viewport.left() <= left && left + CELL <= viewport.right();
-                    if !in_view {
-                        let centre = Some(Align::Center);
-                        match reason {
-                            follow::Reason::Change => ui.scroll_to_rect(cell(index), centre),
-                            follow::Reason::Return => {
-                                let at_once = ScrollAnimation::none();
-                                ui.scroll_to_rect_animation(cell(index), centre, at_once);
-                            }
-                        }
-                    }
+            if follow == Some(follow::Reason::Change)
+                && let Some(index) = current
+            {
+                let left = index as f32 * CELL;
+                let in_view = viewport.left() <= left && left + CELL <= viewport.right();
+                // Where the eye can follow the strip, and the photo
+                // is out of view; in view, nothing to follow.
+                if !in_view {
+                    ui.scroll_to_rect(cell(index), Some(Align::Center));
                 }
+            }
 
-                // The cells in view, and NEAR more at each end.
-                let in_view = in_view(viewport, photos.len());
-                let first = in_view.start.saturating_sub(NEAR);
-                let end = (in_view.end + NEAR).min(photos.len());
-                // Every cell's thumbnail fits in the same tile.
-                let tile = (cell(0) - TILE_INSET).size();
-                let longest = textures::longest(tile.max_elem(), ui.pixels_per_point());
-                for (index, priority) in want_order(first..end, in_view, current) {
-                    textures.want(photos[index].path(), longest, priority);
+            // The cells in view, and NEAR more at each end.
+            let in_view = in_view(viewport, photos.len());
+            let first = in_view.start.saturating_sub(NEAR);
+            let end = (in_view.end + NEAR).min(photos.len());
+            // Every cell's thumbnail fits in the same tile.
+            let tile = (cell(0) - TILE_INSET).size();
+            let longest = textures::longest(tile.max_elem(), ui.pixels_per_point());
+            for (index, priority) in want_order(first..end, in_view, current) {
+                textures.want(photos[index].path(), longest, priority);
+            }
+            let mut outline = None;
+            for (index, photo) in photos.iter().enumerate().take(end).skip(first) {
+                let rect = cell(index);
+                let is_current = current == Some(index);
+                let thumbnail = textures.thumbnail(photo.path(), longest);
+                if photo_cell(ui, photo, thumbnail, rect, is_current) {
+                    click = Some(index);
                 }
-                let mut outline = None;
-                for (index, photo) in photos.iter().enumerate().take(end).skip(first) {
-                    let rect = cell(index);
-                    let is_current = current == Some(index);
-                    let thumbnail = textures.thumbnail(photo.path(), longest);
-                    if photo_cell(ui, photo, thumbnail, rect, is_current) {
-                        click = Some(index);
-                    }
-                    if is_current {
-                        let place = textures::placed(thumbnail, rect - TILE_INSET);
-                        outline = Some(place.expand(textures::MARK_GAP));
-                    }
+                if is_current {
+                    let place = textures::placed(thumbnail, rect - TILE_INSET);
+                    outline = Some(place.expand(textures::MARK_GAP));
                 }
-                // Last, so the cells next to it do not cover it.
-                if let Some(around) = outline {
-                    let stroke = Stroke::new(OUTLINE, palette.accent);
-                    ui.painter()
-                        .rect_stroke(around, 0.0, stroke, StrokeKind::Outside);
-                }
-            });
+            }
+            // Last, so the cells next to it do not cover it.
+            if let Some(around) = outline {
+                let stroke = Stroke::new(OUTLINE, palette.accent);
+                ui.painter()
+                    .rect_stroke(around, 0.0, stroke, StrokeKind::Outside);
+            }
+        });
     });
     // The photo clicked on is where the pointer is: the strip does not
     // move under it, even when the cell is only partly in view.
