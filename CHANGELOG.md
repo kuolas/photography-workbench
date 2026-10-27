@@ -12,14 +12,22 @@ decision is
 
 ## [Unreleased]
 
+### Added
+
+- A slider at the toolbar's end in the grid sets the size of the
+  thumbnails, from 90 to 480 points: a drag snaps to the sizes at which
+  another tile fits in a row, and a click steps to the next of those on
+  its side of the knob. The grid keeps its place as the thumbnails
+  change, and the size is remembered between runs.
+
 ### Changed
 
 - The grid glides to the current photo when it brings it into view, as
   when the arrow keys move to another row or the grid comes back on
   screen, rather than jumping there.
 - The grid's tiles stretch to fill its width: a row holds as many tiles
-  of 220 points at least as fit, and they share the width equally, to
-  the pixel. Resizing the window, or a dock, keeps the grid's place.
+  of the chosen size at least as fit, and they share the width equally,
+  to the pixel. Resizing the window, or a dock, keeps the grid's place.
 - Thumbnails are decoded up to 1024 pixels long, twice as long as
   before, so the grid's tiles stay sharp on high-resolution screens up
   to twice the size they did.

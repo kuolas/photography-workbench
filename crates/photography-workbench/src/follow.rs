@@ -14,7 +14,9 @@
 /// in egui's memory from one frame to the next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Followed {
-    /// Which list of photos it was: a hash of the folder they are of.
+    /// Which list of photos it was: a hash of the folder they are of,
+    /// and of what else the view takes as a new list to follow, as the
+    /// grid does the size chosen for its tiles.
     list: egui::Id,
     /// The index of the current photo.
     current: Option<usize>,
