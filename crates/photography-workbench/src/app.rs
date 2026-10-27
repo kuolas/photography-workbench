@@ -649,6 +649,15 @@ impl PhotographyWorkbenchApp {
 /// The size of the toolbar's count of photos, and of its zoom.
 const COUNT_SIZE: f32 = 12.5;
 
+/// The width the toolbar's count is laid out in, with its text at the
+/// right: room for the widest count of a folder of up to 9999 photos,
+/// "4444 of 4444" in the font's widest digit, so the controls beside it
+/// stay where they are from photo to photo, as the number gains or loses
+/// a digit or changes to wider ones, and from folder to folder. A folder
+/// of more photos than that, which none is expected to hold, pushes them
+/// a little for its five-digit counts.
+const COUNT_WIDTH: f32 = 84.0;
+
 /// The toolbar's zoom buttons in Library's viewer, from the left: what
 /// each asks for, its name, which screen readers and its tooltip give,
 /// and its Lucide icon, with the text shown in its place if the name does
@@ -761,12 +770,9 @@ fn zoom_controls(
         button(ui, full);
         button(ui, fit);
         button(ui, zoom_in);
-        let text = egui::RichText::new(viewer::zoom_label(percent))
-            .size(COUNT_SIZE)
-            .color(palette.text);
-        let size = egui::vec2(ZOOM_LABEL_WIDTH, ui.available_height());
         ui.add_enabled_ui(shown.is_some(), |ui| {
-            ui.add_sized(size, egui::Label::new(text).selectable(false));
+            let zoom = viewer::zoom_label(percent);
+            fixed_width_label(ui, palette, ZOOM_LABEL_WIDTH, egui::Align::Center, zoom);
         });
         button(ui, out);
     });
@@ -794,6 +800,28 @@ fn empty_state(photos: &Photos) -> Option<(&'static str, String)> {
         )),
         Photos::Read(_) => None,
     }
+}
+
+/// A label of `text` in the toolbar's small type, laid out in `width`
+/// whatever its text's width, with the text at `halign` within it, so
+/// what is laid out beside it never shifts as the text changes: the
+/// viewer's zoom, centred, and the count, at the right. The text is kept
+/// on one line whole, however narrow the width.
+fn fixed_width_label(
+    ui: &mut egui::Ui,
+    palette: &theme::Palette,
+    width: f32,
+    halign: egui::Align,
+    text: String,
+) {
+    let text = egui::RichText::new(text)
+        .size(COUNT_SIZE)
+        .color(palette.text);
+    let label = egui::Label::new(text)
+        .halign(halign)
+        .wrap_mode(egui::TextWrapMode::Extend)
+        .selectable(false);
+    ui.add_sized(egui::vec2(width, ui.available_height()), label);
 }
 
 /// Which of the photos is the current one, as the toolbar shows it:
@@ -940,10 +968,10 @@ impl eframe::App for PhotographyWorkbenchApp {
             let start = |ui: &mut egui::Ui| self.mode_controls(ui, &palette);
             let end = |ui: &mut egui::Ui| {
                 if let Some(position) = position {
-                    let text = egui::RichText::new(position)
-                        .size(COUNT_SIZE)
-                        .color(palette.text);
-                    ui.add(egui::Label::new(text).selectable(false));
+                    // In a fixed width, the text at its right, so the
+                    // controls to its left never shift as the count's
+                    // width changes.
+                    fixed_width_label(ui, &palette, COUNT_WIDTH, egui::Align::RIGHT, position);
                 }
                 if let Some(size) = &mut thumbnail_size {
                     ui.add_space(ZOOM_GAP);
@@ -1111,10 +1139,10 @@ mod tests {
     use crate::menu;
 
     use super::{
-        Action, CAPTURE_TIME_KEY, Docks, FILE_SIZES_KEY, Framing, INFO_OVERLAY_KEY, MODE_KEY, Mode,
-        PhotographyWorkbenchApp, Side, SizeUnits, Sizing, THEME_KEY, THUMBNAIL_SIZE,
-        THUMBNAIL_SIZE_KEY, TITLE_BAR_ICONS, Textures, Theme, TimeForm, VIEW_KEY, View,
-        ZOOM_BUTTONS, ZOOM_GAP, Zooming,
+        Action, CAPTURE_TIME_KEY, COUNT_WIDTH, Docks, FILE_SIZES_KEY, Framing, INFO_OVERLAY_KEY,
+        MODE_KEY, Mode, PhotographyWorkbenchApp, Side, SizeUnits, Sizing, THEME_KEY,
+        THUMBNAIL_SIZE, THUMBNAIL_SIZE_KEY, TITLE_BAR_ICONS, Textures, Theme, TimeForm, VIEW_KEY,
+        View, ZOOM_BUTTONS, ZOOM_GAP, Zooming,
     };
 
     /// Settings kept in memory, in place of eframe's file.
@@ -2133,6 +2161,68 @@ mod tests {
         assert_eq!(toggled(&harness), Some(Toggled::False));
     }
 
+    /// The toolbar's count keeps one width, so the controls to its left
+    /// stay where they are as the current photo's number gains a digit,
+    /// or changes to wider ones, as "10 of 11" is wider than "11 of 11",
+    /// the font's 1 being narrow, and from a folder of 11 photos to one of
+    /// 100: the slider in the grid, the zoom controls in the viewer.
+    #[test]
+    fn the_toolbar_s_count_keeps_its_width_as_the_current_photo_changes() {
+        let dir = folder_of_numbered_photos(11);
+        let mut harness = grid_harness(dir.path());
+        let slider = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            harness.get_by_label(THUMBNAIL_SIZE).rect()
+        };
+        let zoom_out = |harness: &Harness<'_, PhotographyWorkbenchApp>| {
+            harness.get_by_label("Zoom out").rect()
+        };
+        let one = slider(&harness);
+        for n in [10, 11] {
+            make_current(&mut harness, n);
+            assert_eq!(count(&harness), nth(n, 11));
+            assert_eq!(slider(&harness), one, "{n}");
+        }
+        click(&mut harness, "Image viewer");
+        let eleven = zoom_out(&harness);
+        for n in [10, 1] {
+            make_current(&mut harness, n);
+            assert_eq!(count(&harness), nth(n, 11));
+            assert_eq!(zoom_out(&harness), eleven, "{n}");
+        }
+        let hundred = folder_of_numbered_photos(100);
+        let mut harness = grid_harness(hundred.path());
+        make_current(&mut harness, 100);
+        assert_eq!(count(&harness), nth(100, 100));
+        assert_eq!(slider(&harness), one, "a folder of 100");
+    }
+
+    /// The count's width holds the widest count of a folder of 9999
+    /// photos, the font's widest digit four times on each side, with a
+    /// little to spare and not much more. Text is laid out in points, the
+    /// same at every number of pixels a point, so one screen stands for
+    /// all.
+    #[test]
+    fn the_count_s_width_holds_the_widest_count_of_9999_photos() {
+        let harness = harness();
+        let font = egui::FontId::proportional(super::COUNT_SIZE);
+        let width = |text: String| {
+            let galley = harness
+                .ctx
+                .fonts_mut(|fonts| fonts.layout_no_wrap(text, font.clone(), egui::Color32::WHITE));
+            galley.size().x
+        };
+        let widest = ('0'..='9')
+            .max_by(|a, b| width(a.to_string()).total_cmp(&width(b.to_string())))
+            .expect("digits");
+        let digits = widest.to_string().repeat(4);
+        let count = width(format!("{digits} of {digits}"));
+        assert!(count <= COUNT_WIDTH, "{count} for {digits}");
+        assert!(
+            count > COUNT_WIDTH - 4.0,
+            "{count} for {digits}: too much to spare"
+        );
+    }
+
     /// In the grid the slider for the thumbnail size is on the toolbar,
     /// just left of the count, set apart from it, and level with it; the
     /// viewer, which has the zoom controls there, has no slider.
@@ -2148,9 +2238,11 @@ mod tests {
             .find(|node| toolbar.contains_rect(node.rect()))
             .expect("no count")
             .rect();
-        // On top of the toolbar's gap between two controls, 6 points.
+        // On top of the toolbar's gap between two controls, 6 points; the
+        // count is laid out in its fixed width.
         let gap = count.left() - slider.right();
         assert_eq!(gap, ZOOM_GAP + 6.0, "{slider:?} {count:?}");
+        assert_eq!(count.width(), COUNT_WIDTH, "{count:?}");
         assert_eq!(slider.center().y, count.center().y, "{slider:?} {count:?}");
 
         click(&mut harness, "Image viewer");
