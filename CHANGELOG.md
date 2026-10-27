@@ -12,6 +12,12 @@ decision is
 
 ## [Unreleased]
 
+### Changed
+
+- The grid glides to the current photo when it brings it into view, as
+  when the arrow keys move to another row or the grid comes back on
+  screen, rather than jumping there.
+
 ## [0.1.0] - 2026-10-26
 
 The first release: Library, the first of the app's three modes, which

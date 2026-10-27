@@ -3920,6 +3920,59 @@ mod tests {
         assert!(in_grid_view(&harness, &photo(30)));
     }
 
+    /// Brought into view, the current photo's row glides there over the
+    /// next frames rather than jumping, and lands with its tiles whole, 4
+    /// points clear of the view's edge: a row below the view, scrolled
+    /// down to, and one above it, scrolled back up to, neither at the
+    /// grid's ends, where the scrolling stops in any case. The harness
+    /// turns egui's scroll animation off, so this test turns it on
+    /// again, and has its frames a sixtieth of a second apart, as on a
+    /// screen, so the glide shows: a quarter of a second, the usual,
+    /// would cover it.
+    #[test]
+    fn the_grid_glides_to_the_current_photo() {
+        let dir = folder_of_30_photos();
+        let builder = Harness::builder().with_step_dt(1.0 / 60.0);
+        let (mut harness, _) = harness_built(builder, None, vec![home(dir.path())]);
+        harness.get_by_label("Home").click();
+        wait(&mut harness, 1.0);
+        let glide = egui::style::ScrollAnimation::default();
+        harness
+            .ctx
+            .all_styles_mut(|style| style.scroll_animation = glide);
+        let centre = centre(&harness);
+        let columns = tiles_in_a_row(&harness, 30);
+        assert!(in_grid_view(&harness, &photo(1)));
+        // The first photo of the sixth row, below the view.
+        let below = 5 * columns + 1;
+        assert!(
+            grid_tile(&harness, &photo(below)).is_none(),
+            "{below} laid out"
+        );
+        harness.state_mut().browser.select_photo(below - 1);
+        for _ in 0..8 {
+            harness.step();
+        }
+        assert!(!in_grid_view(&harness, &photo(1)), "not moved");
+        assert!(!in_grid_view(&harness, &photo(below)), "jumped");
+        wait(&mut harness, 1.0);
+        let row = grid_tile(&harness, &photo(below)).expect("not laid out");
+        assert!(
+            (row.bottom() - (centre.bottom() - 4.0)).abs() < 0.5,
+            "{row:?} in {centre:?}"
+        );
+        // The first photo of the second row, now above the view.
+        let above = columns + 1;
+        assert!(!in_grid_view(&harness, &photo(above)));
+        harness.state_mut().browser.select_photo(above - 1);
+        wait(&mut harness, 1.0);
+        let row = grid_tile(&harness, &photo(above)).expect("not laid out");
+        assert!(
+            (row.top() - (centre.top() + 4.0)).abs() < 0.5,
+            "{row:?} in {centre:?}"
+        );
+    }
+
     /// A click on a tile the grid's edge cuts makes its photo the current
     /// one and leaves the grid where it is, so the second click of a
     /// double-click lands on the same photo.
