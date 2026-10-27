@@ -40,6 +40,9 @@ pub enum Action {
     Photo(Step),
     /// Zoom the viewer's photo, once its 100 % is known.
     Zoom(Zooming),
+    /// Make the grid's thumbnails larger or smaller, one fewer or one
+    /// more to a row.
+    Thumbnails(Sizing),
     /// Show or hide the photo's information over the viewer's photo.
     PhotoInformation,
     /// Show or hide the side docks together.
@@ -75,6 +78,20 @@ pub enum Step {
     First,
     /// The folder's last photo.
     Last,
+}
+
+/// Which way the grid's thumbnails change size: to the next size the
+/// slider snaps to, one tile fewer or one more to a row
+/// ([`crate::grid::larger`], [`crate::grid::smaller`]), up to the range's
+/// ends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sizing {
+    /// Make the grid's thumbnails larger, one fewer to a row, up to the
+    /// largest.
+    Larger,
+    /// Make the grid's thumbnails smaller, one more to a row, down to the
+    /// smallest.
+    Smaller,
 }
 
 /// The sections of the reference, each holding the shortcuts of one kind.
@@ -123,8 +140,9 @@ struct Binding {
     group: Group,
     description: &'static str,
     /// Whether the action is done again while the key is held, as the
-    /// system repeats it: for a step through the photos, but not for a
-    /// toggle, which a held key would turn on and off.
+    /// system repeats it: for a step through the photos or of the
+    /// thumbnails' size, but not for a toggle, which a held key would turn
+    /// on and off.
     repeats: bool,
 }
 
@@ -205,6 +223,30 @@ const BINDINGS: &[Binding] = &[
         VIEWER,
         "Show or hide the photo's information",
     ),
+    repeating(bind(
+        Group::Views,
+        (NONE, Key::Equals),
+        Action::Thumbnails(Sizing::Larger),
+        GRID,
+        "Larger thumbnails",
+    )),
+    // Where the keyboard types `+` with Shift on the `=` key, as a US one
+    // does, or on a key of its own, as a German one does, or on the
+    // keypad.
+    repeating(bind(
+        Group::Views,
+        (NONE, Key::Plus),
+        Action::Thumbnails(Sizing::Larger),
+        GRID,
+        "Larger thumbnails",
+    )),
+    repeating(bind(
+        Group::Views,
+        (NONE, Key::Minus),
+        Action::Thumbnails(Sizing::Smaller),
+        GRID,
+        "Smaller thumbnails",
+    )),
     repeating(bind(
         Group::Photos,
         (NONE, Key::ArrowLeft),
@@ -561,8 +603,8 @@ mod tests {
     }
 
     /// A key held down does again, as the system repeats it, an action
-    /// that steps through the photos, and not one that shows or hides
-    /// something, which would flicker on and off.
+    /// that steps through the photos or the thumbnails' sizes, and not one
+    /// that shows or hides something, which would flicker on and off.
     #[test]
     fn a_held_key_steps_through_the_photos_but_toggles_once() {
         let press = |key| egui::Event::Key {
@@ -578,7 +620,7 @@ mod tests {
                 // egui counts a key that goes down again while it is
                 // down as repeating.
                 let input = egui::RawInput {
-                    events: vec![press(Key::ArrowRight), press(Key::Tab)],
+                    events: vec![press(Key::ArrowRight), press(Key::Tab), press(Key::Minus)],
                     ..egui::RawInput::default()
                 };
                 let mut actions = Vec::new();
@@ -590,9 +632,14 @@ mod tests {
             })
             .collect();
         let next = Action::Photo(Step::Next);
+        let smaller = Action::Thumbnails(Sizing::Smaller);
         assert_eq!(
             frames,
-            [vec![next, Action::SideDocks], vec![next], vec![next]]
+            [
+                vec![smaller, next, Action::SideDocks],
+                vec![smaller, next],
+                vec![smaller, next]
+            ]
         );
     }
 
@@ -673,13 +720,33 @@ mod tests {
         assert_eq!(left, [Key::Tab]);
     }
 
-    /// Only the keys that move between photos repeat.
+    /// The keys that move between photos repeat, and so do those that
+    /// change the thumbnails' size, which goes on by a step while one is
+    /// held; no other key does.
     #[test]
-    fn only_the_photo_keys_repeat() {
+    fn the_photo_keys_and_the_thumbnail_size_s_repeat() {
         for binding in BINDINGS {
-            let photo = matches!(binding.action, Action::Photo(_));
-            assert_eq!(binding.repeats, photo, "{:?}", binding.action);
+            let steps = matches!(binding.action, Action::Photo(_) | Action::Thumbnails(_));
+            assert_eq!(binding.repeats, steps, "{:?}", binding.action);
         }
+    }
+
+    /// The keys that change the thumbnails' size are the grid's: a control
+    /// in the grid is named `=` for larger, the first in the table, and
+    /// `-` for smaller; nothing in the viewer, nor wherever the keys
+    /// apply, as a menu item would be.
+    #[test]
+    fn the_thumbnail_size_s_combinations_are_the_grid_s() {
+        let larger = Action::Thumbnails(Sizing::Larger);
+        let smaller = Action::Thumbnails(Sizing::Smaller);
+        let equals = KeyCombination::new(NONE, Key::Equals);
+        let minus = KeyCombination::new(NONE, Key::Minus);
+        assert_eq!(key_combination_for(Surface::Grid, larger), Some(equals));
+        assert_eq!(key_combination_for(Surface::Grid, smaller), Some(minus));
+        assert_eq!(key_combination_for(Surface::Viewer, larger), None);
+        assert_eq!(key_combination_for(Surface::Viewer, smaller), None);
+        assert_eq!(key_combination_everywhere(larger), None);
+        assert_eq!(key_combination_everywhere(smaller), None);
     }
 
     /// A control is named the key combination that does what it does where
@@ -816,8 +883,9 @@ mod tests {
     }
 
     /// The reference lists first, under Views, the keys that switch the
-    /// view and the one that shows or hides the photo's information over
-    /// the viewer's photo.
+    /// view, the one that shows or hides the photo's information over the
+    /// viewer's photo, and those that make the grid's thumbnails larger
+    /// and smaller.
     #[test]
     fn the_reference_lists_the_views_keys_first() {
         let sections = sections();
@@ -829,8 +897,68 @@ mod tests {
             (label(Key::Enter), "Open the photo in the viewer"),
             (label(Key::Escape), "Back to the thumbnail grid"),
             (label(Key::I), "Show or hide the photo's information"),
+            (label(Key::Equals), "Larger thumbnails"),
+            (label(Key::Plus), "Larger thumbnails"),
+            (label(Key::Minus), "Smaller thumbnails"),
         ];
         assert_eq!(sections[0].rows, rows);
+    }
+
+    /// In the grid, `=` makes the thumbnails larger, and so does `+`, typed
+    /// with Shift on the `=` key as a US keyboard types it, or on a key of
+    /// its own; `-` makes them smaller. Held with Ctrl, they do nothing
+    /// there. In the viewer they do nothing, and are left in its input.
+    #[test]
+    fn equals_plus_and_minus_size_the_thumbnails_in_the_grid_only() {
+        let thumbnails = |sizing| vec![Action::Thumbnails(sizing)];
+        let cases = [
+            (
+                typed(Key::Equals, Key::Equals, NONE),
+                thumbnails(Sizing::Larger),
+            ),
+            (
+                typed(Key::Plus, Key::Equals, SHIFT),
+                thumbnails(Sizing::Larger),
+            ),
+            (
+                typed(Key::Plus, Key::CloseBracket, NONE),
+                thumbnails(Sizing::Larger),
+            ),
+            (
+                typed(Key::Minus, Key::Minus, NONE),
+                thumbnails(Sizing::Smaller),
+            ),
+            (typed(Key::Equals, Key::Equals, CTRL), vec![]),
+            (typed(Key::Minus, Key::Minus, CTRL), vec![]),
+        ];
+        for (event, actions) in cases {
+            assert_eq!(
+                pressed_in(Surface::Grid, vec![event.clone()]),
+                actions,
+                "{event:?}"
+            );
+        }
+        let size_keys = BINDINGS
+            .iter()
+            .filter(|binding| matches!(binding.action, Action::Thumbnails(_)));
+        for binding in size_keys {
+            let KeyCombination { modifiers, key } = binding.key_combination;
+            let label = binding.key_combination.label();
+            assert_eq!(binding.surfaces, GRID, "{label}");
+            let ctx = egui::Context::default();
+            let input = egui::RawInput {
+                events: vec![typed(key, key, modifiers)],
+                ..egui::RawInput::default()
+            };
+            let (mut actions, mut left) = (Vec::new(), Vec::new());
+            let mut output = ctx.run_ui(input, |ui| {
+                actions = take_pressed_actions(ui.ctx(), Surface::Viewer);
+                left = keys_left(ui.ctx());
+            });
+            output.textures_delta.clear();
+            assert_eq!(actions, [], "{label}");
+            assert_eq!(left, [key], "{label}");
+        }
     }
 
     /// The zoom keys do nothing in the grid, and are left in its input.

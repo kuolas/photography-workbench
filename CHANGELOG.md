@@ -18,7 +18,10 @@ decision is
   thumbnails, from 90 to 480 points: a drag snaps to the sizes at which
   another tile fits in a row, and a click steps to the next of those on
   its side of the knob. The grid keeps its place as the thumbnails
-  change, and the size is remembered between runs.
+  change, and the size is remembered between runs. In the grid the keys
+  = and - make the thumbnails larger and smaller, one fewer or one more
+  to a row, and go on while held; on macOS the View menu has the same
+  two items.
 
 ### Changed
 
