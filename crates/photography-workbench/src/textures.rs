@@ -94,9 +94,16 @@ use previews::{Answer, Decoder, Failure, Size};
 use raw_files::Metadata;
 
 /// The sizes thumbnails are decoded at, as the longest side in pixels,
-/// smallest first. Few sizes mean few textures of a photo, each serving
-/// a view at any zoom near its size.
-const SIZES: [u32; 3] = [256, 384, 512];
+/// smallest first, each 1.5 or 1.33 times the one before. Few sizes mean
+/// few textures of a photo, each serving a view at any zoom near its
+/// size. The largest keeps a thumbnail sharp up to 1024 points long on a
+/// screen of one pixel a point, and up to 512 on a screen of two. The
+/// RAW files of today's cameras, and the JPEG files cameras write, carry
+/// a preview about 1620 pixels long beside the full-size image, which
+/// covers every size, so a thumbnail of them is never decoded from the
+/// full-size image; older files whose only smaller preview is about 570
+/// pixels long have the larger sizes decoded from the full-size image.
+const SIZES: [u32; 5] = [256, 384, 512, 768, 1024];
 
 /// The longest side of the smallest thumbnail, in pixels: the quickest
 /// to decode.
@@ -105,6 +112,16 @@ pub const SMALLEST_THUMBNAIL: u32 = SIZES[0];
 /// The longest side of the largest thumbnail, in pixels: a texture
 /// decoded at more than this is a picture.
 pub const LARGEST_THUMBNAIL: u32 = SIZES[SIZES.len() - 1];
+
+/// The longest side, in pixels, of the largest thumbnail that is still
+/// quick to decode from any camera's file: the smaller preview every
+/// RAW file carries, and the smallest copy a camera's JPEG file carries,
+/// is some 570 pixels long at least, and covers this size, where a
+/// larger one is decoded from a larger preview, or from the full-size
+/// image for a file with no other. A JPEG file from elsewhere, with no
+/// smaller copy in it, decodes every size from its one image. The viewer
+/// wants a thumbnail no larger than this to stand in for its picture.
+pub const QUICK_THUMBNAIL: u32 = SIZES[2];
 
 /// The most memory the thumbnails may take, in bytes, unless those
 /// wanted in one frame need more.
@@ -1004,7 +1021,11 @@ mod tests {
         assert_eq!(longest(256.5, 1.0), 384);
         assert_eq!(longest(200.0, 1.5), 384);
         assert_eq!(longest(200.0, 2.0), 512);
-        assert_eq!(longest(200.0, 3.0), 512);
+        assert_eq!(longest(200.0, 3.0), 768);
+        assert_eq!(longest(300.0, 2.0), 768);
+        assert_eq!(longest(500.0, 2.0), 1024);
+        assert_eq!(longest(1000.0, 1.0), 1024);
+        assert_eq!(longest(600.0, 2.0), 1024);
         assert_eq!(longest(0.0, 2.0), 256);
     }
 
@@ -1288,7 +1309,7 @@ mod tests {
         let a = dir.path().join("a.jpg");
         let ctx = egui::Context::default();
         let mut store = Textures::inline();
-        decoded(&mut store, &ctx, &a, 768);
+        decoded(&mut store, &ctx, &a, 1280);
         assert_eq!(store.thumbnail(&a, 384), Thumbnail::Pending);
         let small = decoded(&mut store, &ctx, &a, 256);
         assert_eq!(texture_of(store.thumbnail(&a, 384)), Some(small));
@@ -1314,25 +1335,25 @@ mod tests {
             failed: false,
             coming: true,
         };
-        assert_eq!(store.picture(&a, 1024), nothing);
+        assert_eq!(store.picture(&a, 1536), nothing);
         let thumbnail = decoded(&mut store, &ctx, &a, 512);
-        decoded(&mut store, &ctx, &a, 2048);
-        let shown = store.picture(&a, 1024);
+        decoded(&mut store, &ctx, &a, 2560);
+        let shown = store.picture(&a, 1536);
         assert_eq!(texture_of(shown.shown), Some(thumbnail));
         assert!(!shown.decoded && shown.coming, "{shown:?}");
-        let smaller = decoded(&mut store, &ctx, &a, 768);
-        assert_eq!(texture_of(store.picture(&a, 1024).shown), Some(smaller));
-        let exact = decoded(&mut store, &ctx, &a, 1024);
-        let shown = store.picture(&a, 1024);
+        let smaller = decoded(&mut store, &ctx, &a, 1280);
+        assert_eq!(texture_of(store.picture(&a, 1536).shown), Some(smaller));
+        let exact = decoded(&mut store, &ctx, &a, 1536);
+        let shown = store.picture(&a, 1536);
         assert_eq!(texture_of(shown.shown), Some(exact));
         assert!(shown.decoded && !shown.coming, "{shown:?}");
 
-        decoded(&mut store, &ctx, &b, 2048);
-        let nearer = decoded(&mut store, &ctx, &b, 1536);
-        assert_eq!(texture_of(store.picture(&b, 1024).shown), Some(nearer));
+        decoded(&mut store, &ctx, &b, 2304);
+        let nearer = decoded(&mut store, &ctx, &b, 2048);
+        assert_eq!(texture_of(store.picture(&b, 1536).shown), Some(nearer));
 
         store.shown(1);
-        let shown = store.picture(&a, 1024);
+        let shown = store.picture(&a, 1536);
         assert_eq!(texture_of(shown.shown), Some(exact));
         assert!(!shown.decoded && !shown.coming, "{shown:?}");
     }
@@ -1366,7 +1387,7 @@ mod tests {
                 height: 300
             })
         );
-        decoded(&mut store, &ctx, &b, 1024);
+        decoded(&mut store, &ctx, &b, 1280);
         assert_eq!(store.largest(&b), size(400, 300), "from a picture");
 
         fs::write(&a, jpeg(600, 200)).unwrap();
@@ -1374,7 +1395,7 @@ mod tests {
         store.shown(1);
         assert_eq!(store.largest(&a), size(400, 300), "until decoded again");
         assert_eq!(store.details(&a).unwrap().bytes, before);
-        decoded(&mut store, &ctx, &a, 1024);
+        decoded(&mut store, &ctx, &a, 1280);
         assert_eq!(store.largest(&a), size(600, 200), "the newest decode's");
         assert_eq!(store.details(&a).unwrap().bytes, on_disk(&a));
 
@@ -1397,7 +1418,7 @@ mod tests {
         decoded(&mut store, &ctx, &b, 256);
         store.begin_frame(&ctx);
         assert!(!store.is_wanted(&a));
-        store.want(&a, 1024, CURRENT_PICTURE);
+        store.want(&a, 1280, CURRENT_PICTURE);
         assert!(store.is_wanted(&a));
         assert!(texture_of(store.thumbnail(&b, 256)).is_some());
         assert!(!store.is_wanted(&b), "drawn, not wanted");
@@ -1419,26 +1440,26 @@ mod tests {
         let mut store = Textures::inline();
         for path in [&a, &b, &c] {
             decoded(&mut store, &ctx, path, 256);
-            decoded(&mut store, &ctx, path, 1024);
+            decoded(&mut store, &ctx, path, 1280);
         }
         let (thumbnail, picture) = (4 * 256 * 192, 4 * 400 * 300);
         // Of the pictures not wanted, `b`'s was wanted last the longest
         // ago.
         store.budget.pictures = 2 * picture;
         store.begin_frame(&ctx);
-        store.want(&a, 1024, NEIGHBOURS);
+        store.want(&a, 1280, NEIGHBOURS);
         store.end_frame(&ctx);
-        assert_eq!(store.texture(&b, 1024), None);
-        assert!(store.texture(&a, 1024).is_some() && store.texture(&c, 1024).is_some());
+        assert_eq!(store.texture(&b, 1280), None);
+        assert!(store.texture(&a, 1280).is_some() && store.texture(&c, 1280).is_some());
         for path in [&a, &b, &c] {
             assert!(store.texture(path, 256).is_some(), "{path:?}");
         }
         store.budget.pictures = 1;
         store.begin_frame(&ctx);
-        store.want(&a, 1024, NEIGHBOURS);
+        store.want(&a, 1280, NEIGHBOURS);
         store.end_frame(&ctx);
-        assert_eq!(store.texture(&c, 1024), None);
-        assert!(store.texture(&a, 1024).is_some(), "wanted in the frame");
+        assert_eq!(store.texture(&c, 1280), None);
+        assert!(store.texture(&a, 1280).is_some(), "wanted in the frame");
 
         store.budget = ByKind {
             thumbnails: thumbnail,
@@ -1450,7 +1471,7 @@ mod tests {
         assert_eq!(store.texture(&a, 256), None);
         assert_eq!(store.texture(&c, 256), None);
         assert!(store.texture(&b, 256).is_some(), "drawn in the frame");
-        assert!(store.texture(&a, 1024).is_some(), "within its own budget");
+        assert!(store.texture(&a, 1280).is_some(), "within its own budget");
     }
 
     /// A picture that cannot be decoded is not tried again, but leaves
@@ -1468,43 +1489,43 @@ mod tests {
         let ctx = egui::Context::default();
         let mut store = Textures::inline();
         store.begin_frame(&ctx);
-        store.fail(&ctx, &a, 1024, Failure::Damaged);
+        store.fail(&ctx, &a, 1280, Failure::Damaged);
         let nothing = Picture {
             shown: Thumbnail::Pending,
             decoded: false,
             failed: true,
             coming: false,
         };
-        assert_eq!(store.picture(&a, 1024), nothing);
+        assert_eq!(store.picture(&a, 1280), nothing);
         store.want(&a, 512, CURRENT);
-        store.want(&a, 1024, CURRENT_PICTURE);
+        store.want(&a, 1280, CURRENT_PICTURE);
         assert_eq!(pending(&store), 1, "the picture is tried again");
         store.end_frame(&ctx);
         store.begin_frame(&ctx);
         let thumbnail = store.texture(&a, 512).expect("no thumbnail");
         assert_eq!(texture_of(store.thumbnail(&a, 512)), Some(thumbnail));
-        let shown = store.picture(&a, 1024);
+        let shown = store.picture(&a, 1280);
         assert_eq!(texture_of(shown.shown), Some(thumbnail));
         assert!(!shown.decoded && shown.failed && !shown.coming, "{shown:?}");
 
         store.fail(&ctx, &b, 256, Failure::Damaged);
         store.want(&b, 256, ON_SCREEN);
-        store.want(&b, 1024, CURRENT_PICTURE);
+        store.want(&b, 1280, CURRENT_PICTURE);
         assert_eq!(pending(&store), 1, "the thumbnail is tried again");
         store.end_frame(&ctx);
         store.begin_frame(&ctx);
-        let picture = store.texture(&b, 1024).expect("no picture");
-        let shown = store.picture(&b, 1024);
+        let picture = store.texture(&b, 1280).expect("no picture");
+        let shown = store.picture(&b, 1280);
         assert_eq!(texture_of(shown.shown), Some(picture));
         assert!(shown.decoded && !shown.failed, "{shown:?}");
         let failed = Thumbnail::Failed(Failure::Damaged);
         assert_eq!(store.thumbnail(&b, 256), failed);
 
-        store.fail(&ctx, &c, 1024, Failure::Damaged);
-        assert_eq!(store.picture(&c, 1024), nothing);
+        store.fail(&ctx, &c, 1280, Failure::Damaged);
+        assert_eq!(store.picture(&c, 1280), nothing);
         store.fail(&ctx, &c, 512, Failure::NoPreview);
         assert_eq!(
-            store.picture(&c, 1024),
+            store.picture(&c, 1280),
             Picture {
                 shown: failed,
                 ..nothing
@@ -1512,7 +1533,7 @@ mod tests {
         );
         store.shown(1);
         assert!(
-            !store.picture(&a, 1024).failed,
+            !store.picture(&a, 1280).failed,
             "known from before the read"
         );
         store.end_frame(&ctx);
@@ -1531,22 +1552,22 @@ mod tests {
         let ctx = egui::Context::default();
         let mut store = Textures::inline();
         store.begin_frame(&ctx);
-        store.fail(&ctx, &a, 1024, Failure::Damaged);
-        let other = store.picture(&a, 1280);
+        store.fail(&ctx, &a, 1280, Failure::Damaged);
+        let other = store.picture(&a, 1536);
         assert!(!other.failed && other.coming, "{other:?}");
-        store.want(&a, 1024, CURRENT_PICTURE);
-        assert_eq!(pending(&store), 0, "the size that failed");
         store.want(&a, 1280, CURRENT_PICTURE);
+        assert_eq!(pending(&store), 0, "the size that failed");
+        store.want(&a, 1536, CURRENT_PICTURE);
         assert_eq!(pending(&store), 1, "another size");
         store.end_frame(&ctx);
         store.begin_frame(&ctx);
         let picture = store
-            .texture(&a, 1280)
+            .texture(&a, 1536)
             .expect("not decoded at another size");
-        let shown = store.picture(&a, 1280);
+        let shown = store.picture(&a, 1536);
         assert_eq!(texture_of(shown.shown), Some(picture));
         assert!(shown.decoded && !shown.failed, "{shown:?}");
-        assert!(store.picture(&a, 1024).failed);
+        assert!(store.picture(&a, 1280).failed);
 
         store.fail(&ctx, &b, 256, Failure::Damaged);
         let failed = Thumbnail::Failed(Failure::Damaged);
@@ -1571,10 +1592,10 @@ mod tests {
         let ctx = egui::Context::default();
         let mut store = Textures::inline();
         store.begin_frame(&ctx);
-        store.fail(&ctx, &a, 1024, Failure::Damaged);
-        assert_eq!(store.picture(&a, 1280).shown, Thumbnail::Pending);
+        store.fail(&ctx, &a, 1280, Failure::Damaged);
+        assert_eq!(store.picture(&a, 1536).shown, Thumbnail::Pending);
         store.fail(&ctx, &a, 512, Failure::Damaged);
-        let shown = store.picture(&a, 1280);
+        let shown = store.picture(&a, 1536);
         let expected = Picture {
             shown: Thumbnail::Failed(Failure::Damaged),
             decoded: false,
@@ -1582,7 +1603,7 @@ mod tests {
             coming: true,
         };
         assert_eq!(shown, expected);
-        store.want(&a, 1280, CURRENT_PICTURE);
+        store.want(&a, 1536, CURRENT_PICTURE);
         assert_eq!(pending(&store), 1, "not tried");
         store.end_frame(&ctx);
     }
@@ -1601,8 +1622,8 @@ mod tests {
             (&b, 256, ON_SCREEN),
             (&c, 256, AHEAD),
             (&a, 512, CURRENT),
-            (&c, 1024, NEIGHBOURS),
-            (&a, 1024, CURRENT_PICTURE),
+            (&c, 1280, NEIGHBOURS),
+            (&a, 1280, CURRENT_PICTURE),
         ];
         store.begin_frame(&ctx);
         for (path, longest, tier) in wanted {

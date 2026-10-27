@@ -39,8 +39,10 @@
 //! the graphics card takes ([`picture_side`]). A picture takes a while to
 //! decode, as it is decoded from one of the larger images the file holds,
 //! a RAW file's preview or a JPEG's own image or a large copy of it, so the
-//! photo's thumbnail at the largest size thumbnails are decoded at is
-//! wanted before it, as a quick stand-in; while the picture is on its
+//! photo's thumbnail is wanted before it, as a quick stand-in: of the
+//! smallest size that covers the room, but no larger than the largest
+//! every file decodes quickly, from the smaller preview it carries beside
+//! the full-size image ([`stand_in_side`]). While the picture is on its
 //! way, the best texture of the photo held is shown in its place, so a
 //! photo stepped to shows at once when the filmstrip holds its thumbnail.
 //! Once the picture is settled, held or known not to decode, or the photo
@@ -388,7 +390,8 @@ fn loading(coming: bool, waited: f64) -> Loading {
 /// What the viewer wants decoded of a photo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Wanted {
-    /// Its thumbnail at the largest size thumbnails are decoded at.
+    /// Its thumbnail, the quick stand-in for its picture
+    /// ([`stand_in_side`]).
     Thumbnail,
     /// Its picture.
     Picture,
@@ -501,7 +504,7 @@ pub fn show(
         }
         _ => None,
     };
-    let thumbnail = textures::longest(points, pixels_per_point);
+    let thumbnail = stand_in_side(points, pixels_per_point);
     let order = want_order(
         current,
         photos.len(),
@@ -728,6 +731,19 @@ fn room(centre: Rect) -> Rect {
     centre - Margin::same(MARGIN)
 }
 
+/// The longest side, in pixels, to decode the thumbnail at that stands in
+/// for the picture of a photo fitted in a room whose long side is `points`
+/// long, on a screen of `pixels_per_point`: the smallest thumbnail size
+/// that covers the room ([`textures::longest`]), but no larger than the
+/// largest every camera's file decodes quickly
+/// ([`textures::QUICK_THUMBNAIL`]), so the stand-in of a file that
+/// carries a smaller preview never waits on the full-size image as the
+/// picture may, and a file with no larger preview than that does not
+/// decode the full-size image twice over.
+fn stand_in_side(points: f32, pixels_per_point: f32) -> u32 {
+    textures::longest(points, pixels_per_point).min(textures::QUICK_THUMBNAIL)
+}
+
 /// The longest side, in pixels, to decode the picture of a photo at that
 /// is fitted in a room whose long side is `points` long, on a screen of
 /// `pixels_per_point`, where the graphics card takes textures of at most
@@ -735,7 +751,7 @@ fn room(centre: Rect) -> Rect {
 /// a step of [`STEP`], no longer than `max_side`, and never as short as a
 /// thumbnail ([`textures::LARGEST_THUMBNAIL`]), so it is always a picture,
 /// at least a step longer than the largest thumbnail. Every card takes
-/// textures of 2048 pixels a side, far more than that.
+/// textures of 2048 pixels a side, more than that.
 pub fn picture_side(points: f32, pixels_per_point: f32, max_side: usize) -> u32 {
     // A negative or not-a-number length is cast to none.
     let pixels = (points * pixels_per_point).ceil() as u32;
@@ -803,7 +819,7 @@ mod tests {
 
     use super::{
         LOADING_AFTER, Loading, Waiting, Wanted, Wheel, counts, cursor, largest_side, loading,
-        painted, picture_side, room, want_order, zoom_label,
+        painted, picture_side, room, stand_in_side, want_order, zoom_label,
     };
     use crate::textures::{self, CURRENT, CURRENT_PICTURE, NEIGHBOURS, Thumbnail, placed};
     use crate::zoom::{Framing, Stage, Zoom};
@@ -836,21 +852,36 @@ mod tests {
         assert_eq!(drawn([300, 200], centre), room);
     }
 
+    /// The stand-in is the thumbnail that covers the room, up to 512
+    /// pixels, the largest every file decodes quickly.
+    #[test]
+    fn the_stand_in_is_the_thumbnail_that_covers_the_room_up_to_the_quick_size() {
+        assert_eq!(stand_in_side(200.0, 1.0), 256);
+        assert_eq!(stand_in_side(300.0, 1.0), 384);
+        assert_eq!(stand_in_side(500.0, 1.0), 512);
+        assert_eq!(stand_in_side(700.0, 1.0), 512);
+        assert_eq!(stand_in_side(1000.0, 2.0), 512);
+        assert_eq!(stand_in_side(200.0, 2.0), 512);
+    }
+
     /// A picture is as long as the room's long side in pixels, rounded up
     /// to a step of 256, on a screen of one pixel a point or two; no
     /// longer than the card's largest texture; and always a step longer
     /// than the largest thumbnail, however small the room.
     #[test]
     fn a_picture_is_the_room_in_pixels_rounded_up_to_a_step() {
-        assert_eq!(picture_side(1000.0, 1.0, 16384), 1024);
-        assert_eq!(picture_side(1024.0, 1.0, 16384), 1024);
-        assert_eq!(picture_side(1024.5, 1.0, 16384), 1280);
+        assert_eq!(picture_side(1300.0, 1.0, 16384), 1536);
+        assert_eq!(picture_side(1536.0, 1.0, 16384), 1536);
+        assert_eq!(picture_side(1536.5, 1.0, 16384), 1792);
         assert_eq!(picture_side(1000.0, 2.0, 16384), 2048);
         assert_eq!(picture_side(1100.0, 2.0, 16384), 2304);
         assert_eq!(picture_side(1100.0, 2.0, 2048), 2048);
         assert_eq!(picture_side(9000.0, 2.0, 16384), 16384);
-        assert_eq!(picture_side(300.0, 1.0, 16384), 768);
-        assert_eq!(picture_side(0.0, 2.0, 16384), 768);
+        assert_eq!(picture_side(1000.0, 1.0, 16384), 1280);
+        assert_eq!(picture_side(1024.0, 1.0, 16384), 1280);
+        assert_eq!(picture_side(1024.5, 1.0, 16384), 1280);
+        assert_eq!(picture_side(300.0, 1.0, 16384), 1280);
+        assert_eq!(picture_side(0.0, 2.0, 16384), 1280);
         assert!(picture_side(512.0, 1.0, 16384) > textures::LARGEST_THUMBNAIL);
     }
 

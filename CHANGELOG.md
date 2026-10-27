@@ -20,6 +20,9 @@ decision is
 - The grid's tiles stretch to fill its width: a row holds as many tiles
   of 220 points at least as fit, and they share the width equally, to
   the pixel. Resizing the window, or a dock, keeps the grid's place.
+- Thumbnails are decoded up to 1024 pixels long, twice as long as
+  before, so the grid's tiles stay sharp on high-resolution screens up
+  to twice the size they did.
 
 ## [0.1.0] - 2026-10-26
 
