@@ -28,6 +28,9 @@ decision is
 - The grid glides to the current photo when it brings it into view, as
   when the arrow keys move to another row or the grid comes back on
   screen, rather than jumping there.
+- The filmstrip glides to the current photo too when it brings it into
+  view after the photo changed, rather than jumping; it still jumps when
+  it comes on screen with the viewer.
 - The grid's tiles stretch to fill its width: a row holds as many tiles
   of the chosen size at least as fit, and they share the width equally,
   to the pixel. Resizing the window, or a dock, keeps the grid's place.

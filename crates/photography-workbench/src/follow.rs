@@ -8,7 +8,8 @@
 //!
 //! Each view keeps what it followed in egui's memory from one frame to
 //! the next, under an id of its own, and asks [`follows`] once a frame,
-//! before it scrolls.
+//! before it scrolls. It is told why, too: a view that has just come on
+//! screen may move differently from one the photo changed in.
 
 /// What a view last brought into view, and when it was last drawn, kept
 /// in egui's memory from one frame to the next.
@@ -24,18 +25,40 @@ struct Followed {
     pass: u64,
 }
 
+/// Why a view brings the current photo into view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reason {
+    /// The view was not drawn in the pass before: it has just come on
+    /// screen, whether or not the photo changed meanwhile.
+    Return,
+    /// The current photo, or the list, changed since the view was last
+    /// drawn, which was the pass before.
+    Change,
+}
+
 /// Whether the view `id`, drawn in this pass showing the list `list`
 /// with the photo at `current` current, is to bring that photo into
-/// view: when the photo or the list changed since the view was last
-/// drawn, or the view was not drawn in the pass before, having just come
-/// on screen. Remembers what it was asked, for the next pass.
-pub fn follows(ctx: &egui::Context, id: egui::Id, list: egui::Id, current: Option<usize>) -> bool {
+/// view, and why: [`Reason::Return`] when the view was not drawn in the
+/// pass before, having just come on screen, or [`Reason::Change`] when
+/// the photo or the list changed since the pass before; `None` otherwise,
+/// and when asked again in the same pass. Remembers what it was asked,
+/// for the next pass.
+pub fn follows(
+    ctx: &egui::Context,
+    id: egui::Id,
+    list: egui::Id,
+    current: Option<usize>,
+) -> Option<Reason> {
     let pass = ctx.cumulative_pass_nr();
     let before = ctx.data(|data| data.get_temp::<Followed>(id));
     remember(ctx, id, list, current);
-    before.is_none_or(|before| {
-        before.list != list || before.current != current || before.pass + 1 < pass
-    })
+    match before {
+        None => Some(Reason::Return),
+        Some(before) if before.pass + 1 < pass => Some(Reason::Return),
+        Some(before) => {
+            (before.list != list || before.current != current).then_some(Reason::Change)
+        }
+    }
 }
 
 /// Tell the view `id`, drawn in this pass showing the list `list`, that
@@ -59,7 +82,7 @@ fn remember(ctx: &egui::Context, id: egui::Id, list: egui::Id, current: Option<u
 
 #[cfg(test)]
 mod tests {
-    use super::{follows, shown};
+    use super::{Reason, follows, shown};
 
     /// What a view does in a pass: drawn showing a list with a current
     /// photo, and that photo then clicked on, or not; or not drawn.
@@ -70,13 +93,16 @@ mod tests {
         /// Drawn showing the list and the index of the current photo,
         /// then the photo at the second index clicked on.
         Clicked(&'static str, usize, usize),
+        /// Drawn showing the list and the index of the current photo, and
+        /// asked again in the same pass, as a view drawn twice would.
+        Twice(&'static str, usize),
         /// Not drawn.
         Hidden,
     }
 
     /// Whether the view follows the current photo in each of a run of
-    /// passes, `None` for a pass it was not drawn in.
-    fn follows_in(passes: &[Pass]) -> Vec<Option<bool>> {
+    /// passes, and why, `None` for a pass it was not drawn in.
+    fn follows_in(passes: &[Pass]) -> Vec<Option<Option<Reason>>> {
         let ctx = egui::Context::default();
         let id = egui::Id::new("view");
         passes
@@ -95,6 +121,11 @@ mod tests {
                             follow = Some(follows(ctx, id, list, Some(current)));
                             shown(ctx, id, list, Some(clicked));
                         }
+                        Pass::Twice(list, current) => {
+                            let list = egui::Id::new(list);
+                            follows(ctx, id, list, Some(current));
+                            follow = Some(follows(ctx, id, list, Some(current)));
+                        }
                         Pass::Hidden => {}
                     }
                 });
@@ -105,13 +136,16 @@ mod tests {
             .collect()
     }
 
-    /// A view follows when it is first drawn, when the current photo
-    /// changes, when the list does, though the current photo is at the
-    /// same place in it, and when it comes back after a pass it was not
-    /// drawn in; and not otherwise.
+    /// A view follows when it is first drawn, as it has just come on
+    /// screen, when the current photo changes, when the list does, though
+    /// the current photo is at the same place in it, and when it comes
+    /// back after a pass it was not drawn in, whether or not the photo
+    /// changed meanwhile; and not otherwise, nor when asked again in the
+    /// same pass.
     #[test]
     fn a_view_follows_only_when_what_it_shows_changes() {
-        use Pass::{Drawn, Hidden};
+        use Pass::{Drawn, Hidden, Twice};
+        use Reason::{Change, Return};
         let passes = [
             Drawn("a", 0),
             Drawn("a", 0),
@@ -122,11 +156,21 @@ mod tests {
             Hidden,
             Drawn("b", 3),
             Drawn("b", 3),
+            Hidden,
+            Drawn("b", 4),
+            Twice("b", 5),
         ];
-        let followed = [true, false, true, false, true, false]
+        let followed = [Some(Return), None, Some(Change), None, Some(Change), None]
             .map(Some)
             .into_iter()
-            .chain([None, Some(true), Some(false)]);
+            .chain([
+                None,
+                Some(Some(Return)),
+                Some(None),
+                None,
+                Some(Some(Return)),
+                Some(None),
+            ]);
         assert_eq!(follows_in(&passes), followed.collect::<Vec<_>>());
     }
 
@@ -144,7 +188,12 @@ mod tests {
         ];
         assert_eq!(
             follows_in(&passes),
-            [Some(true), Some(false), Some(false), Some(true)]
+            [
+                Some(Some(Reason::Return)),
+                Some(None),
+                Some(None),
+                Some(Some(Reason::Change))
+            ]
         );
     }
 }

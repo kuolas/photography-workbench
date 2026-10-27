@@ -4004,6 +4004,52 @@ mod tests {
         assert!(!in_filmstrip_view(&harness, &photo(26)));
     }
 
+    /// A photo made current far along the strip is brought to its middle
+    /// gliding, over the next frames, rather than jumping; the strip come
+    /// on screen with the viewer, though, jumps to the photo at once, as
+    /// there was nothing on screen to follow from. The harness turns
+    /// egui's scroll animation off, so this test turns it on again, and
+    /// has its frames a sixtieth of a second apart, as on a screen, so
+    /// the glide shows.
+    #[test]
+    fn the_filmstrip_glides_to_the_current_photo_but_jumps_as_it_comes_on_screen() {
+        let dir = folder_of_30_photos();
+        let builder = Harness::builder().with_step_dt(1.0 / 60.0);
+        let (mut harness, _) = harness_built(builder, None, vec![home(dir.path())]);
+        let open = |harness: &mut Harness<'_, PhotographyWorkbenchApp>, label: &str| {
+            harness.get_by_label(label).click();
+            wait(harness, 1.0);
+        };
+        open(&mut harness, "Home");
+        open(&mut harness, "Image viewer");
+        let glide = egui::style::ScrollAnimation::default();
+        harness
+            .ctx
+            .all_styles_mut(|style| style.scroll_animation = glide);
+        assert!(in_filmstrip_view(&harness, &photo(1)));
+        harness.state_mut().browser.select_photo(25);
+        for _ in 0..8 {
+            harness.step();
+        }
+        assert!(!in_filmstrip_view(&harness, &photo(1)), "not moved");
+        assert!(!in_filmstrip_view(&harness, &photo(26)), "jumped");
+        wait(&mut harness, 1.0);
+        let (cell, _) = film_cell(&harness, &photo(26)).expect("not laid out");
+        let middle = panel(&harness, "bottom_dock").center().x;
+        assert!((cell.center().x - middle).abs() <= 0.5, "{cell:?} {middle}");
+
+        wheel_over_filmstrip(&mut harness, egui::vec2(10_000.0, 0.0));
+        assert!(!in_filmstrip_view(&harness, &photo(26)));
+        open(&mut harness, "Thumbnail grid");
+        // The click's frame, the strip's first, and the one it is scrolled
+        // in; a glide would take a dozen more.
+        harness.get_by_label("Image viewer").click();
+        for _ in 0..3 {
+            harness.step();
+        }
+        assert!(in_filmstrip_view(&harness, &photo(26)), "glided");
+    }
+
     /// Opening the viewer with a photo far along the strip current shows
     /// it in the strip at once, and so does opening it again after the
     /// strip was scrolled away from it.

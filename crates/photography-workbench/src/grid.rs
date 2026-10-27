@@ -213,7 +213,7 @@ pub fn show(
         .data_mut(|data| data.insert_temp(laid_out_id, laid_out));
     // What the grid shows, for when to follow: the folder's photos.
     let list = egui::Id::new(folder);
-    let follow = follow::follows(ui.ctx(), id, list, current);
+    let follow = follow::follows(ui.ctx(), id, list, current).is_some();
     let mut click = None;
     ui.scope(|ui| {
         // Rows 1 point apart: egui adds the gap between items to each

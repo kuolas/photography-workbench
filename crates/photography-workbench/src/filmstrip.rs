@@ -20,11 +20,15 @@
 //! scrolls it sideways.
 //!
 //! The strip brings the current photo into view when the current photo
-//! changes, when the list does, or when the strip comes back on screen,
-//! and then only if the photo is not in view already. Nothing else moves
-//! it: not time passing, and not the strip being scrolled, so a
-//! photographer looking along the folder is not pulled back
-//! ([`crate::follow`]).
+//! changes or when the strip comes back on screen, and then only if the
+//! photo is not in view already. It glides there when the photo changed,
+//! as egui scrolls when asked to show something, so the eye follows
+//! where the strip went, and jumps there when the strip has just come on
+//! screen, as there was nothing to follow from: with the viewer, with its
+//! dock shown again, or with another folder's photos, which are read
+//! while the strip is not drawn. Nothing else moves it: not time passing,
+//! and not the strip being scrolled, so a photographer looking along the
+//! folder is not pulled back ([`crate::follow`]).
 
 use std::cmp::Reverse;
 use std::ops::Range;
@@ -123,12 +127,20 @@ pub fn show(
                     Rect::from_min_size(left_top, vec2(CELL, height))
                 };
 
-                if follow && let Some(index) = current {
+                if let Some(reason) = follow
+                    && let Some(index) = current
+                {
                     let left = index as f32 * CELL;
                     let in_view = viewport.left() <= left && left + CELL <= viewport.right();
                     if !in_view {
                         let centre = Some(Align::Center);
-                        ui.scroll_to_rect_animation(cell(index), centre, ScrollAnimation::none());
+                        match reason {
+                            follow::Reason::Change => ui.scroll_to_rect(cell(index), centre),
+                            follow::Reason::Return => {
+                                let at_once = ScrollAnimation::none();
+                                ui.scroll_to_rect_animation(cell(index), centre, at_once);
+                            }
+                        }
                     }
                 }
 
