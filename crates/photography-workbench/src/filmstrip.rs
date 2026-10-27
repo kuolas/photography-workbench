@@ -27,7 +27,10 @@
 //! read while the strip is not drawn, whether the photo was in view or
 //! not, so the photo chosen in the grid is where the eye looks first,
 //! jumping there before its cells are laid out, as there was nothing to
-//! follow from and no frame is to show the strip where it was. Nothing
+//! follow from and no frame is to show the strip where it was. Whether
+//! the cell is in view is judged from where a glide under way ends, not
+//! from where the strip is now, as a cell in view now may be out of
+//! view when the glide ends ([`crate::follow`]). Nothing
 //! else moves it: not time passing, and not the strip being scrolled, so
 //! a photographer looking along the folder is not pulled back
 //! ([`crate::follow`]).
@@ -134,6 +137,7 @@ pub fn show(
             let middle = (index as f32 + 0.5) * CELL - width / 2.0;
             let mut state = egui::scroll_area::State::default();
             state.offset.x = middle.clamp(0.0, farthest);
+            follow::glide_over(ui.ctx(), id);
             // Under the id the scroll area keeps its state by: its salt
             // as a salt, which is not the same as the id itself.
             let salt = egui::IdSalt::new(id);
@@ -152,11 +156,19 @@ pub fn show(
                 && let Some(index) = current
             {
                 let left = index as f32 * CELL;
-                let in_view = viewport.left() <= left && left + CELL <= viewport.right();
+                // Judged from where a glide under way ends, not from where
+                // the strip is now: a cell in view now may be out of view
+                // then.
+                let now = viewport.left();
+                let from = follow::glide_end(ui.ctx(), id, now).unwrap_or(now);
+                let in_view = from <= left && left + CELL <= from + viewport.width();
                 // Where the eye can follow the strip, and the photo
                 // is out of view; in view, nothing to follow.
                 if !in_view {
                     ui.scroll_to_rect(cell(index), Some(Align::Center));
+                    let farthest = (photos.len() as f32 * CELL - viewport.width()).max(0.0);
+                    let middle = left + CELL / 2.0 - viewport.width() / 2.0;
+                    follow::gliding(ui.ctx(), id, middle.clamp(0.0, farthest));
                 }
             }
 
