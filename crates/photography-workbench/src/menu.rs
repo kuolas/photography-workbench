@@ -4,9 +4,9 @@
 //! has no menu bar of its own on any system, but a Mac app without one at
 //! the top of the screen is out of place there, so on macOS the app gives
 //! the system one: the app menu with About, Settings and Quit, View with
-//! the views, the viewer's zoom, the photo's information over the viewer's
-//! photo and the docks, Window with the modes, and Help with the reference
-//! of keyboard shortcuts.
+//! the views, the viewer's zoom, the grid's thumbnail size, the photo's
+//! information over the viewer's photo and the docks, Window with the
+//! modes, and Help with the reference of keyboard shortcuts.
 //!
 //! Its items ask for the app's actions, which the app does just as it
 //! does them for a key or a button. Which items can be chosen and which
@@ -40,7 +40,8 @@
 
 use desktop_ui::dock::Side;
 
-use crate::keymap::{self, Action, Surface};
+use crate::grid;
+use crate::keymap::{self, Action, Sizing, Surface};
 use crate::layout::Docks;
 use crate::mode::{Layout, Mode};
 use crate::view::{self, View};
@@ -60,6 +61,8 @@ pub struct State {
     pub docks: Docks,
     /// Which of the zoom's items can be chosen.
     pub zooms: Zooms,
+    /// Which of the thumbnail size's items can be chosen.
+    pub thumbnails: Thumbnails,
     /// Whether the viewer shows the photo's information over its photo,
     /// when it is shown.
     pub info_overlay: bool,
@@ -74,8 +77,10 @@ impl State {
     /// dialog is open none can, as the keys stand down then, but the
     /// reference's own item, which closes it. A mode not built yet cannot
     /// be chosen, nor a dock the window does not have, nor a change of the
-    /// zoom the toolbar's control for it is disabled for, nor the photo's
-    /// information anywhere but in Library's viewer, which alone shows it.
+    /// zoom the toolbar's control for it is disabled for, nor a change of
+    /// the thumbnails' size anywhere but in Library's grid or past the
+    /// size's end, nor the photo's information anywhere but in Library's
+    /// viewer, which alone shows it.
     pub fn enabled(&self, action: Action) -> bool {
         if self.dialog {
             return self.shortcuts && action == Action::Shortcuts;
@@ -84,6 +89,7 @@ impl State {
             Action::Mode(mode) => mode.is_available(),
             Action::Dock(side) => self.parts.has_dock(side),
             Action::Zoom(zooming) => self.zooms.can(zooming),
+            Action::Thumbnails(sizing) => self.thumbnails.can(sizing),
             Action::PhotoInformation => self.shows_viewer(),
             _ => true,
         }
@@ -132,6 +138,36 @@ impl Zooms {
             .iter()
             .zip(self.0)
             .any(|(&(of, _), can)| of == zooming && can)
+    }
+}
+
+/// Which of the thumbnail size's items can be chosen, in the order of
+/// [`THUMBNAILS`]: in Library's grid, the one for larger thumbnails while
+/// they are smaller than [`grid::LARGEST_SIZE`], and the one for smaller
+/// while they are larger than [`grid::SMALLEST_SIZE`]; neither anywhere
+/// else.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Thumbnails([bool; THUMBNAILS.len()]);
+
+impl Thumbnails {
+    /// The changes that can be asked for of the grid's thumbnails at
+    /// `size`, the smallest side of its tiles; `None` outside Library's
+    /// grid.
+    pub fn of(size: Option<f32>) -> Self {
+        Self(THUMBNAILS.map(|(sizing, _)| {
+            size.is_some_and(|size| match sizing {
+                Sizing::Larger => size < grid::LARGEST_SIZE,
+                Sizing::Smaller => size > grid::SMALLEST_SIZE,
+            })
+        }))
+    }
+
+    /// Whether `sizing` can be asked for from its item.
+    fn can(self, sizing: Sizing) -> bool {
+        THUMBNAILS
+            .iter()
+            .zip(self.0)
+            .any(|(&(of, _), can)| of == sizing && can)
     }
 }
 
@@ -185,6 +221,13 @@ const ZOOMS: [(Zooming, &str); 4] = [
     (Zooming::Out, "Zoom out"),
     (Zooming::Fit, "Zoom to fit"),
     (Zooming::Full, "Zoom to 100 %"),
+];
+
+/// The names of the items for the thumbnail size, in the View menu's
+/// order: the reference's descriptions of the keys that do the same.
+const THUMBNAILS: [(Sizing, &str); 2] = [
+    (Sizing::Larger, "Larger thumbnails"),
+    (Sizing::Smaller, "Smaller thumbnails"),
 ];
 
 /// The name of the item that shows or hides the photo's information over
@@ -256,6 +299,8 @@ impl MacMenu {
         let shortcuts = item("Keyboard shortcuts", Action::Shortcuts);
         let [zoom_in, zoom_out, fit, full] =
             ZOOMS.map(|(zooming, label)| item(label, Action::Zoom(zooming)));
+        let [larger, smaller] =
+            THUMBNAILS.map(|(sizing, label)| item(label, Action::Thumbnails(sizing)));
         let mut checks = Vec::new();
         let mut check = |label: &str, action| {
             let item = CheckMenuItem::new(label, true, false, key(action));
@@ -301,6 +346,9 @@ impl MacMenu {
                 &zoom_out,
                 &fit,
                 &full,
+                &PredefinedMenuItem::separator(),
+                &larger,
+                &smaller,
                 &PredefinedMenuItem::separator(),
                 &information,
                 &PredefinedMenuItem::separator(),
@@ -417,7 +465,8 @@ mod tests {
     use crate::keymap::Step;
     use crate::zoom::Zoom;
 
-    /// Library's grid, every dock shown, no dialog open.
+    /// Library's grid, its thumbnails at the size they start at, every
+    /// dock shown, no dialog open.
     fn library() -> State {
         State {
             mode: Mode::Library,
@@ -425,6 +474,7 @@ mod tests {
             parts: Mode::Library.layout(),
             docks: Docks::default(),
             zooms: Zooms::default(),
+            thumbnails: Thumbnails::of(Some(grid::DEFAULT_SIZE)),
             info_overlay: false,
             dialog: false,
             shortcuts: false,
@@ -453,6 +503,7 @@ mod tests {
             view: View::Viewer,
             parts: Mode::Library.layout(),
             zooms: Zooms::of(Some(shown(zoom))),
+            thumbnails: Thumbnails::of(None),
             ..library()
         }
     }
@@ -502,6 +553,33 @@ mod tests {
                 assert_eq!(enabled, can, "{zoom:?} {zooming:?}");
             }
             assert!(!state.enabled(Action::Zoom(Zooming::Toggle)), "{zoom:?}");
+        }
+    }
+
+    /// Whether each of the thumbnail size's items can be chosen, in the
+    /// View menu's order, in Library's grid with its thumbnails at `size`.
+    fn thumbnail_items_at(size: f32) -> [bool; 2] {
+        let state = State {
+            thumbnails: Thumbnails::of(Some(size)),
+            ..library()
+        };
+        THUMBNAILS.map(|(sizing, _)| state.enabled(Action::Thumbnails(sizing)))
+    }
+
+    /// In Library's grid the item for larger thumbnails can be chosen
+    /// until they are the largest, and the one for smaller until they are
+    /// the smallest; in the viewer neither can, and neither is ever
+    /// checked, as neither shows or hides anything.
+    #[test]
+    fn the_thumbnail_size_s_items_follow_the_size() {
+        assert_eq!(thumbnail_items_at(grid::DEFAULT_SIZE), [true, true]);
+        assert_eq!(thumbnail_items_at(grid::LARGEST_SIZE), [false, true]);
+        assert_eq!(thumbnail_items_at(grid::SMALLEST_SIZE), [true, false]);
+        let viewer = viewer(Zoom::Fit);
+        for (sizing, _) in THUMBNAILS {
+            let action = Action::Thumbnails(sizing);
+            assert!(!viewer.enabled(action), "{sizing:?}");
+            assert!(!library().checked(action), "{sizing:?}");
         }
     }
 
@@ -586,6 +664,17 @@ mod tests {
             assert!(zoomed.enabled(action), "{action:?}");
             assert!(!settings.enabled(action), "{action:?}");
         }
+        // The thumbnail size's items are the grid's.
+        let sized = library();
+        let behind = State {
+            dialog: true,
+            ..sized
+        };
+        for (sizing, _) in THUMBNAILS {
+            let action = Action::Thumbnails(sizing);
+            assert!(sized.enabled(action), "{action:?}");
+            assert!(!behind.enabled(action), "{action:?}");
+        }
         let reference = State {
             shortcuts: true,
             ..settings
@@ -617,6 +706,10 @@ mod tests {
         assert_eq!(zoom(Zooming::Full).as_deref(), Some("Cmd+Alt+0"));
         assert_eq!(zoom(Zooming::Toggle), None, "a toggle");
         assert_eq!(spelled(Action::PhotoInformation), None, "a toggle");
+        for sizing in [Sizing::Larger, Sizing::Smaller] {
+            let thumbnails = spelled(Action::Thumbnails(sizing));
+            assert_eq!(thumbnails, None, "{sizing:?}: no Cmd, the grid's");
+        }
     }
 
     /// The zoom's items carry the key combinations the viewer's keys and the

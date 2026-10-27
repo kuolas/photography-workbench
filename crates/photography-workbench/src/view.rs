@@ -23,6 +23,12 @@ pub fn shows_viewer(mode: Mode, view: View) -> bool {
     mode == Mode::Library && view == View::Viewer
 }
 
+/// Whether the centre shows Library's grid in `mode` and `view`, which
+/// alone has the slider for the thumbnail size, and whose keys change it.
+pub fn shows_grid(mode: Mode, view: View) -> bool {
+    mode == Mode::Library && view == View::Grid
+}
+
 impl View {
     /// Every view, in the toolbar's order.
     pub const ALL: [Self; 2] = [Self::Grid, Self::Viewer];
