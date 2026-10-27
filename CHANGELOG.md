@@ -41,6 +41,14 @@ decision is
   before, so the grid's tiles stay sharp on high-resolution screens up
   to twice the size they did.
 
+### Fixed
+
+- The slider in the grid, and the zoom controls in the viewer, no
+  longer shift along the toolbar as the current photo's number gains or
+  loses a digit, or changes to wider ones, or the folder changes: the
+  count is laid out in a fixed width, with room for a folder of 9999
+  photos.
+
 ## [0.1.0] - 2026-10-26
 
 The first release: Library, the first of the app's three modes, which
