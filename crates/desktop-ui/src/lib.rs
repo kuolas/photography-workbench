@@ -13,6 +13,7 @@ pub mod drop_down;
 pub mod fonts;
 pub mod icons;
 pub mod keys;
+pub mod slider;
 pub mod style;
 pub mod theme;
 pub mod toolbar;
