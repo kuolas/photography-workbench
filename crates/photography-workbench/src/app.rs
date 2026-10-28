@@ -715,7 +715,7 @@ fn thumbnail_size_slider(
     // An id of its own, as the count beside it comes and goes, and the
     // ids egui gives by position would shift with it.
     let scope = egui::UiBuilder::new()
-        .id(egui::Id::new("thumbnail_size"))
+        .scope_id(egui::Id::unique("thumbnail_size"))
         .layout(egui::Layout::right_to_left(egui::Align::Center));
     ui.scope_builder(scope, |ui| {
         let slider = slider::show(ui, palette, THUMBNAIL_SIZE, size, grid::SIZE_RANGE);
@@ -763,7 +763,7 @@ fn zoom_controls(
     // An id of its own, as the count beside it comes and goes, and the
     // ids egui gives by position would shift with it.
     let cluster = egui::UiBuilder::new()
-        .id(egui::Id::new("zoom_controls"))
+        .scope_id(egui::Id::unique("zoom_controls"))
         .layout(egui::Layout::right_to_left(egui::Align::Center));
     ui.scope_builder(cluster, |ui| {
         let [out, zoom_in, fit, full] = ZOOM_BUTTONS;
@@ -2021,9 +2021,16 @@ mod tests {
         assert_eq!(harness_from(&storage).state().mode, Mode::Library);
     }
 
+    /// The id egui keeps the state of the panel `id` under: `id` is a salt,
+    /// salted into the id of the `Ui` the panel is shown in, which for
+    /// every panel of the app's is the window's root `Ui`.
+    fn panel_id(id: &str) -> egui::Id {
+        egui::ViewportId::ROOT.root_ui_id().with(id)
+    }
+
     /// Where the panel `id` was laid out in the last frame.
     fn panel(harness: &Harness<'_, PhotographyWorkbenchApp>, id: &str) -> egui::Rect {
-        egui::PanelState::load(&harness.ctx, egui::Id::new(id))
+        egui::PanelState::load(&harness.ctx, panel_id(id))
             .unwrap_or_else(|| panic!("no panel {id}"))
             .outer_rect
     }
@@ -2374,7 +2381,7 @@ mod tests {
             let state = egui::PanelState { outer_rect: rect };
             harness
                 .ctx
-                .data_mut(|d| d.insert_persisted(egui::Id::new(id), state));
+                .data_mut(|d| d.insert_persisted(panel_id(id), state));
         }
         harness.run();
         harness
@@ -3958,6 +3965,7 @@ mod tests {
             unit: egui::MouseWheelUnit::Point,
             delta,
             phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
             modifiers: Modifiers::NONE,
         });
         wait(harness, 1.0);
@@ -4665,9 +4673,112 @@ mod tests {
             unit: egui::MouseWheelUnit::Point,
             delta,
             phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
             modifiers: Modifiers::NONE,
         });
         wait(harness, 1.0);
+    }
+
+    /// Rest two fingers on a trackpad with the pointer at `pos`, then move
+    /// them by `delta` points a frame until `pulled` holds, at most 40
+    /// frames, and leave them there: a view pulled past its end is held
+    /// there while they are.
+    fn pull_with_trackpad(
+        harness: &mut Harness<'_, PhotographyWorkbenchApp>,
+        pos: egui::Pos2,
+        delta: egui::Vec2,
+        pulled: impl Fn(&Harness<'_, PhotographyWorkbenchApp>) -> bool,
+    ) {
+        let fingers = |delta, phase| egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            phase,
+            source: egui::MouseWheelSource::Trackpad,
+            modifiers: Modifiers::NONE,
+        };
+        let events = &mut harness.input_mut().events;
+        events.push(egui::Event::PointerMoved(pos));
+        events.push(fingers(egui::Vec2::ZERO, egui::TouchPhase::Start));
+        for _ in 0..40 {
+            harness
+                .input_mut()
+                .events
+                .push(fingers(delta, egui::TouchPhase::Move));
+            harness.step();
+            if pulled(harness) {
+                return;
+            }
+        }
+        panic!("not pulled in 40 frames");
+    }
+
+    /// Lift the fingers [`pull_with_trackpad`] left on the trackpad.
+    fn lift_from_trackpad(harness: &mut Harness<'_, PhotographyWorkbenchApp>) {
+        harness.input_mut().events.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::Vec2::ZERO,
+            phase: egui::TouchPhase::End,
+            source: egui::MouseWheelSource::Trackpad,
+            modifiers: Modifiers::NONE,
+        });
+    }
+
+    /// A photo whose cell is wholly in view where the filmstrip comes to
+    /// rest, made current while a trackpad holds the strip pulled past its
+    /// start, cutting the cell off, is in view: the strip springs back to
+    /// its start and does not bring the photo to its middle.
+    #[test]
+    fn the_filmstrip_judges_what_is_in_view_from_where_it_comes_to_rest() {
+        let dir = folder_of_30_photos();
+        let mut harness = filmstrip_harness(dir.path());
+        let last = (1..=30)
+            .rfind(|&n| in_filmstrip_view(&harness, &photo(n)))
+            .expect("no cell in view");
+        let label = photo(last);
+        let pos = panel(&harness, "bottom_dock").center();
+        pull_with_trackpad(&mut harness, pos, egui::vec2(40.0, 0.0), |harness| {
+            !in_filmstrip_view(harness, &label)
+        });
+        harness.state_mut().browser.select_photo(last - 1);
+        harness.step();
+        lift_from_trackpad(&mut harness);
+        wait(&mut harness, 2.0);
+        assert!(in_filmstrip_view(&harness, &photo(1)), "moved");
+        assert!(in_filmstrip_view(&harness, &label));
+    }
+
+    /// Where the grid comes to rest when it is scrolled to its end, then,
+    /// when `pulled`, pulled past it with a trackpad and let go of, and the
+    /// tiles are made the largest the frame after, as it springs back: the
+    /// tile of the photo that was at the top of the view, and that photo.
+    fn resized_as_it_springs_back(pulled: bool) -> (egui::Rect, usize) {
+        let dir = folder_of_numbered_photos(300);
+        let mut harness = grid_harness(dir.path());
+        wheel_over_grid(&mut harness, egui::vec2(0.0, -100_000.0));
+        let top = top_of_grid_view(&harness, 300);
+        let pos = centre(&harness).center();
+        if pulled {
+            let first = grid_tile(&harness, &photo(top)).expect("no tile");
+            pull_with_trackpad(&mut harness, pos, egui::vec2(0.0, -40.0), |harness| {
+                grid_tile(harness, &photo(top)).is_some_and(|tile| tile.top() < first.top() - 30.0)
+            });
+            lift_from_trackpad(&mut harness);
+            harness.step();
+        }
+        harness.state_mut().thumbnail_size = grid::LARGEST_SIZE;
+        wait(&mut harness, 10.0);
+        (grid_tile(&harness, &photo(top)).expect("no tile"), top)
+    }
+
+    /// Tiles made larger as the grid springs back from past its end, where
+    /// a trackpad pulled it, are laid out where they are when the grid is
+    /// at rest there: the grid does not coast on from the spring.
+    #[test]
+    fn a_size_change_as_the_grid_springs_back_keeps_its_place() {
+        assert_eq!(
+            resized_as_it_springs_back(true),
+            resized_as_it_springs_back(false)
+        );
     }
 
     /// Scrolled away from the current photo, the grid stays where it was
@@ -5187,10 +5298,8 @@ mod tests {
         let stand_in = harness.state().textures.texture(&photos[2], 256);
         assert_eq!(Some(texture_in(&harness, room).0), stand_in);
         assert!(!says_loading(&harness));
-        // egui asks for the frame a frame's time early, which is a
-        // quarter of a second in the harness.
         frame_at(&mut harness, start);
-        assert_eq!(repaint_delay(&harness).as_secs_f64(), 0.5 - 0.25);
+        assert_eq!(repaint_delay(&harness).as_secs_f64(), 0.5);
         frame_at(&mut harness, start + 0.375);
         assert!(!says_loading(&harness));
         frame_at(&mut harness, start + 0.5);
@@ -5318,7 +5427,9 @@ mod tests {
     }
 
     /// Turn the wheel by `delta` in `unit`, with `modifiers` held and the
-    /// pointer at `pos`, then let the smoothing run out.
+    /// pointer at `pos`, then let the smoothing run out: a mouse's wheel,
+    /// which turns in lines or pages, or a trackpad, which scrolls in
+    /// points.
     fn wheel_at(
         harness: &mut Harness<'_, PhotographyWorkbenchApp>,
         pos: egui::Pos2,
@@ -5326,12 +5437,19 @@ mod tests {
         delta: egui::Vec2,
         modifiers: Modifiers,
     ) {
+        let source = match unit {
+            egui::MouseWheelUnit::Point => egui::MouseWheelSource::Trackpad,
+            egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
+                egui::MouseWheelSource::Wheel
+            }
+        };
         let events = &mut harness.input_mut().events;
         events.push(egui::Event::PointerMoved(pos));
         events.push(egui::Event::MouseWheel {
             unit,
             delta,
             phase: egui::TouchPhase::Move,
+            source,
             modifiers,
         });
         wait(harness, 1.0);
@@ -5463,6 +5581,7 @@ mod tests {
             unit: egui::MouseWheelUnit::Line,
             delta: egui::vec2(0.0, 3.0),
             phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
             modifiers: Modifiers::NONE,
         });
         harness.step();
@@ -5537,6 +5656,7 @@ mod tests {
             unit: egui::MouseWheelUnit::Line,
             delta: egui::vec2(0.0, 3.0),
             phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
             modifiers: Modifiers::NONE,
         });
         harness.step();
@@ -5694,16 +5814,25 @@ mod tests {
     /// What the toolbar's zoom says: the text between its zoom out and
     /// zoom in buttons.
     fn zoom_shown(harness: &Harness<'_, PhotographyWorkbenchApp>) -> String {
+        zoom_text(harness).expect("no zoom shown")
+    }
+
+    /// The text of the one label between the toolbar's zoom out and zoom
+    /// in buttons, `None` when it is empty: egui gives screen readers no
+    /// empty text. Fails when there is no label there, or more than one.
+    fn zoom_text(harness: &Harness<'_, PhotographyWorkbenchApp>) -> Option<String> {
         let out = harness.get_by_label("Zoom out").rect();
         let zoom_in = harness.get_by_label("Zoom in").rect();
-        harness
-            .query_all_by_role(Role::Label)
-            .filter(|node| {
-                let rect = node.rect();
-                rect.left() >= out.right() && rect.right() <= zoom_in.left()
-            })
-            .find_map(|node| node.accesskit_node().value())
-            .expect("no zoom shown")
+        let mut labels = harness.query_all_by_role(Role::Label).filter(|node| {
+            let rect = node.rect();
+            rect.left() >= out.right() && rect.right() <= zoom_in.left()
+        });
+        let label = labels.next().expect("no label between the zoom buttons");
+        assert!(
+            labels.next().is_none(),
+            "two labels between the zoom buttons"
+        );
+        label.accesskit_node().value()
     }
 
     /// Whether the control named `label` is shown on, as the toolbar's
@@ -6018,7 +6147,7 @@ mod tests {
             assert!(node.is_disabled(), "{label}");
             assert_ne!(node.toggled(), Some(Toggled::True), "{label}");
         }
-        assert_eq!(zoom_shown(&harness), "");
+        assert_eq!(zoom_text(&harness), None);
         press(&mut harness, Modifiers::NONE, Key::Z);
         press(&mut harness, Modifiers::COMMAND, Key::Equals);
         assert_eq!(harness.state().viewer.framing(), Framing::default());
@@ -6250,7 +6379,7 @@ mod tests {
             let state = egui::PanelState { outer_rect: rect };
             harness
                 .ctx
-                .data_mut(|d| d.insert_persisted(egui::Id::new(id), state));
+                .data_mut(|d| d.insert_persisted(panel_id(id), state));
         }
         harness.run();
         let toolbar = panel(&harness, "toolbar");
@@ -6893,7 +7022,7 @@ mod tests {
                 let state = egui::PanelState { outer_rect: rect };
                 harness
                     .ctx
-                    .data_mut(|d| d.insert_persisted(egui::Id::new(id), state));
+                    .data_mut(|d| d.insert_persisted(panel_id(id), state));
             }
             settle(&mut harness);
             screenshot(&mut harness, out, theme, "widest-docks");

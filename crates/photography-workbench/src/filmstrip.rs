@@ -44,8 +44,8 @@ use desktop_ui::fonts;
 use desktop_ui::theme::Palette;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{
-    Align, Align2, FontFamily, FontId, Margin, Rect, Sense, Stroke, StrokeKind, WidgetInfo,
-    WidgetType, pos2, vec2,
+    Align, Align2, FontFamily, FontId, Margin, Rect, Role, Sense, Stroke, StrokeKind, WidgetInfo,
+    pos2, vec2,
 };
 
 use crate::follow;
@@ -112,13 +112,13 @@ pub fn show(
         return None;
     }
     let id = ui.make_persistent_id("filmstrip");
-    let follow = follow::follows(ui.ctx(), id, egui::Id::new(folder), current);
+    let follow = follow::follows(ui.ctx(), id, egui::Id::unique(folder), current);
     let mut click = None;
     ui.scope(|ui| {
         // A vertical wheel, the one most mice have, scrolls the strip
         // sideways, without Shift held.
         ui.style_mut().always_scroll_the_only_direction = true;
-        let area = egui::ScrollArea::horizontal()
+        let mut area = egui::ScrollArea::horizontal()
             .id_salt(id)
             .auto_shrink([false, false])
             .content_margin(Margin::ZERO);
@@ -135,13 +135,13 @@ pub fn show(
             let width = ui.available_width();
             let farthest = (photos.len() as f32 * CELL - width).max(0.0);
             let middle = (index as f32 + 0.5) * CELL - width / 2.0;
-            let mut state = egui::scroll_area::State::default();
-            state.offset.x = middle.clamp(0.0, farthest);
+            area = area.horizontal_scroll_offset(middle.clamp(0.0, farthest));
             follow::glide_over(ui.ctx(), id);
             // Under the id the scroll area keeps its state by: its salt
             // as a salt, which is not the same as the id itself.
             let salt = egui::IdSalt::new(id);
-            state.store(ui.ctx(), ui.make_persistent_id(salt));
+            let fresh = egui::scroll_area::State::default();
+            fresh.store(ui.ctx(), ui.make_persistent_id(salt));
         }
         area.show_viewport(ui, |ui, viewport| {
             let height = ui.available_height();
@@ -156,17 +156,18 @@ pub fn show(
                 && let Some(index) = current
             {
                 let left = index as f32 * CELL;
+                let farthest = (photos.len() as f32 * CELL - viewport.width()).max(0.0);
                 // Judged from where a glide under way ends, not from where
                 // the strip is now: a cell in view now may be out of view
-                // then.
-                let now = viewport.left();
+                // then. Pulled past an end, as a trackpad can, the strip
+                // is taken to be at that end, which it springs back to.
+                let now = viewport.left().clamp(0.0, farthest);
                 let from = follow::glide_end(ui.ctx(), id, now).unwrap_or(now);
                 let in_view = from <= left && left + CELL <= from + viewport.width();
                 // Where the eye can follow the strip, and the photo
                 // is out of view; in view, nothing to follow.
                 if !in_view {
                     ui.scroll_to_rect(cell(index), Some(Align::Center));
-                    let farthest = (photos.len() as f32 * CELL - viewport.width()).max(0.0);
                     let middle = left + CELL / 2.0 - viewport.width() / 2.0;
                     follow::gliding(ui.ctx(), id, middle.clamp(0.0, farthest));
                 }
@@ -206,7 +207,7 @@ pub fn show(
     // The photo clicked on is where the pointer is: the strip does not
     // move under it, even when the cell is only partly in view.
     if let Some(index) = click {
-        follow::shown(ui.ctx(), id, egui::Id::new(folder), Some(index));
+        follow::shown(ui.ctx(), id, egui::Id::unique(folder), Some(index));
     }
     click
 }
@@ -266,10 +267,9 @@ fn photo_cell(
     is_current: bool,
 ) -> bool {
     let name = photo.name().into_owned();
-    let id = egui::Id::new(("filmstrip_cell", photo.path()));
+    let id = egui::Id::unique(("filmstrip_cell", photo.path()));
     let response = ui.interact(rect, id, Sense::click());
-    response
-        .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, is_current, &name));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, is_current, &name));
 
     let painter = ui.painter();
     let failure = textures::paint(ui, thumbnail, rect - TILE_INSET, FAILED_ICON_SIZE);

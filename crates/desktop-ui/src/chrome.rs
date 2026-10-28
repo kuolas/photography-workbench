@@ -110,7 +110,7 @@ fn left_pad(system_buttons: bool, measured: Option<f32>, zoom: f32) -> f32 {
 /// held: a press on a button lands on the bar under it too, and starting
 /// the drag there would take the pointer away from the button.
 pub fn title_bar_drag_region(ui: &mut egui::Ui, bar: Rect) {
-    let id = ui.id().with("title_bar_drag");
+    let id = ui.scope_id().with("title_bar_drag");
     let response = ui.interact(bar, id, Sense::click_and_drag());
     if response.double_clicked() {
         let maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
@@ -168,12 +168,14 @@ pub fn icon_button(
 fn title_icon(ui: &mut egui::Ui, label: &str, selected: Option<bool>) -> egui::Response {
     let (slot, _) = ui.allocate_exact_size(vec2(ICON_SLOT_WIDTH, TITLE_BAR_HEIGHT), Sense::hover());
     let square = Rect::from_center_size(slot.center(), egui::Vec2::splat(ICON_HIT_SIZE));
-    let response = ui.interact(square, ui.id().with(("title_icon", label)), Sense::click());
+    let response = ui.interact(
+        square,
+        ui.scope_id().with(("title_icon", label)),
+        Sense::click(),
+    );
     response.widget_info(|| match selected {
-        Some(on) => {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, response.enabled(), on, label)
-        }
-        None => egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label),
+        Some(on) => egui::WidgetInfo::selected(egui::Role::Button, response.enabled(), on, label),
+        None => egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), label),
     });
     response
 }
@@ -255,12 +257,7 @@ pub fn selectable_button(
     let response = ui.add(egui::Button::new(text).selected(selected));
     // egui names a button by all its text, the icon's character included.
     response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::Button,
-            response.enabled(),
-            selected,
-            label,
-        )
+        egui::WidgetInfo::selected(egui::Role::Button, response.enabled(), selected, label)
     });
     match key_combination {
         Some(_) => response.on_hover_text(keys::tooltip(label, key_combination)),
@@ -342,9 +339,8 @@ fn painted_button(
     let (glyph, font) = icons::glyph(name, points, fallback);
     ui.painter()
         .text(rect.center(), Align2::CENTER_CENTER, glyph, font, colour);
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), label)
-    });
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), label));
     response.on_hover_text(label)
 }
 
@@ -377,7 +373,7 @@ fn draw_resize_handles(ctx: &egui::Context) {
     // In egui's middle order, with the dialogs: above the window's panels,
     // in the background order, and under a dialog, which egui brings to
     // the top as it opens.
-    egui::Area::new(egui::Id::new("window_resize_handles"))
+    egui::Area::new(egui::Id::unique("window_resize_handles"))
         .order(egui::Order::Middle)
         .fixed_pos(window.min)
         .show(ctx, |ui| {
@@ -388,7 +384,7 @@ fn draw_resize_handles(ctx: &egui::Context) {
             let mut under_pointer = None;
             for (i, (rect, direction, cursor)) in resize_strips(window).into_iter().enumerate() {
                 let response =
-                    ui.interact(rect, egui::Id::new(("window_resize", i)), Sense::drag());
+                    ui.interact(rect, egui::Id::unique(("window_resize", i)), Sense::drag());
                 if response.contains_pointer() {
                     under_pointer = Some((direction, cursor));
                 }

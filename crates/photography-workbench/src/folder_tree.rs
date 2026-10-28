@@ -16,7 +16,7 @@ use catalog::folders::{Place, Row, Subfolders};
 use desktop_ui::icons;
 use desktop_ui::theme::Palette;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
-use egui::{Align2, FontId, Rect, Sense, WidgetInfo, WidgetType, pos2, vec2};
+use egui::{Align2, FontId, Rect, Role, Sense, WidgetInfo, pos2, vec2};
 
 use crate::browse::Browser;
 
@@ -123,25 +123,24 @@ fn folder_row(
 
     let response = ui.interact(
         rect,
-        egui::Id::new(("folder_row", row.path, row.depth)),
+        egui::Id::unique(("folder_row", row.path, row.depth)),
         Sense::click(),
     );
-    response
-        .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, is_selected, name));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, is_selected, name));
     // A folder that may have subfolders has an arrow, after the row so it
     // takes the clicks on it.
     let expandable = matches!(row.subfolders, Subfolders::Unknown | Subfolders::Present);
     let arrow = expandable.then(|| {
         let centre = pos2(rect.left() + ARROW_CENTRE + indent, rect.center().y);
         let square = Rect::from_center_size(centre, egui::Vec2::splat(ICON_SIZE));
-        let id = egui::Id::new(("folder_arrow", row.path, row.depth));
+        let id = egui::Id::unique(("folder_arrow", row.path, row.depth));
         let arrow = ui.interact(square, id, Sense::click());
         let label = if row.expanded {
             format!("Collapse {name}")
         } else {
             format!("Expand {name}")
         };
-        arrow.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
+        arrow.widget_info(|| WidgetInfo::labeled(Role::Button, true, &label));
         arrow
     });
 

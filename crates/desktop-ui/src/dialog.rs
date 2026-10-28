@@ -20,9 +20,12 @@ pub fn dialog_frame(ctx: &egui::Context) -> egui::Frame {
 
 /// Show a dialog in [`dialog_frame`], with `add_contents` inside it. Ask
 /// the result's `should_close()` whether to stop showing it.
+///
+/// `name` is the dialog's own: its id is made from the name alone, not
+/// from where it is shown, so no other dialog of the window may share it.
 pub fn show<R>(
     ctx: &egui::Context,
-    id_salt: impl egui::AsId,
+    name: impl std::hash::Hash + std::fmt::Debug,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::ModalResponse<R> {
     // egui puts a modal dialog in its foreground order, where drop-down
@@ -33,7 +36,7 @@ pub fn show<R>(
     // their earlier order, and a list opened in an earlier showing of the
     // dialog is drawn under it. In the middle order, where egui's windows
     // are, a dialog is always under its lists.
-    let id = egui::Id::new(id_salt);
+    let id = egui::Id::unique(name);
     egui::Modal::new(id)
         .area(egui::Modal::default_area(id).order(egui::Order::Middle))
         .frame(dialog_frame(ctx))
@@ -115,12 +118,15 @@ mod tests {
                         return;
                     }
                     let dialog = show(ui.ctx(), "dialog", |ui| {
+                        let label = ui.label("Choice");
                         egui::ComboBox::from_id_salt("choice")
                             .selected_text(format!("Choice {choice}"))
                             .show_ui(ui, |ui| {
                                 ui.selectable_value(choice, 1, "One");
                                 ui.selectable_value(choice, 2, "Two");
-                            });
+                            })
+                            .response
+                            .labelled_by(label.id);
                     });
                     if dialog.should_close() {
                         *open = false;
@@ -160,7 +166,7 @@ mod tests {
             let choice = harness.get_by_label(pick).rect().center();
             let on_top = harness.ctx.layer_id_at(choice);
             assert!(
-                on_top.is_some_and(|layer| layer.id != egui::Id::new("dialog")),
+                on_top.is_some_and(|layer| layer.id != egui::Id::unique("dialog")),
                 "opening {opening}: the list is under the dialog",
             );
             quick_click(&mut harness, choice);

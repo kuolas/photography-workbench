@@ -159,7 +159,7 @@ mod tests {
     /// passes, and why, `None` for a pass it was not drawn in.
     fn follows_in(passes: &[Pass]) -> Vec<Option<Option<Reason>>> {
         let ctx = egui::Context::default();
-        let id = egui::Id::new("view");
+        let id = egui::Id::unique("view");
         passes
             .iter()
             .map(|pass| {
@@ -168,16 +168,16 @@ mod tests {
                     let ctx = ui.ctx();
                     match *pass {
                         Pass::Drawn(list, current) => {
-                            let list = egui::Id::new(list);
+                            let list = egui::Id::unique(list);
                             follow = Some(follows(ctx, id, list, Some(current)));
                         }
                         Pass::Clicked(list, current, clicked) => {
-                            let list = egui::Id::new(list);
+                            let list = egui::Id::unique(list);
                             follow = Some(follows(ctx, id, list, Some(current)));
                             shown(ctx, id, list, Some(clicked));
                         }
                         Pass::Twice(list, current) => {
-                            let list = egui::Id::new(list);
+                            let list = egui::Id::unique(list);
                             follows(ctx, id, list, Some(current));
                             follow = Some(follows(ctx, id, list, Some(current)));
                         }
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn a_glide_ends_where_it_was_asked_to_until_the_view_arrives() {
         let ctx = egui::Context::default();
-        let id = egui::Id::new("view");
+        let id = egui::Id::unique("view");
         let asked = |ctx: &egui::Context, to| {
             gliding(ctx, id, to);
             None

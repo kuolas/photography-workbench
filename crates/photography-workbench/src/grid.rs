@@ -61,9 +61,7 @@ use std::path::Path;
 use catalog::photos::Photo;
 use desktop_ui::theme::Palette;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
-use egui::{
-    Align, FontId, Margin, Rect, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, WidgetType, vec2,
-};
+use egui::{Align, FontId, Margin, Rect, Role, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, vec2};
 
 use crate::follow;
 use crate::textures::{self, AHEAD, CURRENT, ON_SCREEN, Textures, Thumbnail};
@@ -218,7 +216,7 @@ pub fn show(
     ui.ctx()
         .data_mut(|data| data.insert_temp(laid_out_id, laid_out));
     // What the grid shows, for when to follow: the folder's photos.
-    let list = egui::Id::new(folder);
+    let list = egui::Id::unique(folder);
     let follow = follow::follows(ui.ctx(), id, list, current);
     let mut click = None;
     ui.scope(|ui| {
@@ -233,7 +231,10 @@ pub fn show(
         // makes from its salt.
         let scroll_id = ui.make_persistent_id(egui::IdSalt::new("grid"));
         let state = egui::scroll_area::State::load(ui.ctx(), scroll_id);
-        let mut offset = state.map_or(0.0, |state| state.offset.y);
+        // Pulled past its top or its bottom, as a trackpad can, the grid
+        // is taken to be at that edge, which it springs back to: where
+        // its rows come to rest.
+        let mut offset = state.map_or(0.0, |state| state.clamped_offset().y);
         // Set before the rows are laid out, so the rows laid out are the
         // ones scrolled to, however far they are.
         if let Some(before) = before
@@ -241,15 +242,28 @@ pub fn show(
         {
             offset = anchored(offset, before, laid_out);
             area = area.vertical_scroll_offset(offset);
+            // egui judges the offset by how far the rows reached when it
+            // last laid them out, and would spring one past there back,
+            // as if pulled past the grid's end, though the rows laid out
+            // anew reach farther: not in this frame.
+            ui.spacing_mut().scroll.kinetic.rubber_band = false;
+            // Nor does it coast on from there, as it would while springing
+            // back or flung: the scroll area's state, which keeps how fast
+            // it moves, is stored afresh then, so the rows stay where they
+            // are put. At rest, as when the window is resized, the state
+            // is kept, with whether its scroll bar shows.
+            if state.is_some_and(|state| state.velocity() != Vec2::ZERO) {
+                egui::scroll_area::State::default().store(ui.ctx(), scroll_id);
+            }
         }
         if follow == Some(follow::Reason::Return) {
             // Come back on screen, the grid is where it was left. A glide
             // cut short when it was hidden would go on under the photo:
             // the scroll area's state is stored afresh, without it, and
             // the grid's own memory of it dropped.
-            let mut fresh = egui::scroll_area::State::default();
-            fresh.offset.y = offset;
+            let fresh = egui::scroll_area::State::default();
             fresh.store(ui.ctx(), scroll_id);
+            area = area.vertical_scroll_offset(offset);
             follow::glide_over(ui.ctx(), id);
         }
         // Where the current photo's row is brought to, if it is not in
@@ -485,10 +499,9 @@ fn photo_tile(
     is_current: bool,
 ) -> Option<bool> {
     let name = photo.name().into_owned();
-    let id = egui::Id::new(("photo_tile", photo.path()));
+    let id = egui::Id::unique(("photo_tile", photo.path()));
     let response = ui.interact(rect, id, Sense::click());
-    response
-        .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, is_current, &name));
+    response.widget_info(|| WidgetInfo::selected(Role::Button, true, is_current, &name));
 
     let painter = ui.painter();
     let failure = textures::paint(ui, thumbnail, rect - IMAGE_INSET, FAILED_ICON_SIZE);

@@ -32,8 +32,8 @@ use catalog::photos::Photo;
 use desktop_ui::theme::Palette;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{
-    CornerRadius, FontId, Galley, Id, Rect, Sense, Stroke, StrokeKind, Vec2, WidgetInfo,
-    WidgetType, pos2, vec2,
+    CornerRadius, FontId, Galley, Id, Rect, Role, Sense, Stroke, StrokeKind, Vec2, WidgetInfo,
+    pos2, vec2,
 };
 
 use crate::info::{self, NONE, SizeUnits, TimeForm};
@@ -153,7 +153,7 @@ fn side_by_side(parts: impl IntoIterator<Item = Option<String>>) -> Option<Strin
 /// The id of the panel's node, by which screen readers and the tests
 /// know it.
 pub fn id() -> Id {
-    Id::new("photo_information")
+    Id::unique("photo_information")
 }
 
 /// The panel at the top-left corner of `ui`, the viewer's whole area, in
@@ -229,7 +229,7 @@ pub fn show(
         .collect::<Vec<_>>()
         .join("\n");
     let response = ui.interact(panel.intersect(viewer), id(), Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &text));
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, &text));
 }
 
 /// The width of the widest of `galleys`; nothing for none.

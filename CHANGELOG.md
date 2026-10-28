@@ -40,6 +40,19 @@ decision is
 - Thumbnails are decoded up to 1024 pixels long, twice as long as
   before, so the grid's tiles stay sharp on high-resolution screens up
   to twice the size they did.
+- The app is built on egui 0.37. The docks' widths are remembered under
+  new names, so the first run after the update opens the docks at their
+  default widths.
+- Characters that the app's own fonts lack, as in folder and file names
+  in Chinese, Japanese, Korean, Arabic or Hebrew, are drawn with one of
+  the system's fonts rather than as empty boxes.
+- On macOS, scrolling with a trackpad in the grid, the filmstrip and the
+  folder tree pulls past the first and last items and springs back, as
+  dragging them on a touch screen does on every system; a mouse wheel
+  still stops at the ends.
+- In the Dark theme, buttons and drop-downs are a shade darker and their
+  labels brighter, following egui's own dark look, which that theme
+  keeps.
 
 ### Fixed
 
