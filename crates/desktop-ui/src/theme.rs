@@ -30,8 +30,20 @@ use egui::{Color32, CornerRadius, Shadow};
 use crate::drop_down;
 
 /// The corner radius of buttons, fields and the other controls, in every
-/// theme, in points; egui's own is 2 to 3.
+/// theme, in points; egui's own is 6.
 const CONTROL_CORNER_RADIUS: u8 = 4;
+
+/// The fill of a button, a drop-down list and the other controls on the
+/// dark themes but Dark: at rest, under the pointer, and pressed.
+const DARK_CONTROL_FILLS: [Color32; 3] = [
+    Color32::from_gray(60),
+    Color32::from_gray(70),
+    Color32::from_gray(55),
+];
+
+/// The colour of a control's text and icon under the pointer on the dark
+/// themes but Dark.
+const DARK_HOVERED_TEXT: Color32 = Color32::from_gray(240);
 
 /// The shadow under a popup, such as a menu or a drop-down list, and
 /// under a dialog: straight down and soft, where egui's falls to the
@@ -151,6 +163,16 @@ impl Theme {
         } else {
             egui::Visuals::light()
         };
+        // The dark themes' controls are their own, not the base visuals':
+        // their fills, and their text under the pointer.
+        if p.dark_mode {
+            let w = &mut v.widgets;
+            let [rest, hovered, pressed] = DARK_CONTROL_FILLS;
+            w.inactive.weak_bg_fill = rest;
+            w.hovered.weak_bg_fill = hovered;
+            w.active.weak_bg_fill = pressed;
+            w.hovered.fg_stroke.color = DARK_HOVERED_TEXT;
+        }
         // Resting text and icons only: labels, and widgets neither hovered,
         // pressed nor open. The other states keep the base visuals' text colours, which
         // are egui's feedback for them; `override_text_color` would paint
@@ -380,11 +402,10 @@ impl Palette {
         }
     }
 
-    /// Near-black wells, mid-grey chrome and raised #404040 controls (egui's
-    /// own dark widget fills already match these, so they are left as they
-    /// are). The yellow is kept for links and the current photo's outline
-    /// rather than selection fills, because selected text would be
-    /// unreadable on yellow.
+    /// Near-black wells, mid-grey chrome and controls raised above it
+    /// ([`DARK_CONTROL_FILLS`]). The yellow is kept for links and the
+    /// current photo's outline rather than selection fills, because
+    /// selected text would be unreadable on yellow.
     fn nexus() -> Self {
         Self {
             dark_mode: true,
@@ -575,7 +596,8 @@ mod tests {
 
         let mut harness = Harness::builder().build_ui_state(
             |ui, choice: &mut Option<Theme>| {
-                picker(ui, "theme", choice);
+                let label = ui.label("Theme");
+                picker(ui, "theme", choice).labelled_by(label.id);
             },
             None,
         );
@@ -609,6 +631,26 @@ mod tests {
             }
             assert_eq!(w.noninteractive.corner_radius, stock, "{}", theme.name());
         }
+    }
+
+    /// The dark themes but Dark fill their controls with their own greys,
+    /// at rest, under the pointer and pressed, and draw a control's text
+    /// under the pointer in their own; Dark keeps egui's.
+    #[test]
+    fn the_dark_themes_fill_their_controls_with_their_own_greys() {
+        let fills = |w: &egui::style::Widgets| {
+            [w.inactive, w.hovered, w.active].map(|state| state.weak_bg_fill)
+        };
+        for theme in [Theme::Graphite, Theme::Nexus] {
+            let w = theme.visuals().widgets;
+            assert_eq!(fills(&w), DARK_CONTROL_FILLS, "{}", theme.name());
+            let hovered = w.hovered.fg_stroke.color;
+            assert_eq!(hovered, DARK_HOVERED_TEXT, "{}", theme.name());
+        }
+        let stock = egui::Visuals::dark().widgets;
+        let dark = Theme::Dark.visuals().widgets;
+        assert_eq!(fills(&dark), fills(&stock));
+        assert_eq!(dark.hovered.fg_stroke, stock.hovered.fg_stroke);
     }
 
     /// Popups and windows cast their shadow straight down, darker on a

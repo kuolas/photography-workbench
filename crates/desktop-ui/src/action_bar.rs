@@ -56,7 +56,6 @@ pub fn show(
     top: impl FnOnce(&mut egui::Ui),
     foot: impl FnOnce(&mut egui::Ui),
 ) -> egui::Response {
-    let id = egui::Id::new(id);
     let panel = match edge {
         Edge::Left => egui::Panel::left(id),
         Edge::Right => egui::Panel::right(id),
@@ -140,12 +139,7 @@ pub(crate) fn icon_button(
     ui.painter()
         .text(rect.center(), Align2::CENTER_CENTER, glyph, font, colour);
     response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::Button,
-            response.enabled(),
-            selected,
-            label,
-        )
+        egui::WidgetInfo::selected(egui::Role::Button, response.enabled(), selected, label)
     });
     response.on_hover_text(keys::tooltip(label, key_combination))
 }

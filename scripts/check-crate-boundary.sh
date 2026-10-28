@@ -28,7 +28,7 @@ forbid() {
 	tree=$(cargo tree --quiet -p "$crate" --all-features --target all -e normal,build,dev \
 		--prefix none --format '{p}')
 	for dep in "$@"; do
-		# The first line naming it: "egui v0.36.2", or for one of our crates
+		# The first line naming it: "egui v0.37.0", or for one of our crates
 		# "catalog v0.1.0 (/path/to/crates/catalog)".
 		found=$(grep -m 1 "^$dep v" <<<"$tree") || continue
 		fail=1

@@ -5,7 +5,7 @@
 //!
 //! The spacing: the room inside buttons, the gaps between widgets and the
 //! height of a control. Controls are roomier than egui's own, 22 points
-//! high to its 18, and sit about as close together. Margins, drop-down
+//! high to its 20, and sit about as close together. Margins, drop-down
 //! lists and scroll bars keep egui's own.
 //!
 //! The text: small print at 11 points, where egui has 9, so it stays

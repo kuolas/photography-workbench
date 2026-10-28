@@ -54,7 +54,8 @@ mod tests {
     fn a_drop_down_offers_every_choice_and_sets_the_one_picked() {
         let mut harness = Harness::builder().build_ui_state(
             |ui, choice: &mut u8| {
-                show(ui, "numbers", choice, [1, 2, 3], name);
+                let label = ui.label("Number");
+                show(ui, "numbers", choice, [1, 2, 3], name).labelled_by(label.id);
             },
             1,
         );
@@ -80,8 +81,10 @@ mod tests {
         let long = |_| "A name far longer than any drop-down list is wide, cut short to fit";
         let mut harness = Harness::builder().build_ui_state(
             |ui, choice: &mut u8| {
-                show(ui, "numbers", choice, [1, 2, 3], name);
-                show(ui, "long", choice, [1], long);
+                let label = ui.label("Number");
+                show(ui, "numbers", choice, [1, 2, 3], name).labelled_by(label.id);
+                let label = ui.label("Long");
+                show(ui, "long", choice, [1], long).labelled_by(label.id);
             },
             1,
         );

@@ -85,7 +85,7 @@ use catalog::photos::Photo;
 use desktop_ui::theme::Palette;
 use egui::{
     Color32, CursorIcon, Event, InputOptions, InputState, Margin, Modifiers, MouseWheelUnit,
-    PointerButton, Rect, Sense, Vec2, WidgetInfo, WidgetType, epaint::RectShape, pos2, vec2,
+    PointerButton, Rect, Role, Sense, Vec2, WidgetInfo, epaint::RectShape, pos2, vec2,
 };
 use previews::Size;
 
@@ -477,7 +477,7 @@ pub fn show(
     let name = photo.name().into_owned();
     let id = ui.make_persistent_id("viewer");
     let response = ui.interact(before.intersect(room), id, sense);
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Image, true, &name));
+    response.widget_info(|| WidgetInfo::labeled(Role::Image, true, &name));
     // Every frame, the stage known or not, so the wheel's last event is
     // known however it came, for the scrolling egui smooths over the
     // frames after it.

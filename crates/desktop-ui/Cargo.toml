@@ -12,7 +12,9 @@ publish.workspace = true
 
 # The GUI only: this crate knows nothing of photos (ADR013).
 [dependencies]
-egui.workspace = true
+# egui's own fonts back the window's typeface up (src/fonts.rs), its emoji
+# fonts among them, which draw the arrow keys' symbols.
+egui = { workspace = true, features = ["monochrome_emoji_fonts"] }
 iconflow.workspace = true
 
 [dev-dependencies]

@@ -51,7 +51,7 @@ pub fn show(
     });
     // egui's own line would take a point of the bar's height, off the
     // whole points the centre above it ends on, so the bar draws its own.
-    egui::Panel::bottom(egui::Id::new(id))
+    egui::Panel::bottom(id)
         .resizable(false)
         .show_separator_line(false)
         .exact_size(TOOLBAR_HEIGHT)

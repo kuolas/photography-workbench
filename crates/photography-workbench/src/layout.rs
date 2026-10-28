@@ -232,7 +232,7 @@ fn toolbar_toggle(
     // An id of its own, as what comes before it on the toolbar comes and
     // goes, and the ids egui gives by position would shift with it.
     let scope = egui::UiBuilder::new()
-        .id(egui::Id::new(id))
+        .scope_id(egui::Id::unique(id))
         .layout(egui::Layout::right_to_left(egui::Align::Center));
     ui.scope_builder(scope, |ui| {
         toolbar::button(ui, palette, icon, label, shown, combination).clicked()

@@ -46,8 +46,8 @@ use desktop_ui::theme::Palette;
 use desktop_ui::{dock, fonts};
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
 use egui::{
-    Align2, CornerRadius, FontFamily, FontId, Frame, Label, Margin, Rect, RichText, Sense, Stroke,
-    StrokeKind, WidgetInfo, WidgetType, pos2, vec2,
+    Align2, CornerRadius, FontFamily, FontId, Frame, Label, Margin, Rect, RichText, Role, Sense,
+    Stroke, StrokeKind, WidgetInfo, pos2, vec2,
 };
 use previews::Size;
 use raw_files::{DateTime, Lens, Metadata, Rational, SignedRational};
@@ -352,7 +352,7 @@ fn group(
         .layout_no_wrap(heading.to_owned(), font, palette.text);
     let size = vec2(ui.available_width(), galley.size().y);
     let (top, response) = ui.allocate_exact_size(size, Sense::hover());
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, heading));
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, heading));
     let inside = Frame::NONE.inner_margin(BOX_MARGIN).show(ui, |ui| {
         ui.set_width(ui.available_width());
         add_contents(ui);
@@ -385,8 +385,7 @@ fn group(
 fn row(ui: &mut egui::Ui, palette: &Palette, label: &str, value: &str) {
     let size = vec2(ui.available_width(), ROW_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
-    response
-        .widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, format!("{label}: {value}")));
+    response.widget_info(|| WidgetInfo::labeled(Role::Label, true, format!("{label}: {value}")));
     let font = FontId::proportional(ROW_TEXT);
     let painter = ui.painter();
     let middle = rect.center().y;
