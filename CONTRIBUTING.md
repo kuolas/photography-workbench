@@ -52,6 +52,64 @@ It is the project's one list of what is broken, deferred or wanted.
 For anything bigger than a small fix, please open or find an issue **before**
 you start, so we can agree on the approach before you spend time on it.
 
+### Labels
+
+The maintainer labels each new issue, so there is nothing for you to pick
+when you open one. They sort the tracker by what an issue is, where it
+belongs, what kind of work it needs and whether it can start; an issue
+often has several. A crate added under `crates/` gets a label of its own
+when it lands.
+
+What it is:
+
+- `bug` — something doesn't work, or gives a wrong result. The *Bug report*
+  form adds it.
+- `enhancement` — a new feature or a change in behaviour. The *Feature
+  request* form adds it.
+
+Where it belongs, by the crate it touches:
+
+- `photography-workbench` — the app: the window, its views and its menus
+  (`crates/photography-workbench`).
+- `desktop-ui` — the custom widgets and the shared parts of the window
+  (`crates/desktop-ui`).
+- `catalog` — the photos on disk: the folder tree and a folder's photo list
+  (`crates/catalog`).
+- `previews` — decoding the photos' embedded previews, off the UI thread
+  (`crates/previews`).
+- `ci` — the CI workflows, the git hooks and the scripts in `scripts/`.
+- `docs` — documentation: `docs/`, the READMEs and the API docs.
+
+What kind of work it is:
+
+- `security` — hardening against hostile files, or a vulnerability once it
+  has been disclosed. Report a vulnerability privately first, as
+  [Security issues](#security-issues) says.
+- `performance` — speed, memory use or allocations.
+- `testing` — tests, fixtures and test harnesses.
+- `accessibility` — a barrier for people with disabilities.
+- `platform: windows`, `platform: macos`, `platform: linux` — behaviour
+  specific to one system.
+
+Whether it can start:
+
+- `needs-decision` — waits on a decision about how the app should behave.
+  Comments on the issue help make it.
+- `blocked` — waits on something outside the project, such as a
+  dependency's release.
+
+After an issue is opened:
+
+- `question` — work waits on more information, usually from whoever
+  opened the issue. Despite its name, it does not mark an issue that asks
+  a question.
+- `help wanted` — the maintainer would welcome a contributor taking it on.
+- `duplicate` — another issue already covers it; it is closed with a link
+  to that one.
+- `invalid` — not a problem in photography-workbench; it is closed with the
+  reason.
+- `wontfix` — decided against; it is closed, and the issue says why.
+
 ## Security issues
 
 Please **don't** report security problems in a public issue. See
