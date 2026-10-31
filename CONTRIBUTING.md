@@ -2,8 +2,9 @@
 
 Thanks for your interest! photography-workbench is a desktop app for culling
 photos, written in Rust. It is at an early stage — one of its three modes
-is built, and the scope is still settling — so ideas, bug reports and small
-fixes are all welcome.
+is built, and the scope is still settling — so ideas and bug reports are the
+help it needs most. Changes to the code and docs come from contributors; see
+[Becoming a contributor](#becoming-a-contributor).
 
 This page is the one place the project's rules live. It is short on purpose;
 if something here is unclear, that is a bug in this page, and an issue about it
@@ -55,6 +56,27 @@ you start, so we can agree on the approach before you spend time on it.
 
 Please **don't** report security problems in a public issue. See
 [SECURITY.md](SECURITY.md) for how to report them privately.
+
+## Becoming a contributor
+
+Pull requests come from contributors. While the project is young, a pull
+request from someone who is not one yet is closed with a link to this section,
+however good the change.
+
+You become a contributor by taking part first:
+
+1. **Start in [Discussions](https://github.com/kuolas/photography-workbench/discussions).**
+   Say who you are and what brings you to the project.
+2. **Use the app** on your own photos, on your own system.
+3. **Report what you find**: bug reports and feature requests that come from
+   that use, through the issue forms.
+
+A contributor also has a public GitHub profile with a visible record of
+activity, such as projects, issues and reviews, so the maintainer can see how
+they work.
+
+After you have taken part this way for a while, the maintainer invites you to
+work on an issue. Agree on the approach in that issue before you start.
 
 ## Making a change
 
