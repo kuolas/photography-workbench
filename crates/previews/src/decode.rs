@@ -239,16 +239,16 @@ pub fn decode(path: &Path, longest: u32) -> Result<Decoded, Failure> {
         } else {
             // As its frame header gives it, which raw-files read.
             upright_size(
-                largest.width(),
-                largest.height(),
+                largest.size().width,
+                largest.size().height,
                 upright_by(largest.orientation()),
             )
         };
         let previews = jpegs(raw.previews())
             .map(|preview| {
                 upright_size(
-                    preview.width(),
-                    preview.height(),
+                    preview.size().width,
+                    preview.size().height,
                     upright_by(preview.orientation()),
                 )
             })
@@ -326,7 +326,7 @@ fn decode_jpeg_file(
     // costs one.
     let chosen = own.and_then(|own| {
         smaller_copies(raw.previews(), &own)
-            .find(|copy| copy.width().max(copy.height()) >= longest)
+            .find(|copy| copy.size().width.max(copy.size().height) >= longest)
             .map(|copy| (own, copy))
     });
     if let Some((own, copy)) = chosen {
@@ -340,8 +340,11 @@ fn decode_jpeg_file(
         match decoded {
             Ok(jpeg) => {
                 // As its frame header gives it, which raw-files read.
-                let largest =
-                    upright_size(own.width(), own.height(), upright_by(own.orientation()));
+                let largest = upright_size(
+                    own.size().width,
+                    own.size().height,
+                    upright_by(own.orientation()),
+                );
                 return Ok((jpeg, largest, Some(metadata)));
             }
             Err(failure) if gives_way(failure) => {}
@@ -370,12 +373,12 @@ fn smaller_copies<'a>(
     previews: &'a [Preview],
     own: &'a Preview,
 ) -> impl Iterator<Item = Preview> + 'a {
-    let longer = |preview: &Preview| preview.width().max(preview.height());
+    let longer = |preview: &Preview| preview.size().width.max(preview.size().height);
     jpegs(previews)
         .filter(move |preview| {
             longer(preview) < longer(own)
-                && preview.width() <= own.width()
-                && preview.height() <= own.height()
+                && preview.size().width <= own.size().width
+                && preview.size().height <= own.size().height
                 && same_shape(preview, own)
         })
         .copied()
@@ -385,8 +388,8 @@ fn smaller_copies<'a>(
 /// [`SHAPE_TOLERANCE_PERCENT`]. Both are compared as stored: every image
 /// of a JPEG file is turned upright by the same orientation, IFD0's.
 fn same_shape(copy: &Preview, own: &Preview) -> bool {
-    let across = u64::from(copy.width()) * u64::from(own.height());
-    let down = u64::from(copy.height()) * u64::from(own.width());
+    let across = u64::from(copy.size().width) * u64::from(own.size().height);
+    let down = u64::from(copy.size().height) * u64::from(own.size().width);
     across.abs_diff(down) * 100 <= SHAPE_TOLERANCE_PERCENT * across.max(down)
 }
 
@@ -430,7 +433,7 @@ fn jpeg_file(mut file: File) -> Result<BufReader<Take<File>>, Failure> {
 /// the orientation does not enter into it.
 fn choose(previews: &[Preview], longest: u32) -> Option<Preview> {
     jpegs(previews)
-        .find(|preview| preview.width().max(preview.height()) >= longest)
+        .find(|preview| preview.size().width.max(preview.size().height) >= longest)
         .copied()
         .or_else(|| largest(previews))
 }
@@ -903,7 +906,7 @@ mod tests {
         let raw = RawFile::from_reader(Cursor::new(file)).unwrap();
         let sizes = raw.previews().iter();
         sizes
-            .map(|preview| (preview.width(), preview.height()))
+            .map(|preview| (preview.size().width, preview.size().height))
             .collect()
     }
 

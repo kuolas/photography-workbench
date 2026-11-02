@@ -2937,9 +2937,9 @@ checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
 
 [[package]]
 name = "raw-files"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64e8c9c4cd65c7bec418a7e7e0fc5e6cc2101727371cda4e1c0a609da8a37aa4"
+checksum = "032d6f57da30de60d228de62a3836aac801e3bae5bb05748932d5afc9cba496f"
 
 [[package]]
 name = "raw-window-handle"
