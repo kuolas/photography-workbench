@@ -345,6 +345,18 @@ A few conventions:
 - **Decisions that would surprise someone reading only the code** get a short
   Architecture Decision Record in
   [docs/architecture-decisions/](docs/architecture-decisions/README.md).
+- **The library crates' public API follows the
+  [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/checklist.html),**
+  and reads well to a person: code that calls it is plain to read and
+  to write. The library crates are every crate under `crates/` but the
+  app. A pull request that adds a public item goes through the
+  checklist for it: the common traits, a rustdoc example on each type,
+  an `# Errors` section on each function that returns a `Result`, and
+  what a `None` means where one is returned. Where a crate departs from
+  a guideline on purpose, it says so where a reader would look, in the
+  item's docs or the crate's. No crate is published, so the items about
+  publishing, such as the Cargo metadata, the release notes and a
+  permissive licence, do not apply.
 
 ## Local git hooks (optional)
 
