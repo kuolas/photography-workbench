@@ -4,8 +4,8 @@
 # check-crate-boundary.sh — check that the workspace's crates depend on one
 # another in one direction only (ADR013): the engine crates, catalog and
 # previews, have no GUI (nor the window and GPU crates under it, winit and
-# wgpu), and desktop-ui knows nothing of photos. CI runs it; run it yourself
-# after adding a dependency.
+# wgpu), acutance depends on no crate at all, and desktop-ui knows nothing
+# of photos. CI runs it; run it yourself after adding a dependency.
 #
 #   scripts/check-crate-boundary.sh
 #
@@ -43,9 +43,23 @@ forbid() {
 	done
 }
 
+# alone <crate> — fail if <crate> depends on any crate at all, and list them.
+alone() {
+	local crate=$1 tree others
+	tree=$(cargo tree --quiet -p "$crate" --all-features --target all -e normal,build,dev \
+		--prefix none --format '{p}')
+	# grep finding no other crate is the passing case, not an error.
+	others=$(grep -v "^$crate v" <<<"$tree" | sort -u) || true
+	[ -z "$others" ] && return
+	fail=1
+	printf '\ncheck-crate-boundary: %s must depend on no crate (ADR020). It depends on:\n\n%s\n' \
+		"$crate" "$others" >&2
+}
+
 forbid catalog egui eframe desktop-ui winit wgpu
 forbid previews egui eframe desktop-ui winit wgpu
 forbid desktop-ui raw-files image catalog previews
+alone acutance
 
 if [ "$fail" = 0 ]; then
 	printf 'check-crate-boundary: ok\n'
