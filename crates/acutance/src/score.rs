@@ -106,6 +106,96 @@ impl EdgeMap {
     }
 }
 
+/// The scores of a grid of cells laid over the frame, row by row.
+///
+/// # Examples
+///
+/// ```
+/// use acutance::{Area, EdgeMap, Plane, Size};
+///
+/// # fn main() {
+/// #     example().unwrap();
+/// # }
+/// # fn example() -> Option<()> {
+/// // Dark on the left, light on the right: one edge down the middle.
+/// let samples = (0..64 * 48).map(|i| if i % 64 < 32 { 0.2 } else { 0.8 });
+/// let frame = Size { width: 64, height: 48 };
+/// let plane = Plane::from_samples(64, 48, samples.collect(), frame)?;
+/// let cells = EdgeMap::of(&plane).cells(4, 3);
+/// assert_eq!(cells.iter().count(), 12);
+/// // The edge runs between the second and third columns, of 16 pixels
+/// // each: one of them is the sharpest.
+/// let (sharpest, _) = cells.best();
+/// assert!(sharpest.x == 16 || sharpest.x == 32, "{sharpest:?}");
+/// # Some(())
+/// # }
+/// ```
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cells {
+    /// Never empty.
+    cells: Vec<(Area, Score)>,
+}
+
+impl Cells {
+    /// The sharpest cell; of cells that score the same, the first.
+    pub fn best(&self) -> (Area, Score) {
+        let mut best = self.cells[0];
+        for &cell in &self.cells[1..] {
+            if cell.1.value() > best.1.value() {
+                best = cell;
+            }
+        }
+        best
+    }
+
+    /// Every cell and its score, row by row, left to right.
+    pub fn iter(&self) -> impl Iterator<Item = (Area, Score)> {
+        self.cells.iter().copied()
+    }
+}
+
+impl<'a> IntoIterator for &'a Cells {
+    type Item = (Area, Score);
+    type IntoIter = std::iter::Copied<std::slice::Iter<'a, (Area, Score)>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.cells.iter().copied()
+    }
+}
+
+impl EdgeMap {
+    /// The scores of a grid of `columns × rows` cells laid over the frame:
+    /// the cells tile it, each as near as whole pixels allow to the same
+    /// size. Zero columns or rows are taken as one, and more than the
+    /// frame has pixels across or down as that many.
+    pub fn cells(&self, columns: u32, rows: u32) -> Cells {
+        let columns = columns.clamp(1, self.frame.width);
+        let rows = rows.clamp(1, self.frame.height);
+        let mut values = Vec::new();
+        let mut cells = Vec::with_capacity(columns as usize * rows as usize);
+        for row in 0..rows {
+            let (y, height) = cell_span(row, rows, self.frame.height);
+            for column in 0..columns {
+                let (x, width) = cell_span(column, columns, self.frame.width);
+                let area = Area {
+                    x,
+                    y,
+                    width,
+                    height,
+                };
+                cells.push((area, self.score_with(&area, &mut values)));
+            }
+        }
+        Cells { cells }
+    }
+}
+
+/// The start and length of cell `index` of `count` tiling `0..length`.
+fn cell_span(index: u32, count: u32, length: u32) -> (u32, u32) {
+    let edge = |i: u32| (u64::from(i) * u64::from(length) / u64::from(count)) as u32;
+    (edge(index), edge(index + 1) - edge(index))
+}
+
 /// The mean of the strongest [`STRONGEST`] of the values, at least one of
 /// them; 0 when there are none. Reorders the values.
 fn strongest_mean(values: &mut [f32]) -> f32 {
@@ -237,9 +327,73 @@ mod tests {
     }
 
     #[test]
+    fn the_best_cell_holds_the_edge() {
+        let edges = EdgeMap::of(&plane(64, 48, |x, _| if x < 40 { 0.0 } else { 1.0 }));
+        let cells = edges.cells(4, 3);
+        let (area, score) = cells.best();
+        assert_eq!((area.x, area.width), (32, 16), "{area:?}");
+        assert!(score.value() > 0.1, "{score:?}");
+        // The cells left and right of the edge's own score nothing.
+        assert!(
+            cells
+                .iter()
+                .filter(|(a, _)| a.x != 32)
+                .all(|(_, s)| s.value() == 0.0)
+        );
+    }
+
+    #[test]
+    fn of_cells_that_score_the_same_the_first_is_best() {
+        let flat = EdgeMap::of(&plane(30, 20, |_, _| 0.5));
+        assert_eq!(
+            flat.cells(3, 2).best().0,
+            Area {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 10
+            }
+        );
+    }
+
+    #[test]
     fn the_types_go_to_other_threads() {
         fn send_sync<T: Send + Sync>() {}
         send_sync::<Score>();
+        send_sync::<Cells>();
+    }
+
+    #[test]
+    fn a_for_loop_takes_the_cells_in_order() {
+        let cells = EdgeMap::of(&plane(30, 20, |_, _| 0.5)).cells(3, 2);
+        let mut areas = Vec::new();
+        for (area, _) in &cells {
+            areas.push(area);
+        }
+        assert_eq!(areas, cells.iter().map(|(a, _)| a).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn the_cells_tile_the_frame() {
+        let edges = EdgeMap::of(&plane(64, 47, |_, _| 0.5));
+        let cells: Vec<Area> = edges.cells(5, 3).iter().map(|(a, _)| a).collect();
+        assert_eq!(cells.len(), 15);
+        let mut covered = vec![0; 64 * 47];
+        for a in &cells {
+            assert!(
+                a.width >= 12 && a.width <= 13 && a.height >= 15 && a.height <= 16,
+                "{a:?}"
+            );
+            for y in a.y..a.y + a.height {
+                for x in a.x..a.x + a.width {
+                    covered[(y * 64 + x) as usize] += 1;
+                }
+            }
+        }
+        assert!(covered.iter().all(|&n| n == 1));
+        assert_eq!(edges.cells(0, 0).iter().count(), 1);
+        // At most one cell per pixel of the frame, however many are asked.
+        assert_eq!(edges.cells(1000, 1000).iter().count(), 64 * 47);
     }
 
     #[test]
