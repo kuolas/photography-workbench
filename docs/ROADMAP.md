@@ -1,12 +1,12 @@
 # Roadmap
 
-The big picture: what is planned, and in what order. Bugs and smaller
-requests live in the
+The big picture: what the app aims for, what it does so far, and what
+comes next. Bugs and smaller requests live in the
 [issue tracker](https://github.com/kuolas/photography-workbench/issues).
 
 ## Where we are
 
-The first release, 0.1.0, ships Library's first milestone, Browse fast:
+The first release, 0.1.0, ships Library's first capability, Browse fast:
 
 - **A folder tree** — the home folder and every memory card and drive
   mounted, to choose a folder from.
@@ -24,7 +24,9 @@ It was built one pull request at a time under
 [issue #4](https://github.com/kuolas/photography-workbench/issues/4), and
 the decisions that shape it are recorded in the
 [architecture decisions](architecture-decisions/README.md). Next in
-Library is picking the keepers.
+Library is rating sharpness, where the photographer focused; picking the
+keepers, which needs a decision on where ratings live
+([open questions](#open-questions)), comes after it.
 
 ## Three modes
 
@@ -39,50 +41,55 @@ jobs ([ADR010](architecture-decisions/adr010-modes-and-the-window.md)):
 0.1.0 ships Library. The other two are in the mode switcher from the
 start, disabled until they exist.
 
-## Milestones
+## Capabilities
+
+What the app gives is grouped by mode into seven capabilities. A
+capability is a lasting area of work, not a step towards a finish: each
+grows with every release, as Browse fast did after 0.1.0, so none is
+ever done.
 
 ### Library
 
-1. **Browse fast** — *release 0.1.0.* A folder tree of the home folder and
-   every mounted volume; a thumbnail grid or a single-photo viewer in the
-   centre; a filmstrip below; the photo's information on the right; all
-   driven from the keyboard. RAW files show the JPEG preview the camera
-   embedded, read without decoding the sensor data.
-2. **Pick keepers.** Mark photos as keepers or rejects, and filter by it.
-3. **Rate sharpness.** Score each photo's sharpness where the photographer
-   focused, and sort or filter by it.
-4. **Rate composition.** Score each photo's framing.
+- **Browse fast** — *release 0.1.0.* A folder tree of the home folder and
+  every mounted volume; a thumbnail grid or a single-photo viewer in the
+  centre; a filmstrip below; the photo's information on the right; all
+  driven from the keyboard. RAW files show the JPEG preview the camera
+  embedded, read without decoding the sensor data.
+- **Pick keepers.** Mark photos as keepers or rejects, and filter by it.
+- **Rate sharpness.** Score each photo's sharpness where the photographer
+  focused, and sort or filter by it.
+- **Rate composition.** Score each photo's framing.
 
 ### Organizer
 
-5. **Bring photos in.** Copy a memory card's photos into a folder scheme,
-   verify the copy, and show what arrived.
-6. **Rename by EXIF.** Name files from their capture date, camera and
-   other metadata, with a preview of every new name before anything
-   changes on disk.
+- **Bring photos in.** Copy a memory card's photos into a folder scheme,
+  verify the copy, and show what arrived.
+- **Rename by EXIF.** Name files from their capture date, camera and
+  other metadata, with a preview of every new name before anything
+  changes on disk.
 
 ### Develop
 
-7. **Develop a RAW file.** From the sensor data to a picture: white
-   balance, exposure, tone, colour and the rest, without touching the
-   original.
+- **Develop a RAW file.** From the sensor data to a picture: white
+  balance, exposure, tone, colour and the rest, without touching the
+  original.
 
-The order within a mode is a plan, not a promise; a change of direction
-gets an ADR.
+Which capability comes next is a plan, not a promise; a change of
+direction gets an ADR.
 
 ## Following raw-files
 
 RAW files are read by [raw-files](https://crates.io/crates/raw-files)
 ([ADR009](architecture-decisions/adr009-raw-files-reads-raw-files.md)),
-whose milestones unlock the ones above:
+whose capabilities unlock the ones above:
 
-| raw-files milestone | What it unlocks here |
+| raw-files capability | What it unlocks here |
 |---|---|
-| 1 and 2, embedded previews of NEF and ARW files (released as 0.1.0) | Browse fast |
-| 3, basic metadata: capture time, camera, lens, exposure, orientation, sizes (released as 0.2.0), and the camera's settings, such as the white balance (released as 0.5.0) | The Info dock's camera data; later, the camera's settings beside it, Rename by EXIF and sorting by capture time |
-| 4, focus points in image coordinates (released as 0.3.0) | Rate sharpness |
-| 5, plain JPEG files: their metadata and the smaller copies of their picture (released as 0.4.0) | A camera JPEG's camera data in the Info dock, and its thumbnails as quick as a RAW file's |
-| 7, the sensor data; 8, development to a linear image with its colour model | Develop a RAW file |
+| Previews: the JPEG previews a NEF or an ARW file embeds (released as 0.1.0) | Browse fast |
+| Metadata: capture time, camera, lens, exposure, orientation, sizes (released as 0.2.0), and the camera's settings, such as the white balance (released as 0.5.0); open, every value a file records | The Info dock's camera data; later, the camera's settings beside it, Rename by EXIF and sorting by capture time |
+| Focus points: where the camera focused, in image coordinates (released as 0.3.0), and a DSLR's point placed from a table of the body's points, with the points the camera used (released as 0.6.0) | Rate sharpness |
+| JPEG as a format of its own: a plain JPEG file's metadata and the smaller copies of its picture (released as 0.4.0) | A camera JPEG's camera data in the Info dock, and its thumbnails as quick as a RAW file's |
+| Raw sensor data, and the developed image: a linear image with its colour model (not started) | Develop a RAW file, and sharpness scores at full resolution for files whose largest preview is small |
 
 The cameras the app can open are the ones raw-files reads: Nikon NEF and
 Sony ARW first, then DNG, Canon and Fujifilm in raw-files' order. Plain
