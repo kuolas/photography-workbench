@@ -77,6 +77,8 @@ Where it belongs, by the crate it touches:
   (`crates/catalog`).
 - `previews` — decoding the photos' embedded previews, off the UI thread
   (`crates/previews`).
+- `acutance` — measuring sharpness: a picture's edges, the scores of its
+  areas and focus peaking (`crates/acutance`).
 - `ci` — the CI workflows, the git hooks and the scripts in `scripts/`.
 - `docs` — documentation: `docs/`, the READMEs and the API docs.
 
@@ -229,9 +231,9 @@ Closes: #12
 
 - **Subject line:** `component: Summary`.
   - The component tag is optional and a single word naming the part of the
-    project the commit touches: a crate (`catalog`, `previews`,
-    `desktop-ui`, or `app` for `photography-workbench`), or `docs`, `build`,
-    `ci`.
+    project the commit touches: a crate (`acutance`, `catalog`,
+    `previews`, `desktop-ui`, or `app` for `photography-workbench`), or
+    `docs`, `build`, `ci`.
   - The summary is in the imperative ("Add", not "Added"), **starts with a
     capital letter** (or with an identifier written as it appears in code,
     ``previews: `scale_to()` keeps the aspect ratio``), has **no trailing

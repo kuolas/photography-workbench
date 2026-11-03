@@ -17,6 +17,7 @@ never:
 
 | Crate | Holds | May depend on |
 |---|---|---|
+| `crates/acutance` | sharpness: a picture's luminance as a plane of samples, made from 8-bit RGB, float RGB or one sample per pixel, with the size of the frame it shows and how much of the frame's detail it holds; the plane's edge map; the score of an area of the frame and of every cell of a grid laid over it; and the mask of focus peaking, at three levels. Knows nothing of files | no other crate, here or external; never `egui`, `eframe`, `desktop-ui`, `winit`, `wgpu`, `raw-files`, `image`, `catalog` or `previews` |
 | `crates/catalog` | the photos on disk: the folder tree of the home folder and the mounted volumes, and a folder's photo list and its current photo | `raw-files`; never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/previews` | decoding the photos into images to show: a JPEG, or a smaller copy of its picture that it carries, or the embedded preview of a RAW file, made small and upright, on worker threads, the most wanted first, each with what its file tells of itself: its size on disk, the sizes of its previews and what the camera recorded, read from a RAW file or a JPEG's EXIF block | `raw-files`, `image`; never `egui`, `eframe`, `desktop-ui`, `winit` or `wgpu` |
 | `crates/desktop-ui` | the custom widgets and the shared parts of the window; so far the colour themes, the style, the typeface, the icons, the parts of the title bar, the action bars, the docks, the toolbar, the sliders, the dialogs' frame, the About dialog, and the keyboard shortcuts' key combinations and reference. Knows nothing of photos | `egui`, `iconflow`; never `catalog`, `previews`, `raw-files` or `image` |
@@ -126,6 +127,25 @@ file may take is capped. Paths are relative to `crates/previews`:
 | `src/failure.rs` | `Failure`, why a photo could not be shown, in a sentence for the photographer: the file could not be read (with the system's kind of error), is not a photo the app shows, is a RAW file with no preview, is damaged, or is too large; and how each error of the file system, raw-files and the JPEG decoder becomes one | `image`, `raw-files` |
 | `src/fixtures.rs` | for the tests only: JPEGs encoded from flat colours, with an EXIF block giving only the orientation or any the tests build, such as one holding a thumbnail in IFD1, and with smaller images after their own listed in an index of the Multi-Picture Format, as cameras store copies of the picture, and a small writer of TIFF structures, for a JPEG's EXIF block and for NEF files holding up to two previews and the tags a camera records, in IFD0 and the Exif IFD | `image` |
 | `tests/local_corpus.rs` | a test run only when asked for, with `PW_LOCAL_CORPUS` naming a folder of one's own photos: it decodes as a thumbnail every file under it that the app's photo list would show, one of a format raw-files reads or a JPEG, and lists those that fail; a second decodes each photo's largest image whole, a RAW file's largest preview or a JPEG file's own image, and lists those whose size the thumbnail's decode told differs from the size decoded | the crate |
+
+### acutance
+
+The acutance crate measures sharpness on planes of samples that its
+caller decoded, so it depends on nothing, and its tests run on planes
+they make up: steps, blurs, gratings and noise. Everything runs on the
+caller's thread; the edge map of a 6000 × 4000 plane takes about 70 ms
+on one core in a release build
+([ADR020](architecture-decisions/adr020-sharpness-measured-as-acutance.md)).
+Paths are relative to `crates/acutance`:
+
+| File | Holds | May depend on |
+|---|---|---|
+| `src/lib.rs` | the library root | its own modules |
+| `src/plane.rs` | `Plane`, one luminance sample per pixel, an `f32` in `[0, 1]`, and the `Size` of the frame it shows: made from 8-bit RGB, its luminance weighed with Rec. 709's weights on the encoded values as they are; from float RGB, linear and unclipped, as a demosaic gives it, weighed in `f32` and then clamped; or from one sample per pixel, clamped. A wrong length, a side of the plane or of the frame that is zero, or a plane whose shape differs from its frame's by more than 3 %, as a preview not turned upright would, makes none; scores compare only between planes made the same way, a linear plane's edges being weaker than an encoded one's. `Fidelity`, how much of the frame's detail the plane holds: full when it is at least as wide as the frame, reduced when at least half as wide, coarse below | — |
+| `src/area.rs` | `Area`, a rectangle in the frame's pixels: whether two share a pixel, one centred on a point and kept within the frame, and where one lands on a smaller plane, clipped to the frame and scaled outwards so it covers every plane pixel it touches | its own `plane` |
+| `src/edges.rs` | `EdgeMap`, how strong an edge each pixel sits on: the plane blurred with a 3 × 3 binomial kernel, the Sobel operator's magnitude over the largest it can give, and the plane's median magnitude, its noise floor, subtracted, what falls below it set to zero, so a high-ISO frame does not score as sharp everywhere | its own `plane` |
+| `src/score.rs` | `Score`, how sharp an area is, in `[0, 1]`, with the pixels it was read from and the plane's fidelity; an area's score, the mean of the strongest 5 % of its edge map's values; and `Cells`, the scores of a grid laid over the frame, and the sharpest of them | its own `area`, `edges` and `plane` |
+| `src/mask.rs` | focus peaking: `Mask`, one byte per pixel of the plane, 255 on the strongest edges, and `Level`, how many it marks, the strongest 10 %, 5 % or 2 %, with the name it is saved under. A plane with no edges has no peaks | its own `edges` |
 
 ### How it fits together
 
@@ -328,10 +348,10 @@ which resets those settings.
 Choices that shape the code still to come, such as rating storage, are open
 — see [ROADMAP.md](ROADMAP.md#open-questions).
 
-The structure above is the first release's, laid out as
+The structure above is laid out as
 [ADR013](architecture-decisions/adr013-a-workspace-of-small-crates.md)
-decided: `catalog` and `previews` below the GUI-free line, and the
-window drawing what they list and decode. This file is rewritten with
+decided: `catalog`, `previews` and `acutance` below the GUI-free line,
+and the window drawing what the first two list and decode. This file is rewritten with
 each change to the structure, in the same pull request.
 
 ## As the code grows

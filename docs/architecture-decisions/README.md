@@ -25,6 +25,7 @@ They answer "why is it like this?" for anyone reading the code later.
 | [ADR017](adr017-showing-and-hiding-the-docks.md) | Showing and hiding the docks | Accepted; amended by [ADR019](adr019-the-photo-s-information-on-the-toolbar.md), which narrows the side docks for the photo's information's toggle |
 | [ADR018](adr018-raw-files-reads-jpeg-files-too.md) | raw-files reads JPEG files too | Accepted |
 | [ADR019](adr019-the-photo-s-information-on-the-toolbar.md) | The photo's information on the toolbar | Accepted |
+| [ADR020](adr020-sharpness-measured-as-acutance.md) | Sharpness measured as acutance | Accepted |
 
 ## When to write one
 
