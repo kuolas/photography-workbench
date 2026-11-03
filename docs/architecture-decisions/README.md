@@ -46,9 +46,11 @@ Records are not rewritten or deleted, with two exceptions: corrections,
 described next, and the extension at the end of this section.
 
 A correction leaves the decision as it was: a figure measured again, a
-term renamed in the code, a slip. It is made in the record itself, with
-no new record and no change of status, and the commit that makes it
-says why the record is corrected rather than superseded.
+term renamed in the code or the roadmap, a slip. It is made in the
+record itself, with no new record and no change of status, and the
+commit that makes it says why the record is corrected rather than
+superseded. The words ADR009 used for raw-files' milestones, which its
+roadmap now calls capabilities, were corrected this way.
 
 A new decision that replaces an old one gets its own ADR; the old one's
 status becomes "Superseded by [ADRxxx](…)", linking to the new record.
