@@ -46,10 +46,11 @@ We will read RAW files with **raw-files**, and decode the JPEG previews it
 returns with the **`image`** crate (`MIT OR Apache-2.0`), built with only its
 pure-Rust JPEG decoder.
 
-- The app's features follow raw-files' milestones: renaming by EXIF needs
-  its basic metadata, sharpness at the point of focus needs its focus
-  points, and a Develop mode needs its sensor data and development.
-  Until a milestone ships there, the corresponding feature waits here.
+- The app's features follow raw-files' capabilities: renaming by EXIF
+  needs its metadata, sharpness at the point of focus needs its focus
+  points, and a Develop mode needs its raw sensor data and its developed
+  image. Until a capability gives it there, the corresponding feature
+  waits here.
 - The formats the app opens are the formats raw-files recognises: Nikon NEF
   (with the NRW files of Coolpix cameras) and Sony ARW (with SRF, SR2 and
   ARQ) in 0.1.0; DNG, Canon and Fujifilm files as raw-files adds them.
