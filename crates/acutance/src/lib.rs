@@ -19,7 +19,9 @@
 //! strongest edges ([`EdgeMap::score`]); the [`Score`] carries the
 //! plane's fidelity, and scores of different fidelity are not compared.
 //! [`EdgeMap::cells`] scores every cell of a grid laid over the frame, and
-//! [`Cells::best`] says where the frame is sharpest.
+//! [`Cells::best`] says where the frame is sharpest. [`EdgeMap::peaks`]
+//! marks the pixels on the strongest edges, a [`Mask`] to draw over the
+//! picture as focus peaking, at one of three [`Level`]s.
 //!
 //! Making the edge map is the costly step, and it runs on the caller's
 //! thread, on one core: over a 6000 × 4000 plane it took about 70 ms in a
@@ -59,10 +61,12 @@
 
 mod area;
 mod edges;
+mod mask;
 mod plane;
 mod score;
 
 pub use area::Area;
 pub use edges::EdgeMap;
+pub use mask::{Level, Mask};
 pub use plane::{Fidelity, Plane, Size};
 pub use score::{Cells, Score};
