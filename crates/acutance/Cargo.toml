@@ -1,0 +1,18 @@
+[package]
+name = "acutance"
+description = "Sharpness for photography-workbench: an edge map of a picture, its scores and its peaks"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+# No dependencies: it measures planes of samples, whatever decoded them
+# (ADR020), so it needs no decoder and no GUI (ADR013).
+[dependencies]
+
+[lints]
+workspace = true

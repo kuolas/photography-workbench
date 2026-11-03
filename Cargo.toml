@@ -22,6 +22,7 @@ publish = false
 # `<name>.workspace = true`, adding the features it needs.
 [workspace.dependencies]
 # The workspace's own crates.
+acutance = { path = "crates/acutance" }
 catalog = { path = "crates/catalog" }
 desktop-ui = { path = "crates/desktop-ui" }
 previews = { path = "crates/previews" }
